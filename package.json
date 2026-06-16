@@ -2,6 +2,8 @@
   "name": "gurunet",
   "version": "0.1.0",
   "private": true,
+  "author": "Kikandi",
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",

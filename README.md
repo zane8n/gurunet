@@ -1,5 +1,7 @@
 # GURUnet
 
+Designed by Kikandi.
+
 GURUnet is a personal development web app for daily network engineering,
 cybersecurity, Linux, scripting, troubleshooting, automation, and documentation
 challenges.
@@ -20,12 +22,18 @@ and notebook flow.
 | Auth | Auth.js + custom credentials routes | Google SSO uses Auth.js with the Prisma adapter. The existing email/password flow still uses app route handlers and bcrypt. |
 | Database | PostgreSQL | Recommended production database. |
 | ORM | Prisma | Installed for schema and migration work. |
-| AI | OpenAI API | Used for high-quality challenge generation, verification questions, grading critique, and notebook language. Deterministic code still owns score math, caps, PIS, ERT, streaks, and redemptions. |
+| AI | DeepSeek through OpenAI-compatible SDK | Used for adaptive challenge generation, examiner chat, verification questions, grading critique, and notebook language. Deterministic code still owns score math, caps, PIS, ERT, streaks, and redemptions. |
 | Hosting | Vercel | Good fit for the Next.js app; defer deployment until the app behavior is approved. |
 
-The local MVP still uses a small JSON datastore in `.data/gurunet.json` for
-challenge/progress data. Google SSO and Auth.js session/account records use
-PostgreSQL through Prisma. `.data/` is intentionally ignored by Git.
+Runtime data is stored in PostgreSQL through Prisma. Local `.data` files are
+only used for development backup/import sources and local upload storage.
+
+## Ownership
+
+GURUnet is designed by Kikandi. The source code, interface design, challenge
+workflow, scoring system, product behavior, documentation, branding, and related
+assets are proprietary and owned by Kikandi unless a separate written agreement
+says otherwise. See `LICENSE` and `NOTICE`.
 
 ## Local Setup
 

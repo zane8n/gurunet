@@ -2,9 +2,13 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  applicationName: "GURUnet",
   title: "GURUnet",
   description:
     "A personal network engineering discipline platform for daily challenges, grading, penalties, and technical growth.",
+  authors: [{ name: "Kikandi" }],
+  creator: "Kikandi",
+  publisher: "Kikandi",
   icons: {
     icon: [
       { url: "/favicon.ico" },

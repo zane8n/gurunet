@@ -2629,8 +2629,8 @@ function readAttachment(file: File): Promise<SubmissionAttachment> {
 function Footer() {
   return (
     <footer className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-5 pb-8 pt-2 text-xs text-slate-500 sm:px-8 md:flex-row md:items-center md:justify-between">
-      <p>© {new Date().getFullYear()} GURUnet. All rights reserved.</p>
-      <p className="font-mono text-teal-800">Created by Zed with love.</p>
+      <p>© {new Date().getFullYear()} Kikandi. All rights reserved.</p>
+      <p className="font-mono text-teal-800">GURUnet · Designed by Kikandi.</p>
     </footer>
   );
 }
