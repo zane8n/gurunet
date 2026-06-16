@@ -1,4 +1,4 @@
-import type { AiJobType, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/store";
 import { nowIso } from "@/lib/time";
@@ -15,6 +15,12 @@ import {
   fromDbUser,
 } from "@/lib/db-mappers";
 import { buildSubmissionContent } from "@/lib/submission-content";
+
+type AiJobType =
+  | "ChallengeGeneration"
+  | "VerificationQuestion"
+  | "StrictCritique"
+  | "NotebookSummary";
 
 export async function enqueueAiJob(
   type: AiJobType,

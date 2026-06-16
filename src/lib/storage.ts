@@ -7,7 +7,7 @@ import type { User } from "@/lib/domain";
 
 const uploadRoot =
   process.env.GURUNET_UPLOAD_DIR ||
-  path.join(".data", "uploads");
+  (process.env.VERCEL ? path.join("/tmp", "gurunet-uploads") : path.join(".data", "uploads"));
 const maxFileSize = 2.5 * 1024 * 1024;
 const maxBatchSize = 8 * 1024 * 1024;
 

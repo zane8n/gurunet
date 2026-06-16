@@ -132,6 +132,9 @@ DEEPSEEK_BASE_URL="https://api.deepseek.com"
 DEEPSEEK_ENABLED="true"
 DEEPSEEK_FAST_MODEL="deepseek-v4-flash"
 DEEPSEEK_REASONING_MODEL="deepseek-v4-pro"
+JOB_SECRET="..."
+IMPORT_SECRET="..."
+GURUNET_UPLOAD_DIR=".data/uploads"
 ```
 
 For local development, place them in `.env.local`.
@@ -239,11 +242,25 @@ When ready:
 
 1. Push the repository to GitHub.
 2. Import it into Vercel.
-3. Set `DATABASE_URL`, `AUTH_SECRET`, and `DEEPSEEK_API_KEY` in Vercel project
+3. Set `DATABASE_URL`, `AUTH_SECRET`, `AUTH_URL`, Google OAuth env vars,
+   `DEEPSEEK_API_KEY`, `JOB_SECRET`, and `IMPORT_SECRET` in Vercel project
    settings.
 4. Attach a production PostgreSQL database.
-5. Run Prisma migrations during deployment or through a controlled migration
-   job.
+5. Use build command `pnpm vercel-build` if you want Vercel to run
+   `prisma migrate deploy` during deployment. Otherwise run
+   `pnpm prisma:deploy` from a trusted machine before deploying.
+
+Deployment caveats:
+
+- `pnpm build` runs `prisma generate` before `next build` so Vercel does not
+  typecheck against a stale Prisma Client.
+- If your Postgres provider requires SSL, include the provider-specific SSL
+  option in `DATABASE_URL`, for example `?sslmode=require`.
+- Local upload storage is suitable for development. Vercel serverless storage is
+  ephemeral, so production evidence uploads should move to Vercel Blob or
+  S3-compatible storage before relying on long-term file retention.
+- `POST /api/ai/jobs/run` should be triggered by a cron job or protected manual
+  call using `JOB_SECRET`.
 
 Vercel Hobby is suitable for personal/non-commercial use. Payment features,
 paid users, or commercial workflows should move to a paid deployment plan.
