@@ -1,0 +1,345 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ChallengeStatus {
+  Active
+  Submitted
+  Late
+  Missed
+  Excused
+  RecoveryChallenge
+  PressureChallenge
+}
+
+enum Difficulty {
+  Guided
+  Normal
+  Advanced
+  Production
+  Expert
+}
+
+enum TechnicalCap {
+  NONE
+  MOSTLY_WRONG
+  UNSAFE
+  INCOMPLETE
+}
+
+enum LedgerType {
+  PIS
+  ERT
+}
+
+enum AttachmentKind {
+  image
+  file
+}
+
+enum AiJobStatus {
+  Queued
+  Running
+  Succeeded
+  Failed
+  FallbackUsed
+}
+
+enum AiJobType {
+  ChallengeGeneration
+  VerificationQuestion
+  StrictCritique
+  NotebookSummary
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  timezone      String    @default("Africa/Johannesburg")
+  pisScore      Float    @default(50)
+  ertBalance    Int      @default(0)
+  currentStreak Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions          Session[]
+  localSessions     LocalSession[]
+  accounts          Account[]
+  challenges        Challenge[]
+  submissions       Submission[]
+  submissionAttachments SubmissionAttachment[]
+  grades            Grade[]
+  ledgerEvents      LedgerEvent[]
+  redemptions       Redemption[]
+  notebookEntries   NotebookEntry[]
+  disciplineRecords WeeklyDisciplineRecord[]
+  friendshipsStarted Friendship[] @relation("FriendshipsStarted")
+  friendshipsReceived Friendship[] @relation("FriendshipsReceived")
+  challengeEnrollments ChallengeEnrollment[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model LocalSession {
+  id        String   @id
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Challenge {
+  id                   String          @id
+  userId               String
+  dateKey              String
+  title                String
+  difficulty           Difficulty
+  topic                String
+  scenario             String
+  objective            String
+  constraints          String[]
+  allowedTools         String[]
+  expectedAnswerFormat String
+  submissionRequirements String[]
+  deadlineAt           DateTime
+  solution             String
+  antiGenericRequirement String
+  status               ChallengeStatus @default(Active)
+  isRecovery           Boolean         @default(false)
+  isPressure           Boolean         @default(false)
+  createdAt            DateTime        @default(now())
+
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  submissions     Submission[]
+  grades          Grade[]
+  notebookEntries NotebookEntry[]
+
+  @@unique([userId, dateKey])
+}
+
+model Submission {
+  id                   String   @id
+  challengeId          String
+  userId               String
+  content              String
+  submittedAt          DateTime
+  isLate               Boolean
+  requiresVerification Boolean  @default(false)
+  verificationQuestion String?
+  verificationAnswer   String?
+  createdAt            DateTime @default(now())
+
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grade     Grade?
+  attachments SubmissionAttachment[]
+}
+
+model SubmissionAttachment {
+  id           String         @id
+  submissionId String?
+  userId       String
+  filename     String
+  mimeType     String
+  byteSize     Int
+  storagePath  String
+  kind         AttachmentKind
+  createdAt    DateTime       @default(now())
+
+  submission Submission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@index([userId])
+}
+
+model Grade {
+  id                    String       @id
+  submissionId          String       @unique
+  challengeId           String
+  userId                String
+  creativity            Int
+  ingenuity             Int
+  reporting             Int
+  alienness             Int
+  neatness              Int
+  rawScore              Float
+  balancePenalty        Float
+  latePenalty           Float
+  technicalCap          TechnicalCap
+  finalScore            Float
+  verdict               String
+  correction            String
+  contentionNotes       String[]
+  nextImprovementTarget String
+  pisChange             Float
+  previousPis           Float
+  updatedPis            Float
+  ertEarned             Int
+  ertBalance            Int
+  createdAt             DateTime     @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  challenge  Challenge  @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model LedgerEvent {
+  id           String     @id
+  userId       String
+  type         LedgerType
+  amount       Float
+  reason       String
+  balanceAfter Float
+  createdAt    DateTime   @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Redemption {
+  id           String   @id
+  userId       String
+  rewardName   String
+  cost         Int
+  date         String
+  note         String?
+  balanceAfter Int
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model NotebookEntry {
+  id              String   @id
+  userId          String
+  challengeId     String
+  title           String
+  summary         String
+  mistakes        String[]
+  correctApproach String
+  commands        String[]
+  lessons         String[]
+  tags            String[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+}
+
+model WeeklyDisciplineRecord {
+  id                      String  @id
+  userId                  String
+  weekKey                 String
+  missedCount             Int     @default(0)
+  pisGainCapMultiplier    Float   @default(1)
+  weekendRecoveryRequired Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, weekKey])
+}
+
+model Friendship {
+  id        String   @id
+  userId    String
+  friendId  String
+  status    String   @default("Accepted")
+  createdAt DateTime @default(now())
+
+  user   User @relation("FriendshipsStarted", fields: [userId], references: [id], onDelete: Cascade)
+  friend User @relation("FriendshipsReceived", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, friendId])
+}
+
+model MarketplaceChallenge {
+  id               String     @id
+  title            String
+  topic            String
+  difficulty       Difficulty
+  summary          String
+  estimatedMinutes Int
+  enrollmentCount  Int        @default(0)
+  createdAt        DateTime   @default(now())
+
+  enrollments ChallengeEnrollment[]
+}
+
+model ChallengeEnrollment {
+  id                     String   @id
+  userId                 String
+  marketplaceChallengeId String
+  createdAt              DateTime @default(now())
+
+  user                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketplaceChallenge MarketplaceChallenge @relation(fields: [marketplaceChallengeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, marketplaceChallengeId])
+}
+
+model AiJob {
+  id          String      @id
+  type        AiJobType
+  status      AiJobStatus @default(Queued)
+  dedupeKey   String      @unique
+  payload     Json
+  result      Json?
+  error       String?
+  attempts    Int         @default(0)
+  runAfter    DateTime    @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([status, runAfter])
+  @@index([type])
+}
