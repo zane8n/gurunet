@@ -21,8 +21,7 @@
 
 # local app data
 /.data/
-.format.txt
-.context.txt
+
 
 # production
 /build

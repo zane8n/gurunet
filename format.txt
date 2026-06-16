@@ -1,0 +1,555 @@
+1. Recommended stack
+Layer	Choice	Reason
+Framework	Next.js + TypeScript	Best balance of simple, elegant, full-stack JS. App Router Route Handlers support REST endpoints inside the app directory.
+UI	Tailwind CSS + shadcn/ui + Framer Motion	Minimal, modern, visually strong without becoming cluttered.
+Auth	Auth.js	Supports secure auth patterns, database/JWT sessions, OAuth, and username/password stores.
+Database	PostgreSQL	
+ORM	Prisma	Simple schema, migrations, good TypeScript integration. Prisma Migrate keeps database schema changes versioned.
+AI	OpenAI API	Use Structured Outputs for predictable JSON challenge/grading results. OpenAI states Structured Outputs enforce schema adherence better than JSON mode.
+Hosting	Vercel	Still suitable. Vercel Hobby is free for personal projects, and GitHub deployments are supported.
+
+Important hosting note: Vercel Hobby is for personal/non-commercial use, so once GURUnet adds payment, paid users, or commercial features, move to Pro or another paid deployment path. Vercel’s terms say Hobby is offered for personal/non-commercial use.
+
+2. Product direction
+GURUnet core idea
+
+GURUnet is a personal engineering discipline platform for network engineering, cybersecurity, Linux, scripting, troubleshooting, automation, and documentation.
+
+It should not feel like Hack The Box or TryHackMe visually. It should feel like a personal engineering command center:
+
+Minimal dashboard
+Daily challenge card
+PIS/ERT/streak tracking
+Submission and grading flow
+Recovery penalties
+Engineering notebook
+Strict professor/senior-engineer correction tone
+Future-ready social and payment system
+3. Visual design
+Theme
+Element	Value
+Primary color	Teal
+Background	Off-white / faded white
+Accent	Dark slate / muted graphite
+Style	Minimal, clean, technical
+Layout	Dashboard-first
+Avoid	Gamified clutter, cartoon UI, too many badges
+
+Suggested palette:
+
+Primary teal:      #0F766E
+Deep teal:         #115E59
+Soft teal:         #CCFBF1
+Off-white:         #FAFAF7
+Panel white:       #FFFFFF
+Text dark:         #1F2937
+Muted text:        #6B7280
+Warning amber:     #D97706
+Danger red:        #B91C1C
+4. Core app modules
+Current build
+Module	Purpose
+Auth	Signup, login, logout, protected sessions
+Dashboard	Today’s challenge, status, streak, PIS, ERT
+Challenge Engine	Creates and stores daily challenges
+Submission System	User submits answer before/after deadline
+Grading Engine	Scores answer using rubric
+Penalty Engine	Applies late/missed/recovery restrictions
+PIS Engine	Maintains Personal Improvement Score
+ERT Engine	Earns/redeems Engineering Reward Tokens
+Progress Tracker	Historical record of all attempts
+Redemption Ledger	Tracks ERT spending
+Engineering Notebook	Stores challenge, submission, correction, lessons learned
+Future modules
+Module	Future use
+Payments	Pay or get paid after milestone completion
+Community	Friends, leaderboards, invitations, challenge sharing
+Team Challenges	Group labs and competitive scenarios
+Public Profiles	Optional portfolio of completed engineering growth
+AI Journal Expansion	Auto-generated readable notebooks and searchable knowledge base
+5. Web-app behavior adapted from your task rules
+Daily flow
+At 08:00 local time, generate or unlock the daily challenge.
+User sees:
+title
+difficulty
+scenario
+objective
+constraints
+allowed tools
+expected answer format
+deadline: 12:00 noon
+User submits answer.
+App records submission timestamp.
+If the answer appears generic or unverifiable, app may trigger one follow-up verification question.
+Grading is completed.
+PIS, ERT, streak, tracker, and notebook are updated.
+Solution is revealed only after submission/grading.
+Missed challenge logic
+
+If there is no submission after the allowed window:
+
+status becomes Missed
+score becomes 0/20
+PIS decreases by -1.0
+streak resets to 0
+no ERT earned
+next challenge includes a recovery component
+Late restriction logic
+Submission time	App effect
+Before 12:00	No penalty
+12:01–16:00	Late penalty applied
+After 16:00	No PIS increase, no ERT
+After 20:00 / next day	Grade allowed, but final score capped at 12/20
+Access restriction ideas
+
+These are good penalties for the web app:
+
+Trigger	Restriction
+Missed challenge	Next day includes recovery task
+2 misses/week	Weekly PIS gain capped by 50%
+3 misses/week	Weekend recovery challenge required
+Low score under 13/20	No ERT, no PIS gain
+Unsafe answer	Score cap and temporary “Safety Review” badge
+Repeated vague answers	Harder verification questions
+Late after 16:00	No rewards even if answer is good
+Unredeemed poor discipline	Dashboard shows “Recovery Required” state
+
+This makes the app feel serious without becoming hostile.
+
+6. Database model
+
+Core tables:
+
+users
+sessions
+accounts
+challenges
+submissions
+grades
+pis_events
+ert_events
+ert_redemptions
+progress_entries
+notebook_entries
+weekly_discipline_records
+Key entities
+User
+id
+name
+email
+passwordHash
+timezone
+pisScore
+ertBalance
+currentStreak
+createdAt
+updatedAt
+Challenge
+id
+userId
+title
+difficulty
+topic
+scenario
+objective
+constraints
+allowedTools
+expectedFormat
+deadlineAt
+solution
+status
+isRecovery
+createdAt
+Submission
+id
+challengeId
+userId
+content
+submittedAt
+isLate
+requiresVerification
+verificationQuestion
+verificationAnswer
+createdAt
+Grade
+id
+submissionId
+creativity
+ingenuity
+reporting
+alienness
+neatness
+rawScore
+balancePenalty
+latePenalty
+technicalCap
+finalScore
+verdict
+correction
+nextImprovementTarget
+createdAt
+ERT event
+id
+userId
+type
+amount
+reason
+balanceAfter
+createdAt
+Notebook entry
+id
+userId
+challengeId
+summary
+mistakes
+correctApproach
+commands
+lessons
+tags
+createdAt
+
+The notebook should be in the current build, but keep it simple: generate it after grading from the challenge, submission, and correction. Do not make it an expensive AI feature at first.
+
+7. REST API surface
+
+Using Next.js Route Handlers, implement REST where it matters. Route Handlers are intended for custom request handlers in the App Router.
+
+Auth
+POST   /api/auth/signup
+POST   /api/auth/login
+POST   /api/auth/logout
+GET    /api/auth/session
+User
+GET    /api/me
+PATCH  /api/me
+GET    /api/me/stats
+Challenges
+GET    /api/challenges/today
+POST   /api/challenges/generate
+GET    /api/challenges/:id
+GET    /api/challenges/history
+Submissions
+POST   /api/challenges/:id/submit
+GET    /api/submissions/:id
+POST   /api/submissions/:id/verification
+Grading
+POST   /api/submissions/:id/grade
+GET    /api/grades/:id
+PIS / ERT
+GET    /api/pis
+GET    /api/ert
+POST   /api/ert/redeem
+GET    /api/ert/redemptions
+Notebook
+GET    /api/notebook
+GET    /api/notebook/:id
+PATCH  /api/notebook/:id
+8. AI implementation strategy
+
+Use AI only for:
+
+challenge generation
+grading assistance
+verification question generation
+notebook summary generation
+
+Do not let AI directly change PIS/ERT balances. The app logic should compute that deterministically.
+
+Use OpenAI Structured Outputs for challenge and grade JSON, because schema adherence is important for storing results safely.
+
+For token control:
+
+keep the grading rubric static and cached
+store challenge templates
+send only the relevant challenge + submission + minimal historical weakness summary
+use cheaper models for notebook summaries
+use stronger models only for grading complex submissions
+log token usage per request
+
+OpenAI prompt caching works automatically for recent models and can reduce latency and input token cost when prompts share the same prefix; static instructions should be placed at the beginning and variable user content at the end.
+
+9. Project setup guideline
+9.1 Install basics on Arch Linux
+sudo pacman -Syu
+sudo pacman -S nodejs npm git postgresql
+sudo npm install -g pnpm
+
+Check versions:
+
+node -v
+pnpm -v
+git --version
+9.2 Create the app
+pnpm create next-app@latest gurunet
+cd gurunet
+
+Choose:
+
+TypeScript: yes
+ESLint: yes
+Tailwind CSS: yes
+src directory: yes
+App Router: yes
+Turbopack: yes
+Import alias: yes
+9.3 Install dependencies
+pnpm add @prisma/client zod bcryptjs
+pnpm add openai
+pnpm add framer-motion lucide-react
+pnpm add next-auth@beta
+pnpm add -D prisma
+
+Optional UI setup:
+
+pnpm dlx shadcn@latest init
+pnpm dlx shadcn@latest add button card input textarea badge table tabs dialog dropdown-menu progress
+9.4 Initialize Prisma
+pnpm prisma init
+
+Edit environment file:
+
+vim .env
+
+Add:
+
+DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/gurunet"
+AUTH_SECRET="generate-a-long-random-secret"
+OPENAI_API_KEY="your-openai-key"
+APP_TIMEZONE="Africa/Lubumbashi"
+9.5 Suggested folder structure
+gurunet/
+├─ src/
+│  ├─ app/
+│  │  ├─ (auth)/
+│  │  │  ├─ login/
+│  │  │  └─ signup/
+│  │  ├─ (dashboard)/
+│  │  │  ├─ dashboard/
+│  │  │  ├─ challenges/
+│  │  │  ├─ notebook/
+│  │  │  └─ rewards/
+│  │  ├─ api/
+│  │  │  ├─ auth/
+│  │  │  ├─ challenges/
+│  │  │  ├─ submissions/
+│  │  │  ├─ grades/
+│  │  │  ├─ ert/
+│  │  │  └─ notebook/
+│  │  ├─ layout.tsx
+│  │  └─ page.tsx
+│  ├─ components/
+│  │  ├─ ui/
+│  │  ├─ dashboard/
+│  │  ├─ challenge/
+│  │  └─ layout/
+│  ├─ lib/
+│  │  ├─ auth.ts
+│  │  ├─ prisma.ts
+│  │  ├─ openai.ts
+│  │  ├─ scoring.ts
+│  │  ├─ penalties.ts
+│  │  ├─ ert.ts
+│  │  └─ time.ts
+│  ├─ schemas/
+│  │  ├─ challenge.schema.ts
+│  │  ├─ grade.schema.ts
+│  │  └─ submission.schema.ts
+│  └─ styles/
+├─ prisma/
+│  └─ schema.prisma
+├─ .env
+└─ package.json
+10. Minimal page structure
+Public pages
+/
+  Landing page
+
+/login
+/signup
+Protected pages
+/dashboard
+  Today’s challenge
+  PIS
+  ERT
+  Streak
+  Missed/late status
+
+/challenges
+  Challenge history
+
+/challenges/[id]
+  Challenge detail
+  Submission panel
+  Grade result
+  Solution reveal after grading
+
+/notebook
+  Searchable engineering notes
+
+/rewards
+  ERT balance
+  Redemption form
+  Redemption ledger
+
+/profile
+  Timezone, account, preferences
+11. Dashboard layout
+
+Keep it simple:
+
+Top bar:
+GURUnet | Dashboard | Challenges | Notebook | Rewards | Profile
+
+Main area:
+[Today's Challenge Card]
+
+Right rail:
+[PIS Score]
+[ERT Balance]
+[Current Streak]
+[Deadline Timer]
+[Recovery Status]
+
+Bottom:
+[Recent Progress Tracker]
+
+No excessive menus. No unnecessary landing-page noise after login.
+
+12. Challenge generation logic
+
+The challenge generator should receive:
+
+user PIS
+recent weaknesses
+missed status
+weekly discipline record
+topic rotation history
+difficulty level
+
+It should output structured JSON:
+
+{
+  "title": "...",
+  "difficulty": "Normal",
+  "topic": "OSPF Troubleshooting",
+  "scenario": "...",
+  "objective": "...",
+  "constraints": ["..."],
+  "allowedTools": ["..."],
+  "expectedAnswerFormat": "...",
+  "submissionDeadline": "12:00",
+  "solution": "...",
+  "antiGenericRequirement": "Explain why your first three checks are ordered that way."
+}
+
+The solution must be stored but hidden until submission/grading.
+
+13. Grading logic
+
+The AI may propose scores, but the backend must apply deterministic caps:
+
+rawScore = ((creativity + ingenuity + reporting + alienness + neatness) / 35) * 20
+
+finalScore = rawScore
+           - balancePenalty
+           - latePenalty
+
+then apply:
+technical correctness cap
+unsafe cap
+incomplete cap
+after-20:00 cap
+
+The app should never trust the AI alone for:
+
+missed status
+late penalty
+ERT balance
+PIS balance
+streak count
+redemption deduction
+
+Those must be handled by code.
+
+14. ERT redemption behavior
+
+User enters:
+
+Reward name
+Cost
+Date
+Note
+
+Backend checks:
+
+if cost <= currentBalance:
+    deduct
+    log redemption
+else:
+    reject
+
+Never allow negative ERT.
+
+15. Deployment guideline for later
+
+When ready:
+
+Push project to GitHub.
+Import repo into Vercel.
+Add environment variables in Vercel.
+Connect managed PostgreSQL database.
+Run Prisma migration during deploy.
+Set production domain.
+
+Vercel supports Git-based deployments where commits or pull requests trigger deployments, and GitHub projects can be automatically deployed with preview URLs.
+
+16. Build order
+
+Do not build everything at once. Build in this order:
+
+Order	Build item	Reason
+1	Auth + protected dashboard	Foundation
+2	Prisma schema	Data foundation
+3	Manual challenge creation	Avoid AI complexity first
+4	Submission flow	Core user action
+5	Grading engine	Core value
+6	PIS/ERT engine	Discipline/reward loop
+7	Missed/late/recovery logic	Penalty loop
+8	AI challenge generation	Automation
+9	Notebook	Knowledge retention
+10	Hosting	Only after local app works
+17. Recommended MVP scope
+
+For the first real build, include:
+
+Auth
+Dashboard
+Daily challenge
+Submission
+AI grading
+PIS
+ERT
+Missed/late penalties
+Progress tracker
+Redemption ledger
+Simple notebook
+
+Do not include yet:
+
+Payments
+Friends
+Leaderboards
+Public profiles
+Challenge marketplace
+Multi-user enrollments
+
+Those are second-phase features.
+
+Project tracker
+Code	Current milestone	Variables	Observations / changes	Next steps
+GNET-00	Product direction	App name: GURUnet; theme: teal/off-white	Task rules converted from prompt system into app behavior	Start project scaffold
+GNET-01	Stack decision	Next.js, TypeScript, Tailwind, shadcn/ui, Prisma, PostgreSQL, Auth.js, OpenAI	Best fit for simple full-stack JS and Vercel deployment	Create repo and install dependencies
+GNET-02	Core engine	PIS, ERT, penalties, grading, recovery	Must be deterministic in backend, not AI-controlled	Design Prisma schema
+GNET-03	AI usage	OpenAI Structured Outputs, prompt caching	Use AI for challenge/grading/notebook only; keep balances code-controlled	Define JSON schemas
+GNET-04	Hosting	Vercel Hobby for personal phase	Payment/commercial phase likely requires paid plan	Ignore deployment until app is approved locally
