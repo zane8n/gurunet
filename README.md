@@ -28,12 +28,12 @@ and notebook flow.
 Runtime data is stored in PostgreSQL through Prisma. Local `.data` files are
 only used for development backup/import sources and local upload storage.
 
-## Ownership
+## Credit And License
 
-GURUnet is designed by Kikandi. The source code, interface design, challenge
-workflow, scoring system, product behavior, documentation, branding, and related
-assets are proprietary and owned by Kikandi unless a separate written agreement
-says otherwise. See `LICENSE` and `NOTICE`.
+GURUnet is designed by Kikandi. The project is distributed under the Apache
+License, Version 2.0. Keep the Kikandi attribution in user-facing credits and
+project notices unless a separate written agreement says otherwise. See
+`LICENSE` and `NOTICE`.
 
 ## Local Setup
 

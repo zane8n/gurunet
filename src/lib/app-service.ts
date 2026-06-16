@@ -1,8 +1,10 @@
 import { z } from "zod";
 import type {
   DisciplineRecord,
+  DisciplineSnapshot,
   Difficulty,
   MarketplaceChallenge,
+  StudyProfile,
   User,
 } from "@/lib/domain";
 import { difficultyForPis } from "@/lib/challenges";
@@ -24,9 +26,16 @@ import {
   fromDbRedemption,
   fromDbStatus,
   fromDbSubmission,
+  fromDbStudyProfile,
   fromDbUser,
   toDbStatus,
 } from "@/lib/db-mappers";
+import {
+  defaultDisciplineSnapshot,
+  disciplineCatalog,
+  disciplineSnapshot,
+  getDiscipline,
+} from "@/lib/disciplines";
 import { enqueueAiJob } from "@/lib/ai-jobs";
 import { buildSubmissionContent, type SubmissionAttachment } from "@/lib/submission-content";
 import {
@@ -66,18 +75,30 @@ export const challengeNoticeSchema = z.object({
   reason: z.string().trim().min(6).max(800),
 });
 
-const trackSchema = z.enum([
+const disciplineIdSchema = z.enum([
   "networking",
-  "linux",
-  "security",
-  "automation",
-  "cloud",
-  "incident_command",
-  "documentation",
+  "linux_systems",
+  "cybersecurity",
+  "software_engineering",
+  "automation_scripting",
+  "cloud_devops",
+  "data_ai",
+  "applied_engineering",
+  "technical_writing",
 ]);
+type DisciplineId = z.infer<typeof disciplineIdSchema>;
+const oldTrackToDiscipline: Record<string, string> = {
+  networking: "networking",
+  linux: "linux_systems",
+  security: "cybersecurity",
+  automation: "automation_scripting",
+  cloud: "cloud_devops",
+  incident_command: "cybersecurity",
+  documentation: "technical_writing",
+};
 
 export const challengeSettingsSchema = z.object({
-  track: trackSchema,
+  track: z.string().transform((value) => oldTrackToDiscipline[value] ?? value).pipe(disciplineIdSchema),
   durationMinutes: z.coerce.number().int().min(15).max(180),
   difficultyFloor: z.enum(["Guided", "Normal", "Advanced", "Production", "Expert"]),
   topicFocus: z.string().trim().max(120).optional(),
@@ -87,7 +108,7 @@ export const challengeSettingsSchema = z.object({
 
 export const cohortCreateSchema = z.object({
   name: z.string().trim().min(3).max(80),
-  track: trackSchema,
+  track: z.string().transform((value) => oldTrackToDiscipline[value] ?? value).pipe(disciplineIdSchema),
   difficulty: z.enum(["Guided", "Normal", "Advanced", "Production", "Expert"]),
   completionWindowHours: z.coerce.number().int().min(4).max(168),
 });
@@ -101,6 +122,92 @@ export const examinerChatSchema = z.object({
   challengeId: z.string().trim().min(2).max(120).optional(),
 });
 
+export const studyProfileSchema = z.object({
+  primaryDiscipline: disciplineIdSchema,
+  secondaryInterests: z.array(disciplineIdSchema).max(4).default([]),
+  rankedTopics: z.array(z.string().trim().min(2).max(80)).min(3).max(8),
+  currentLevel: z.enum(["Beginner", "Intermediate", "Advanced", "Production", "Expert"]),
+  preferredFormats: z.array(z.string().trim().min(3).max(80)).min(2).max(6),
+  evidenceTypes: z.array(z.string().trim().min(3).max(80)).min(2).max(8),
+  weeklyTimeBudgetHours: z.coerce.number().int().min(1).max(40),
+  targetDifficulty: z.enum(["Guided", "Normal", "Advanced", "Production", "Expert"]),
+  weakAreas: z.array(z.string().trim().min(2).max(80)).min(1).max(8),
+  avoidAreas: z.array(z.string().trim().min(2).max(80)).max(8).default([]),
+  goals: z.array(z.string().trim().min(5).max(140)).min(1).max(6),
+  customDiscipline: z.string().trim().min(3).max(80).optional(),
+});
+
+export function getDisciplineCatalog() {
+  return disciplineCatalog;
+}
+
+export async function getStudyProfile(user: User) {
+  const profile = await safeFindStudyProfile(user.id);
+  return {
+    onboardingRequired: !profile?.completedAt,
+    studyProfile: profile,
+    activeDiscipline: profile ? snapshotFromProfile(profile) : defaultDisciplineSnapshot(),
+  };
+}
+
+export async function updateStudyProfile(
+  user: User,
+  input: z.infer<typeof studyProfileSchema>,
+) {
+  const template = getDiscipline(input.primaryDiscipline);
+  const customStatus = input.customDiscipline ? "Draft" : null;
+  const profile = await prisma.userStudyProfile.upsert({
+    where: { userId: user.id },
+    update: {
+      primaryDiscipline: template.id,
+      secondaryInterests: input.secondaryInterests,
+      rankedTopics: input.rankedTopics,
+      currentLevel: input.currentLevel,
+      preferredFormats: input.preferredFormats,
+      evidenceTypes: input.evidenceTypes,
+      weeklyTimeBudgetHours: input.weeklyTimeBudgetHours,
+      targetDifficulty: input.targetDifficulty,
+      weakAreas: input.weakAreas,
+      avoidAreas: input.avoidAreas,
+      goals: input.goals,
+      customDiscipline: input.customDiscipline,
+      customStatus,
+      completedAt: new Date(),
+    },
+    create: {
+      userId: user.id,
+      primaryDiscipline: template.id,
+      secondaryInterests: input.secondaryInterests,
+      rankedTopics: input.rankedTopics,
+      currentLevel: input.currentLevel,
+      preferredFormats: input.preferredFormats,
+      evidenceTypes: input.evidenceTypes,
+      weeklyTimeBudgetHours: input.weeklyTimeBudgetHours,
+      targetDifficulty: input.targetDifficulty,
+      weakAreas: input.weakAreas,
+      avoidAreas: input.avoidAreas,
+      goals: input.goals,
+      customDiscipline: input.customDiscipline,
+      customStatus,
+      completedAt: new Date(),
+    },
+  });
+  const mapped = fromDbStudyProfile(profile);
+  await updateChallengeSettings(user, {
+    track: mapped.primaryDiscipline as DisciplineId,
+    durationMinutes: Math.max(15, Math.min(180, Math.round((mapped.weeklyTimeBudgetHours * 60) / 5))),
+    difficultyFloor: mapped.targetDifficulty,
+    topicFocus: mapped.rankedTopics[0] ?? "",
+    recoveryMode: false,
+    teamMode: false,
+  });
+  return {
+    onboardingRequired: false,
+    studyProfile: mapped,
+    activeDiscipline: snapshotFromProfile(mapped),
+  };
+}
+
 export async function getDashboard(user: User) {
   await ensureMissedPreviousChallenge(user);
   const today = await getOrCreateTodayChallenge(user);
@@ -108,6 +215,7 @@ export async function getDashboard(user: User) {
 
   const dbUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
   const currentUser = fromDbUser(dbUser);
+  const profileState = await getStudyProfile(currentUser);
   const timezone = getUserTimezone(currentUser.timezone);
   const [submissions, grades, notebookEntries, redemptions, challenges, todayNotice, challengeSettings, cohorts, socialData] =
     await Promise.all([
@@ -159,17 +267,23 @@ export async function getDashboard(user: User) {
       : null,
     challengeSettings,
     cohorts,
+    onboardingRequired: profileState.onboardingRequired,
+    studyProfile: profileState.studyProfile,
+    activeDiscipline: profileState.activeDiscipline,
     nextChallengeUnlockAt: nextChallengeUnlockIso(today.dateKey, timezone),
     todaySubmission,
     todayGrade: todayGradeDb ? fromDbGrade(todayGradeDb) : null,
     progress: challenges.map((challenge) => {
       const grade = grades.find((item) => item.challengeId === challenge.id);
+      const submission = submissions.find((item) => item.challengeId === challenge.id);
       return {
         id: challenge.id,
         date: challenge.dateKey,
         challenge: challenge.title,
         difficulty: challenge.difficulty,
         status: fromDbStatus(challenge.status),
+        submittedAt: submission?.submittedAt.toISOString() ?? null,
+        deadlineAt: challenge.deadlineAt.toISOString(),
         finalScore: grade?.finalScore ?? null,
         pis: grade?.updatedPis ?? currentUser.pisScore,
         ertEarned: grade?.ertEarned ?? 0,
@@ -209,6 +323,8 @@ export async function getOrCreateTodayChallenge(user: User) {
     }),
   ]);
   const settings = await getChallengeSettings(currentUser);
+  const profileState = await getStudyProfile(currentUser);
+  const discipline = profileState.activeDiscipline;
 
   const challenge = createDailyChallenge(currentUser, {
     dateKey: today,
@@ -216,6 +332,7 @@ export async function getOrCreateTodayChallenge(user: User) {
     pressure: false,
     recentWeaknesses: recentGrades.map((grade) => grade.nextImprovementTarget),
     settings,
+    discipline,
   });
 
   const created = await prisma.challenge.create({
@@ -238,6 +355,7 @@ export async function getOrCreateTodayChallenge(user: User) {
       status: toDbStatus(challenge.status),
       isRecovery: challenge.isRecovery,
       isPressure: challenge.isPressure,
+      disciplineSnapshot: discipline,
       createdAt: new Date(challenge.createdAt),
     },
   });
@@ -250,6 +368,7 @@ export async function getOrCreateTodayChallenge(user: User) {
     track: settings.track,
     topicFocus: settings.topicFocus,
     durationMinutes: settings.durationMinutes,
+    disciplineSnapshot: discipline,
   });
 
   return fromDbChallenge(created);
@@ -601,6 +720,14 @@ async function applyExaminerActions(
     nextSettings.track = track;
     settingsChanged = true;
     actions.push({ type: "settings.track", summary: `Future challenge track set to ${trackLabel(track)}.` });
+    const profile = await safeFindStudyProfile(user.id);
+    if (profile) {
+      await prisma.userStudyProfile.update({
+        where: { userId: user.id },
+        data: { primaryDiscipline: track },
+      });
+      actions.push({ type: "profile.discipline", summary: `Study profile discipline updated to ${trackLabel(track)}.` });
+    }
   }
 
   const duration = lower.match(/\b(\d{2,3})\s*(min|minute|minutes)\b/);
@@ -650,12 +777,13 @@ async function applyExaminerActions(
 }
 
 function inferTrack(lower: string) {
-  if (/\b(linux|systemd|journalctl|bash|zsh)\b/.test(lower)) return "linux";
-  if (/\b(security|cyber|incident response|hardening|auth|forensic)\b/.test(lower)) return "security";
-  if (/\b(automation|script|python|ansible|terraform)\b/.test(lower)) return "automation";
-  if (/\b(cloud|aws|azure|gcp|vpc|iam)\b/.test(lower)) return "cloud";
-  if (/\b(incident command|commander|war room|coordination)\b/.test(lower)) return "incident_command";
-  if (/\b(documentation|runbook|postmortem|report)\b/.test(lower)) return "documentation";
+  if (/\b(linux|systemd|journalctl|bash|zsh)\b/.test(lower)) return "linux_systems";
+  if (/\b(security|cyber|incident response|hardening|auth|forensic)\b/.test(lower)) return "cybersecurity";
+  if (/\b(automation|script|python|ansible|terraform)\b/.test(lower)) return "automation_scripting";
+  if (/\b(cloud|aws|azure|gcp|vpc|iam|devops|kubernetes|kubectl)\b/.test(lower)) return "cloud_devops";
+  if (/\b(data|ai|model|dataset|analysis|metric)\b/.test(lower)) return "data_ai";
+  if (/\b(software|code|api|typescript|react|testing)\b/.test(lower)) return "software_engineering";
+  if (/\b(documentation|runbook|postmortem|report|writing)\b/.test(lower)) return "technical_writing";
   if (/\b(network|networking|routing|switching|ospf|bgp|vlan|stp|firewall)\b/.test(lower)) return "networking";
   return null;
 }
@@ -728,6 +856,8 @@ export async function gradeExistingSubmission(user: User, submissionId: string) 
     submission: domainSubmission,
     user: fromDbUser(storedUser),
   });
+  const rubricSnapshot =
+    domainChallenge.disciplineSnapshot?.rubric ?? defaultDisciplineSnapshot().rubric;
   const notebookEntry = createNotebookEntry(domainChallenge, grade);
 
   const created = await prisma.$transaction(async (tx) => {
@@ -751,6 +881,7 @@ export async function gradeExistingSubmission(user: User, submissionId: string) 
         correction: grade.correction,
         contentionNotes: grade.contentionNotes,
         nextImprovementTarget: grade.nextImprovementTarget,
+        rubricSnapshot,
         pisChange: grade.pisChange,
         previousPis: grade.previousPis,
         updatedPis: grade.updatedPis,
@@ -1022,21 +1153,28 @@ function createDailyChallenge(
     pressure: boolean;
     recentWeaknesses: string[];
     settings?: Awaited<ReturnType<typeof getChallengeSettings>>;
+    discipline?: DisciplineSnapshot;
   },
 ) {
   const challenge = templateFallbackChallenge(user, options.recovery, options.pressure, options.dateKey);
-  if (!options.settings) return challenge;
+  if (!options.settings && !options.discipline) return challenge;
+  const discipline = options.discipline ?? defaultDisciplineSnapshot();
   return {
     ...challenge,
-    topic: trackLabel(options.settings.track),
-    difficulty: higherDifficulty(challenge.difficulty, options.settings.difficultyFloor),
-    objective: options.settings.topicFocus
+    topic: discipline.label,
+    difficulty: higherDifficulty(challenge.difficulty, options.settings?.difficultyFloor ?? discipline.targetDifficulty),
+    objective: options.settings?.topicFocus
       ? `${challenge.objective} Focus the work on: ${options.settings.topicFocus}.`
+      : discipline.topics.length
+        ? `${challenge.objective} Focus area: ${discipline.topics[0]}.`
       : challenge.objective,
     constraints: [
       ...challenge.constraints,
-      `Target completion time: ${options.settings.durationMinutes} minutes.`,
+      `Target completion time: ${options.settings?.durationMinutes ?? Math.max(30, Math.min(120, discipline.weeklyTimeBudgetHours * 12))} minutes.`,
+      `Expected evidence style: ${discipline.evidenceTypes.join(", ")}.`,
     ],
+    expectedAnswerFormat: discipline.responseSections.join(" -> "),
+    submissionRequirements: discipline.evidenceTypes.slice(0, 5),
   };
 }
 
@@ -1098,6 +1236,32 @@ async function getChallengeSettings(user: User) {
   } catch {
     return fallback;
   }
+}
+
+async function safeFindStudyProfile(userId: string): Promise<StudyProfile | null> {
+  const delegate = (prisma as unknown as {
+    userStudyProfile?: {
+      findUnique: (args: { where: { userId: string } }) => Promise<Parameters<typeof fromDbStudyProfile>[0] | null>;
+    };
+  }).userStudyProfile;
+  if (!delegate) return null;
+  try {
+    const profile = await delegate.findUnique({ where: { userId } });
+    return profile ? fromDbStudyProfile(profile) : null;
+  } catch {
+    return null;
+  }
+}
+
+function snapshotFromProfile(profile: StudyProfile) {
+  return disciplineSnapshot({
+    disciplineId: profile.primaryDiscipline,
+    rankedTopics: profile.rankedTopics,
+    preferredFormats: profile.preferredFormats,
+    evidenceTypes: profile.evidenceTypes,
+    targetDifficulty: profile.targetDifficulty,
+    weeklyTimeBudgetHours: profile.weeklyTimeBudgetHours,
+  });
 }
 
 async function getCohortSnapshot(user: User) {
@@ -1247,16 +1411,7 @@ function createInviteCode() {
 }
 
 function trackLabel(track: string) {
-  const labels: Record<string, string> = {
-    networking: "Networking",
-    linux: "Linux",
-    security: "Security",
-    automation: "Automation",
-    cloud: "Cloud",
-    incident_command: "Incident command",
-    documentation: "Documentation",
-  };
-  return labels[track] ?? "Networking";
+  return getDiscipline(oldTrackToDiscipline[track] ?? track).label;
 }
 
 function higherDifficulty(current: string, floor: string) {

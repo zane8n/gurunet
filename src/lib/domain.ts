@@ -29,6 +29,45 @@ export type User = {
   updatedAt: string;
 };
 
+export type RubricAxis = {
+  label: string;
+  description: string;
+};
+
+export type DisciplineSnapshot = {
+  id: string;
+  label: string;
+  topics: string[];
+  formats: string[];
+  evidenceTypes: string[];
+  responseSections: string[];
+  weakPatterns: string[];
+  unsafePatterns: string[];
+  rubric: Record<string, RubricAxis>;
+  targetDifficulty: Difficulty;
+  weeklyTimeBudgetHours: number;
+};
+
+export type StudyProfile = {
+  userId: string;
+  primaryDiscipline: string;
+  secondaryInterests: string[];
+  rankedTopics: string[];
+  currentLevel: string;
+  preferredFormats: string[];
+  evidenceTypes: string[];
+  weeklyTimeBudgetHours: number;
+  targetDifficulty: Difficulty;
+  weakAreas: string[];
+  avoidAreas: string[];
+  goals: string[];
+  customDiscipline?: string;
+  customStatus?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Session = {
   id: string;
   userId: string;
@@ -55,6 +94,7 @@ export type Challenge = {
   status: ChallengeStatus;
   isRecovery: boolean;
   isPressure: boolean;
+  disciplineSnapshot?: DisciplineSnapshot;
   createdAt: string;
 };
 
@@ -90,6 +130,7 @@ export type Grade = {
   correction: string;
   contentionNotes: string[];
   nextImprovementTarget: string;
+  rubricSnapshot?: Record<string, RubricAxis>;
   pisChange: number;
   previousPis: number;
   updatedPis: number;

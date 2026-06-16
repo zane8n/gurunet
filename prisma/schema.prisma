@@ -75,6 +75,7 @@ model User {
   challengeNotices  ChallengeNotice[]
   examinerMessages  ExaminerMessage[]
   challengeSettings UserChallengeSettings?
+  studyProfile      UserStudyProfile?
   accounts          Account[]
   challenges        Challenge[]
   submissions       Submission[]
@@ -159,6 +160,7 @@ model Challenge {
   status               ChallengeStatus @default(Active)
   isRecovery           Boolean         @default(false)
   isPressure           Boolean         @default(false)
+  disciplineSnapshot   Json?
   createdAt            DateTime        @default(now())
 
   user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -213,6 +215,28 @@ model UserChallengeSettings {
   recoveryMode    Boolean    @default(false)
   teamMode        Boolean    @default(false)
   updatedAt       DateTime   @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserStudyProfile {
+  userId                String     @id
+  primaryDiscipline     String
+  secondaryInterests    String[]
+  rankedTopics          String[]
+  currentLevel          String
+  preferredFormats      String[]
+  evidenceTypes         String[]
+  weeklyTimeBudgetHours Int
+  targetDifficulty      Difficulty
+  weakAreas             String[]
+  avoidAreas            String[]
+  goals                 String[]
+  customDiscipline      String?
+  customStatus          String?
+  completedAt           DateTime?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -272,6 +296,7 @@ model Grade {
   correction            String
   contentionNotes       String[]
   nextImprovementTarget String
+  rubricSnapshot        Json?
   pisChange             Float
   previousPis           Float
   updatedPis            Float

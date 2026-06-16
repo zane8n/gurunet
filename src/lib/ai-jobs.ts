@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import type { DisciplineSnapshot } from "@/lib/domain";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/store";
 import { nowIso } from "@/lib/time";
@@ -191,6 +192,10 @@ async function runChallengeGenerationJob(payload: Record<string, unknown>) {
     track: typeof payload.track === "string" ? payload.track : challenge.topic,
     topicFocus: typeof payload.topicFocus === "string" ? payload.topicFocus : undefined,
     durationMinutes: typeof payload.durationMinutes === "number" ? payload.durationMinutes : undefined,
+    disciplineSnapshot:
+      payload.disciplineSnapshot && typeof payload.disciplineSnapshot === "object"
+        ? (payload.disciplineSnapshot as DisciplineSnapshot)
+        : undefined,
   });
   if (!ai) return { fallback: true, output: { skipped: "no generated challenge" } };
 

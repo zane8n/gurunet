@@ -25,8 +25,10 @@ import {
   LogOut,
   Medal,
   NotebookTabs,
+  Pencil,
+  Search,
   ShieldCheck,
-  Store,
+  Trash2,
   Trophy,
   UserPlus,
   Users,
@@ -60,6 +62,8 @@ type ProgressRow = {
   challenge: string;
   difficulty: string;
   status: string;
+  submittedAt: string | null;
+  deadlineAt: string;
   finalScore: number | null;
   pis: number;
   ertEarned: number;
@@ -122,6 +126,62 @@ type ChallengeSettings = {
   teamMode: boolean;
 };
 
+type DisciplineTemplate = {
+  id: string;
+  label: string;
+  summary: string;
+  topics: string[];
+  formats: string[];
+  evidenceTypes: string[];
+  responseSections: string[];
+  rubric: Record<string, { label: string; description: string }>;
+};
+
+type CheckboxOption = string | { value: string; label: string };
+
+type ApiIssue = {
+  path?: Array<string | number>;
+  message?: string;
+};
+
+class ApiRequestError extends Error {
+  issues: ApiIssue[];
+
+  constructor(message: string, issues: ApiIssue[] = []) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.issues = issues;
+  }
+}
+
+type StudyProfile = {
+  userId: string;
+  primaryDiscipline: string;
+  secondaryInterests: string[];
+  rankedTopics: string[];
+  currentLevel: string;
+  preferredFormats: string[];
+  evidenceTypes: string[];
+  weeklyTimeBudgetHours: number;
+  targetDifficulty: string;
+  weakAreas: string[];
+  avoidAreas: string[];
+  goals: string[];
+  customDiscipline?: string;
+  customStatus?: string;
+  completedAt?: string;
+};
+
+type ActiveDiscipline = {
+  id: string;
+  label: string;
+  topics: string[];
+  formats: string[];
+  evidenceTypes: string[];
+  responseSections: string[];
+  rubric: Record<string, { label: string; description: string }>;
+};
+
 type CohortSummary = {
   id: string;
   name: string;
@@ -155,6 +215,9 @@ type Dashboard = {
   today: Challenge;
   todayNotice: ChallengeNotice | null;
   challengeSettings: ChallengeSettings;
+  onboardingRequired: boolean;
+  studyProfile: StudyProfile | null;
+  activeDiscipline: ActiveDiscipline;
   cohorts: CohortSummary[];
   nextChallengeUnlockAt: string;
   todaySubmission: Submission | null;
@@ -178,15 +241,40 @@ async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const text = await response.text();
     let message = text || response.statusText;
+    let issues: ApiIssue[] = [];
     try {
-      const parsed = JSON.parse(text) as { error?: string };
+      const parsed = JSON.parse(text) as { error?: string; issues?: ApiIssue[] };
       message = parsed.error || message;
+      issues = Array.isArray(parsed.issues) ? parsed.issues : [];
     } catch {
       // Keep the original response text when the body is not JSON.
     }
-    throw new Error(message);
+    throw new ApiRequestError(message, issues);
   }
   return response.json() as Promise<T>;
+}
+
+function formatApiIssue(issue: ApiIssue) {
+  const field = issue.path?.join(".") || "profile";
+  return `${profileFieldLabel(field)}: ${issue.message ?? "Please check this value."}`;
+}
+
+function profileFieldLabel(field: string) {
+  const labels: Record<string, string> = {
+    primaryDiscipline: "Primary discipline",
+    secondaryInterests: "Secondary interests",
+    rankedTopics: "Ranked topic interests",
+    currentLevel: "Current level",
+    preferredFormats: "Preferred challenge formats",
+    evidenceTypes: "Expected evidence/output",
+    weeklyTimeBudgetHours: "Weekly hours",
+    targetDifficulty: "Target difficulty",
+    weakAreas: "Weak areas",
+    avoidAreas: "Avoid areas",
+    goals: "Professional goals",
+    customDiscipline: "Custom request",
+  };
+  return labels[field] ?? field;
 }
 
 const sampleSubmission = `Hypothesis:
@@ -264,21 +352,30 @@ const responseOutlineChips = [
 
 const trackOptions = [
   ["networking", "Networking"],
-  ["linux", "Linux"],
-  ["security", "Security"],
-  ["automation", "Automation"],
-  ["cloud", "Cloud"],
-  ["incident_command", "Incident command"],
-  ["documentation", "Documentation"],
+  ["linux_systems", "Linux / Systems"],
+  ["cybersecurity", "Cybersecurity"],
+  ["software_engineering", "Software Engineering"],
+  ["automation_scripting", "Automation / Scripting"],
+  ["cloud_devops", "Cloud / DevOps"],
+  ["data_ai", "Data / AI"],
+  ["applied_engineering", "Applied Engineering / Troubleshooting"],
+  ["technical_writing", "Technical Writing / Documentation"],
 ] as const;
 
 const difficultyOptions = ["Guided", "Normal", "Advanced", "Production", "Expert"] as const;
 
 export function GurunetApp() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [disciplines, setDisciplines] = useState<DisciplineTemplate[]>([]);
+  const [profileGate, setProfileGate] = useState<{
+    onboardingRequired: boolean;
+    studyProfile: StudyProfile | null;
+    activeDiscipline: ActiveDiscipline;
+  } | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("signup");
   const [authError, setAuthError] = useState("");
+  const [profileErrors, setProfileErrors] = useState<string[]>([]);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [responseOpen, setResponseOpen] = useState(false);
@@ -302,6 +399,20 @@ export function GurunetApp() {
       try {
         const session = await apiRequest<{ user: SafeUser | null }>("/api/auth/session");
         if (session.user) {
+          const [profile, catalog] = await Promise.all([
+            apiRequest<{
+              onboardingRequired: boolean;
+              studyProfile: StudyProfile | null;
+              activeDiscipline: ActiveDiscipline;
+            }>("/api/study-profile"),
+            apiRequest<{ disciplines: DisciplineTemplate[] }>("/api/disciplines"),
+          ]);
+          setDisciplines(catalog.disciplines);
+          setProfileGate(profile);
+          if (profile.onboardingRequired) {
+            setDashboard(null);
+            return;
+          }
           const data = await apiRequest<Dashboard>("/api/me/stats");
           setDashboard(data);
         } else {
@@ -321,7 +432,38 @@ export function GurunetApp() {
   async function loadDashboard() {
     const data = await apiRequest<Dashboard>("/api/me/stats");
     setDashboard(data);
+    setProfileGate({
+      onboardingRequired: data.onboardingRequired,
+      studyProfile: data.studyProfile,
+      activeDiscipline: data.activeDiscipline,
+    });
     setVerification("");
+  }
+
+  async function saveStudyProfile(input: unknown) {
+    setBusy(true);
+    setStatus("");
+    setProfileErrors([]);
+    try {
+      const profile = await apiRequest<{
+        onboardingRequired: boolean;
+        studyProfile: StudyProfile | null;
+        activeDiscipline: ActiveDiscipline;
+      }>("/api/study-profile", {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      });
+      setProfileGate(profile);
+      await loadDashboard();
+      setStatus("Study profile saved.");
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.issues.length > 0) {
+        setProfileErrors(error.issues.map(formatApiIssue));
+      }
+      setStatus(error instanceof Error ? error.message : "Study profile update failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -736,6 +878,22 @@ export function GurunetApp() {
     );
   }
 
+  if (profileGate?.onboardingRequired) {
+    return (
+      <main className="app-background min-h-screen text-slate-950">
+        <AppHeader />
+        <StudyProfileOnboarding
+          busy={busy}
+          disciplines={disciplines}
+          errors={profileErrors}
+          status={status}
+          onSave={saveStudyProfile}
+        />
+        <Footer />
+      </main>
+    );
+  }
+
   if (!dashboard || !user || !today) {
     return (
       <main className="app-background min-h-screen text-slate-950">
@@ -843,20 +1001,52 @@ export function GurunetApp() {
 
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
             <article className="glass-panel rounded-md p-5">
-              <p className="text-sm font-semibold text-teal-800">{today.topic}</p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-normal">
-                {today.title}
-              </h1>
-              <p className="mt-3 max-w-5xl leading-7 text-slate-600">
-                {today.scenario}
-              </p>
+              {todaySubmission ? (
+                <div className="rounded-md border border-teal-700/15 bg-gradient-to-br from-teal-50 to-white p-4">
+                  <p className="text-sm font-semibold text-teal-800">Submitted response</p>
+                  <h1 className="mt-2 text-2xl font-semibold tracking-normal">
+                    {today.title}
+                  </h1>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Your assessment stays focused on the submitted work until the next
+                    challenge unlocks at {nextUnlock}.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-teal-800">{today.topic}</p>
+                  <h1 className="mt-2 text-3xl font-semibold tracking-normal">
+                    {today.title}
+                  </h1>
+                  <p className="mt-3 max-w-5xl leading-7 text-slate-600">
+                    {today.scenario}
+                  </p>
 
-              <div className="mt-5 border-t border-slate-200 pt-4">
-                <h2 className="text-xl font-semibold">Objective</h2>
-                <p className="mt-2 leading-7 text-slate-600">{today.objective}</p>
-              </div>
+                  <div className="mt-5 border-t border-slate-200 pt-4">
+                    <h2 className="text-xl font-semibold">Objective</h2>
+                    <p className="mt-2 leading-7 text-slate-600">{today.objective}</p>
+                  </div>
+                </>
+              )}
 
-              <ChallengeAccordions challenge={today} />
+              {todaySubmission ? (
+                <details className="my-5 rounded-md border border-slate-200 bg-white/55">
+                  <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-semibold text-slate-900 marker:hidden">
+                    Challenge prompt
+                    <ChevronRight size={16} className="text-teal-700" />
+                  </summary>
+                  <div className="border-t border-slate-200 px-4 py-4">
+                    <p className="text-sm font-semibold text-teal-800">{today.topic}</p>
+                    <p className="mt-2 text-lg font-semibold text-slate-950">{today.title}</p>
+                    <p className="mt-2 leading-7 text-slate-600">{today.scenario}</p>
+                    <p className="mt-4 font-semibold text-slate-900">Objective</p>
+                    <p className="mt-1 leading-7 text-slate-600">{today.objective}</p>
+                    <ChallengeAccordions challenge={today} />
+                  </div>
+                </details>
+              ) : (
+                <ChallengeAccordions challenge={today} />
+              )}
 
               <SubmissionControl
                 busy={busy}
@@ -876,15 +1066,7 @@ export function GurunetApp() {
               />
             </article>
 
-            <Panel icon={<ShieldCheck size={19} />} title="Solution gate">
-              {todayGrade ? (
-                <p className="text-sm leading-6 text-slate-600">{today.solution}</p>
-              ) : (
-                <p className="text-sm leading-6 text-slate-600">
-                  The solution remains hidden until submission and grading are complete.
-                </p>
-              )}
-            </Panel>
+            <TeachingPanel challenge={today} grade={todayGrade} submission={todaySubmission ?? null} />
           </div>
         </div>
       </section>
@@ -916,9 +1098,15 @@ export function GurunetApp() {
             onAddFriend={addFriend}
             onEnroll={enrollMarketplace}
           />
-          <div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
+          <div className="grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
             <RewardPanel busy={busy} onRedeem={redeem} />
-            <NotebookPanel entries={dashboard.notebookEntries} redemptions={dashboard.redemptions} />
+            <NotebookPanel
+              key={dashboard.notebookEntries.map((entry) => entry.id).join(":")}
+              busy={busy}
+              entries={dashboard.notebookEntries}
+              redemptions={dashboard.redemptions}
+              onAskExaminer={openExaminer}
+            />
           </div>
         </div>
       </section>
@@ -957,6 +1145,338 @@ function GoogleMark() {
       height={20}
       aria-hidden="true"
     />
+  );
+}
+
+function StudyProfileOnboarding({
+  busy,
+  disciplines,
+  errors,
+  status,
+  onSave,
+}: {
+  busy: boolean;
+  disciplines: DisciplineTemplate[];
+  errors: string[];
+  status: string;
+  onSave: (input: unknown) => void;
+}) {
+  const first = disciplines[0];
+  const [selectedId, setSelectedId] = useState(first?.id ?? "networking");
+  const selected = disciplines.find((item) => item.id === selectedId) ?? first;
+  const topics = selected?.topics ?? [];
+  const formats = selected?.formats ?? [];
+  const evidenceTypes = selected?.evidenceTypes ?? [];
+  const [clientErrors, setClientErrors] = useState<string[]>([]);
+  const visibleErrors = [...clientErrors, ...errors];
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const input = {
+      primaryDiscipline: String(form.get("primaryDiscipline") || selectedId),
+      secondaryInterests: form.getAll("secondaryInterests").map(String),
+      rankedTopics: form.getAll("rankedTopics").map(String),
+      currentLevel: String(form.get("currentLevel") || "Intermediate"),
+      preferredFormats: form.getAll("preferredFormats").map(String),
+      evidenceTypes: form.getAll("evidenceTypes").map(String),
+      weeklyTimeBudgetHours: Number(form.get("weeklyTimeBudgetHours") || 4),
+      targetDifficulty: String(form.get("targetDifficulty") || "Normal"),
+      weakAreas: form.getAll("weakAreas").map(String),
+      avoidAreas: form.getAll("avoidAreas").map(String),
+      goals: form.getAll("goals").map(String),
+      customDiscipline: String(form.get("customDiscipline") || "") || undefined,
+    };
+    const nextErrors = validateStudyProfileInput(input);
+    setClientErrors(nextErrors);
+    if (nextErrors.length > 0) return;
+    onSave(input);
+  }
+
+  return (
+    <section className="mx-auto grid w-full max-w-6xl gap-6 px-5 py-8 sm:px-8">
+      <div>
+        <p className="font-mono text-xs uppercase tracking-[0.16em] text-teal-800">
+          Study profile
+        </p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-normal">
+          Configure GURUnet as a rigorous capacity builder.
+        </h1>
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+          Choose a governed STEM/technical discipline and concrete evidence
+          standards. The examiner will use this to shape challenges, response
+          templates, grading language, and notebook guidance.
+        </p>
+        <div className="mt-4 grid gap-2 rounded-md border border-teal-700/15 bg-teal-50 p-4 text-sm leading-6 text-teal-950">
+          <p className="font-semibold">How validation works</p>
+          <p>
+            Pick focused options, not every option. GURUnet uses these choices to
+            generate daily challenges, select evidence standards, tune grading
+            language, and shape the notebook. Broad selections make the system
+            less rigorous, so some groups have maximum limits.
+          </p>
+          <p>
+            Required: primary discipline, at least 3 ranked topics, at least 2
+            formats, at least 2 evidence types, at least 1 weak area, at least 1
+            professional goal, 1-40 weekly hours, and a difficulty target.
+          </p>
+        </div>
+      </div>
+
+      <form onSubmit={submit} className="grid gap-5">
+        <div className="quiet-panel rounded-md p-5">
+          <div className="grid gap-4 md:grid-cols-[0.75fr_1.25fr]">
+            <label className="grid gap-2 text-sm font-medium text-slate-700">
+              Primary discipline
+              <select
+                name="primaryDiscipline"
+                value={selectedId}
+                onChange={(event) => setSelectedId(event.target.value)}
+                className="h-11 rounded-md border border-slate-300 bg-white px-3 text-sm"
+              >
+                {disciplines.map((discipline) => (
+                  <option key={discipline.id} value={discipline.id}>
+                    {discipline.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="rounded-md bg-white/60 p-3 text-sm leading-6 text-slate-600">
+              {selected?.summary}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-2">
+          <SurveyGroup title="Ranked topic interests">
+            <CheckboxGrid
+              key={`${selectedId}-rankedTopics`}
+              name="rankedTopics"
+              values={topics}
+              min={3}
+              max={8}
+              limitHint="Pick 3-8. These become the priority topic pool for generated challenges."
+            />
+          </SurveyGroup>
+          <SurveyGroup title="Preferred challenge formats">
+            <CheckboxGrid
+              key={`${selectedId}-preferredFormats`}
+              name="preferredFormats"
+              values={formats}
+              min={2}
+              max={6}
+              limitHint="Pick 2-6. This controls the shape of the task, not the discipline itself."
+            />
+          </SurveyGroup>
+          <SurveyGroup title="Expected evidence/output">
+            <CheckboxGrid
+              key={`${selectedId}-evidenceTypes`}
+              name="evidenceTypes"
+              values={evidenceTypes}
+              min={2}
+              max={8}
+              limitHint="Pick 2-8. These are the proof types the grader expects to see."
+            />
+          </SurveyGroup>
+          <SurveyGroup title="Weak areas">
+            <CheckboxGrid
+              key={`${selectedId}-weakAreas`}
+              name="weakAreas"
+              values={topics}
+              min={1}
+              max={8}
+              limitHint="Pick 1-8. These become pressure points and recovery targets."
+            />
+          </SurveyGroup>
+        </div>
+
+        <div className="quiet-panel rounded-md p-5">
+          <div className="grid gap-3 md:grid-cols-4">
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Current level
+              <select name="currentLevel" defaultValue="Intermediate" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm">
+                {["Beginner", "Intermediate", "Advanced", "Production", "Expert"].map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Target difficulty
+              <select name="targetDifficulty" defaultValue="Normal" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm">
+                {difficultyOptions.map((item) => <option key={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Weekly hours
+              <input name="weeklyTimeBudgetHours" type="number" min={1} max={40} defaultValue={4} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" />
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Custom request
+              <input name="customDiscipline" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Optional" />
+            </label>
+          </div>
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-2">
+          <SurveyGroup title="Secondary interests">
+            <CheckboxGrid
+              key={`${selectedId}-secondaryInterests`}
+              name="secondaryInterests"
+              values={disciplines
+                .filter((item) => item.id !== selectedId)
+                .map((item) => ({ value: item.id, label: item.label }))}
+              max={4}
+              limitHint="Optional. Pick up to 4 adjacent areas for occasional cross-training."
+            />
+          </SurveyGroup>
+          <SurveyGroup title="Professional goals">
+            <CheckboxGrid
+              name="goals"
+              values={[
+                "Stronger troubleshooting discipline",
+                "Better technical communication",
+                "Production-ready judgment",
+                "Broader STEM fluency",
+                "Interview/certification readiness",
+                "Build a reusable notebook",
+              ]}
+              min={1}
+              max={6}
+              limitHint="Pick 1-6. These steer the examiner's long-term emphasis."
+            />
+          </SurveyGroup>
+        </div>
+
+        {(status || visibleErrors.length > 0) && (
+          <div className={`rounded-md border p-4 text-sm leading-6 ${
+            visibleErrors.length > 0
+              ? "border-orange-200 bg-orange-50 text-orange-900"
+              : "border-teal-700/15 bg-teal-50 text-teal-900"
+          }`}>
+            {status && <p className="font-semibold">{status}</p>}
+            {visibleErrors.length > 0 && (
+              <ul className="mt-2 grid gap-1">
+                {visibleErrors.map((error) => (
+                  <li key={error}>- {error}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        <button disabled={busy} className="h-11 w-fit rounded-md bg-teal-700 px-5 text-sm font-semibold text-white disabled:opacity-60">
+          Save profile
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function validateStudyProfileInput(input: {
+  rankedTopics: string[];
+  preferredFormats: string[];
+  evidenceTypes: string[];
+  weeklyTimeBudgetHours: number;
+  weakAreas: string[];
+  goals: string[];
+}) {
+  const errors: string[] = [];
+  if (input.rankedTopics.length < 3) errors.push("Ranked topic interests: pick at least 3 focused topics.");
+  if (input.rankedTopics.length > 8) errors.push("Ranked topic interests: pick no more than 8 topics.");
+  if (input.preferredFormats.length < 2) errors.push("Preferred challenge formats: pick at least 2 formats.");
+  if (input.preferredFormats.length > 6) errors.push("Preferred challenge formats: pick no more than 6 formats.");
+  if (input.evidenceTypes.length < 2) errors.push("Expected evidence/output: pick at least 2 evidence types.");
+  if (input.evidenceTypes.length > 8) errors.push("Expected evidence/output: pick no more than 8 evidence types.");
+  if (input.weakAreas.length < 1) errors.push("Weak areas: pick at least 1 area for targeted capacity building.");
+  if (input.weakAreas.length > 8) errors.push("Weak areas: pick no more than 8 areas.");
+  if (input.goals.length < 1) errors.push("Professional goals: pick at least 1 goal.");
+  if (input.goals.length > 6) errors.push("Professional goals: pick no more than 6 goals.");
+  if (!Number.isInteger(input.weeklyTimeBudgetHours) || input.weeklyTimeBudgetHours < 1 || input.weeklyTimeBudgetHours > 40) {
+    errors.push("Weekly hours: enter a whole number from 1 to 40.");
+  }
+  return errors;
+}
+
+function SurveyGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="quiet-panel rounded-md p-5">
+      <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+function CheckboxGrid({
+  max,
+  min,
+  name,
+  values,
+  limitHint,
+}: {
+  max?: number;
+  min?: number;
+  name: string;
+  values: CheckboxOption[];
+  limitHint?: string;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+
+  function toggle(value: string) {
+    setSelected((current) => {
+      if (current.includes(value)) return current.filter((item) => item !== value);
+      if (max && current.length >= max) return current;
+      return [...current, value];
+    });
+  }
+
+  const countTone =
+    min && selected.length < min
+      ? "text-orange-700"
+      : max && selected.length >= max
+        ? "text-teal-800"
+        : "text-slate-500";
+
+  return (
+    <div className="grid gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {limitHint && <p className="text-xs text-slate-500">{limitHint}</p>}
+        {(min || max) && (
+          <p className={`text-xs font-semibold ${countTone}`}>
+            {selected.length}
+            {max ? `/${max}` : ""} selected
+            {min && selected.length < min ? ` · ${min - selected.length} more required` : ""}
+          </p>
+        )}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {values.map((option) => {
+          const value = typeof option === "string" ? option : option.value;
+          const label = typeof option === "string" ? option : option.label;
+          const checked = selected.includes(value);
+          const disabled = Boolean(max && selected.length >= max && !checked);
+          return (
+            <label
+              key={`${name}-${value}`}
+              className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${
+                checked
+                  ? "border-teal-700/30 bg-teal-50 text-teal-950"
+                  : disabled
+                    ? "border-slate-200 bg-slate-50 text-slate-400"
+                    : "border-slate-200 bg-white/60 text-slate-700"
+              }`}
+            >
+              <input
+                checked={checked}
+                disabled={disabled}
+                name={name}
+                value={value}
+                type="checkbox"
+                className="mt-1"
+                onChange={() => toggle(value)}
+              />
+              <span>{label}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -1029,21 +1549,40 @@ function ActivityGrid({ rows }: { rows: ProgressRow[] }) {
         {cells.map((row, index) => (
           <span
             key={`${row?.id ?? "empty"}-${index}`}
-            title={row ? `${row.date}: ${row.status}` : "No record"}
-            className={`size-3 rounded-[3px] transition-transform hover:scale-125 ${
-              row
-                ? row.finalScore && row.finalScore >= 15
-                  ? "bg-teal-700"
-                  : row.status.includes("Missed")
-                    ? "bg-red-400"
-                    : "bg-teal-200"
-                : "bg-slate-200/80"
-            }`}
+            title={activityTitle(row)}
+            className={`size-3.5 rounded-[3px] transition-transform hover:scale-125 ${activityTone(row)}`}
           />
         ))}
       </div>
     </div>
   );
+}
+
+function activityTitle(row?: ProgressRow) {
+  if (!row) return "No record";
+  const timing = row.submittedAt
+    ? `${minutesBeforeDeadline(row)} min before deadline`
+    : "not submitted";
+  return `${row.date}: ${row.status}, ${row.finalScore ?? "-"} / 20, ${timing}`;
+}
+
+function minutesBeforeDeadline(row: ProgressRow) {
+  if (!row.submittedAt) return 0;
+  return Math.round((new Date(row.deadlineAt).getTime() - new Date(row.submittedAt).getTime()) / 60000);
+}
+
+function activityTone(row?: ProgressRow) {
+  if (!row) return "bg-slate-200/80";
+  if (row.status.includes("Missed")) return "bg-red-500";
+  if (!row.submittedAt) return "bg-slate-300";
+
+  const minutesEarly = minutesBeforeDeadline(row);
+  const score = row.finalScore ?? 0;
+  if (minutesEarly < 0 || score < 8) return "bg-orange-500";
+  if (score >= 16 && minutesEarly >= 90) return "bg-teal-800";
+  if (score >= 13 && minutesEarly >= 30) return "bg-teal-600";
+  if (score >= 10) return "bg-amber-400";
+  return "bg-orange-400";
 }
 
 function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
@@ -1073,15 +1612,15 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
   const line = points.map((point) => `${point.x},${point.y}`).join(" ");
 
   return (
-    <div className="rounded-md border border-teal-950/10 bg-white/50 p-3">
+    <div>
       {graded.length === 0 ? (
-        <p className="grid h-28 place-items-center text-sm text-slate-500">
+        <p className="grid h-24 place-items-center text-sm text-slate-500">
           No graded attempts yet.
         </p>
       ) : (
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="h-32 w-full"
+          className="h-28 w-full"
           role="img"
           aria-label="Final score frequency polygon"
         >
@@ -1229,14 +1768,14 @@ function SectionNav() {
   ];
   return (
     <nav className="sticky top-0 z-30 border-b border-teal-950/10 bg-white/72 backdrop-blur-xl">
-      <div className="mx-auto flex w-full max-w-7xl gap-2 overflow-x-auto px-5 py-2 sm:px-8">
+      <div className="mx-auto flex w-full max-w-7xl gap-6 overflow-x-auto px-5 py-3 sm:px-8">
         {items.map((item) => (
           <a
             key={item.href}
             href={item.href}
-            className="interactive-lift flex h-9 shrink-0 items-center gap-2 rounded-md border border-teal-700/10 bg-white/70 px-3 text-xs font-semibold text-slate-700"
+            className="group flex h-8 shrink-0 items-center gap-2 border-b-2 border-transparent text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 transition-colors hover:border-teal-700 hover:text-teal-800"
           >
-            <span className="text-teal-700">{item.icon}</span>
+            <span className="text-teal-700/80 group-hover:text-teal-800">{item.icon}</span>
             {item.label}
           </a>
         ))}
@@ -1309,11 +1848,11 @@ function MetricsBand({
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-3">
-        <Panel icon={<Medal size={19} />} title="Score distribution">
+      <div className="grid gap-5 lg:grid-cols-[minmax(13rem,0.62fr)_minmax(13rem,0.58fr)_minmax(0,1.8fr)]">
+        <Panel icon={<Medal size={19} />} title="Score distribution" compact>
           <FrequencyPolygon rows={rows} />
         </Panel>
-        <Panel icon={<CalendarClock size={19} />} title="Streak map">
+        <Panel icon={<CalendarClock size={19} />} title="Streak map" compact>
           <ActivityGrid rows={rows} />
         </Panel>
         {grade ? (
@@ -1470,17 +2009,19 @@ function List({ items }: { items: string[] }) {
 }
 
 function Panel({
+  compact = false,
   icon,
   title,
   children,
 }: {
+  compact?: boolean;
   icon: ReactNode;
   title: string;
   children: ReactNode;
 }) {
   return (
-    <section className="quiet-panel interactive-lift rounded-md p-5">
-      <div className="mb-4 flex items-center gap-2 text-teal-700">
+    <section className={`quiet-panel interactive-lift rounded-md ${compact ? "p-4" : "p-5"}`}>
+      <div className={`${compact ? "mb-3" : "mb-4"} flex items-center gap-2 text-teal-700`}>
         {icon}
         <h3 className="font-semibold text-slate-950">{title}</h3>
       </div>
@@ -1596,6 +2137,116 @@ function SubmissionControl({
         </div>
       )}
       {status && <p className="mt-3 text-sm font-medium text-teal-800">{status}</p>}
+    </div>
+  );
+}
+
+function TeachingPanel({
+  challenge,
+  grade,
+  submission,
+}: {
+  challenge: Challenge;
+  grade: Grade | null;
+  submission: Submission | null;
+}) {
+  if (!submission) {
+    return (
+      <Panel icon={<ShieldCheck size={19} />} title="Assessment teaching">
+        <div className="grid gap-3 text-sm leading-6 text-slate-600">
+          <p>
+            The full worked solution unlocks after you submit and grade the
+            response. Until then, use the examiner chat for clarification without
+            exposing the answer.
+          </p>
+          <p className="rounded-md bg-white/65 px-3 py-2 font-medium text-slate-800">
+            Gate status: locked
+          </p>
+        </div>
+      </Panel>
+    );
+  }
+
+  if (!grade) {
+    return (
+      <Panel icon={<ShieldCheck size={19} />} title="Assessment teaching">
+        <div className="grid gap-3 text-sm leading-6 text-slate-600">
+          <p>
+            Your response is recorded. Grade it to unlock the worked solution,
+            correction notes, and the next learning target.
+          </p>
+          <p className="rounded-md bg-teal-50 px-3 py-2 font-medium text-teal-900">
+            Gate status: awaiting assessment
+          </p>
+        </div>
+      </Panel>
+    );
+  }
+
+  const parsed = parseSubmissionContent(submission.content);
+  const gaveEvidence = /\b(show|log|trace|output|because|therefore|verify|evidence|screenshot|config)\b/i.test(parsed.body);
+  const gaveRisk = /\b(risk|rollback|avoid|blast radius|do not|contain)\b/i.test(parsed.body);
+  const gaveRecommendation = /\b(recommend|fix|correct|next|validate|verify)\b/i.test(parsed.body);
+
+  return (
+    <Panel icon={<ShieldCheck size={19} />} title="Assessment teaching">
+      <div className="grid gap-4">
+        <div className="rounded-md border border-teal-700/15 bg-teal-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-teal-800">
+            Worked solution
+          </p>
+          <p className="mt-2 text-sm leading-6 text-teal-950">{challenge.solution}</p>
+        </div>
+
+        <div className="grid gap-2 text-sm leading-6 text-slate-600">
+          <AssessmentLine
+            label="Correct"
+            complete={gaveEvidence || grade.finalScore >= 13}
+            text={gaveEvidence ? "You anchored at least part of the answer in observable evidence." : "The score indicates some useful reasoning, but the evidence trail needs sharper proof."}
+          />
+          <AssessmentLine
+            label="Vague"
+            complete={!gaveRecommendation || grade.technicalCap !== "NONE"}
+            text="Any claim that is not tied to a command, artifact, measurement, or explicit tradeoff should be rewritten as testable evidence."
+          />
+          <AssessmentLine
+            label="Risk"
+            complete={gaveRisk}
+            text={gaveRisk ? "You included risk or rollback thinking." : "Add rollback, blast radius, and what not to change before validation."}
+          />
+          <AssessmentLine
+            label="Correction"
+            complete={false}
+            text={grade.correction}
+          />
+        </div>
+
+        <p className="rounded-md bg-white/70 px-3 py-2 text-sm font-semibold leading-6 text-teal-900">
+          Next assessment focus: {grade.nextImprovementTarget}
+        </p>
+      </div>
+    </Panel>
+  );
+}
+
+function AssessmentLine({
+  complete,
+  label,
+  text,
+}: {
+  complete: boolean;
+  label: string;
+  text: string;
+}) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white/65 p-3">
+      <div className="flex items-center gap-2">
+        <CheckCircle2 size={15} className={complete ? "text-teal-700" : "text-amber-600"} />
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          {label}
+        </p>
+      </div>
+      <p className="mt-1">{text}</p>
     </div>
   );
 }
@@ -1759,7 +2410,7 @@ function ResponseEditorModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[92vh] overflow-hidden sm:max-w-5xl"
+        className="max-h-[92vh] overflow-y-auto sm:max-w-5xl"
         onPointerDownOutside={(event) => event.preventDefault()}
       >
         <DialogHeader>
@@ -1835,7 +2486,7 @@ function ResponseEditorModal({
               value={body}
               onChange={(event) => onBodyChange(event.target.value)}
               onPaste={handlePaste}
-              className="min-h-[24rem] resize-none rounded-md border border-slate-300 bg-white p-4 font-mono text-sm leading-6 outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/15"
+              className="min-h-[24rem] max-h-[55vh] resize-y overflow-auto rounded-md border border-slate-300 bg-white p-4 font-mono text-sm leading-6 outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/15"
               placeholder="Write with headings, bullets, command output, code blocks, and attached screenshots or files."
             />
           </div>
@@ -2179,14 +2830,19 @@ function GradeSummary({ grade }: { grade: Grade }) {
   return (
     <Panel icon={<Medal size={19} />} title="Daily scoresheet">
       <div className="grid gap-3">
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <Result label="Verdict" value={grade.verdict} />
           <Result label="Raw /20" value={grade.rawScore} />
           <Result label="Final /20" value={grade.finalScore} />
           <Result label="ERT earned" value={grade.ertEarned} />
         </div>
-        <p className="text-sm leading-6 text-slate-600">{grade.correction}</p>
-        <p className="text-sm font-semibold text-teal-900">
+        <div className="rounded-md border border-slate-200 bg-white/65 p-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Examiner correction
+          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{grade.correction}</p>
+        </div>
+        <p className="rounded-md bg-teal-50 px-3 py-2 text-sm font-semibold leading-6 text-teal-900">
           Next target: {grade.nextImprovementTarget}
         </p>
       </div>
@@ -2196,9 +2852,9 @@ function GradeSummary({ grade }: { grade: Grade }) {
 
 function Result({ label, value }: { label: string; value: string | number }) {
   return (
-    <div>
-      <p className="text-sm text-slate-500">{label}</p>
-      <p className="text-xl font-semibold text-slate-950">{value}</p>
+    <div className="min-w-0 rounded-md border border-slate-200 bg-white/60 p-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</p>
+      <p className="mt-1 break-words text-lg font-semibold leading-6 text-slate-950">{value}</p>
     </div>
   );
 }
@@ -2445,90 +3101,45 @@ function SocialPanel({
   onEnroll: (challengeId: string) => void;
 }) {
   return (
-    <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-      <Panel icon={<Medal size={20} />} title="Leaderboard">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[480px] text-left text-sm">
-            <thead className="border-b border-slate-200 text-slate-500">
-              <tr>
-                {["Rank", "Engineer", "PIS", "Streak", "Latest"].map((head) => (
-                  <th key={head} className="py-2 pr-3 font-semibold">
-                    {head}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {social.leaderboard.map((row) => (
-                <tr key={row.id} className="border-b border-slate-100">
-                  <td className="py-3 pr-3 font-semibold text-teal-800">#{row.rank}</td>
-                  <td className="py-3 pr-3">
-                    <p className="font-medium text-slate-900">
-                      {row.name}
-                      {row.isYou ? " (you)" : ""}
-                    </p>
-                    <p className="text-xs text-slate-500">{row.handle}</p>
-                  </td>
-                  <td className="py-3 pr-3">{row.pisScore.toFixed(1)}</td>
-                  <td className="py-3 pr-3">{row.currentStreak}</td>
-                  <td className="py-3 pr-3">{row.latestScore ?? "-"}</td>
+    <Panel icon={<Users size={20} />} title="Social hub">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,0.72fr)]">
+        <div className="grid gap-4">
+          <div className="overflow-x-auto rounded-md border border-slate-200 bg-white/65">
+            <table className="w-full min-w-[560px] text-left text-sm">
+              <thead className="border-b border-slate-200 text-slate-500">
+                <tr>
+                  {["Rank", "Profile", "PIS", "Streak", "Latest"].map((head) => (
+                    <th key={head} className="px-3 py-3 font-semibold">
+                      {head}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
+              </thead>
+              <tbody>
+                {social.leaderboard.map((row) => (
+                  <tr key={row.id} className="border-b border-slate-100 last:border-0">
+                    <td className="px-3 py-3 font-semibold text-teal-800">#{row.rank}</td>
+                    <td className="px-3 py-3">
+                      <p className="font-medium text-slate-900">
+                        {row.name}
+                        {row.isYou ? " (you)" : ""}
+                      </p>
+                      <p className="text-xs text-slate-500">{row.handle}</p>
+                    </td>
+                    <td className="px-3 py-3">{row.pisScore.toFixed(1)}</td>
+                    <td className="px-3 py-3">{row.currentStreak}</td>
+                    <td className="px-3 py-3">{row.latestScore ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-      <Panel icon={<Users size={20} />} title="Friends and public profiles">
-        <form onSubmit={onAddFriend} className="grid gap-3 sm:grid-cols-[1fr_auto]">
-          <input
-            name="email"
-            type="email"
-            required
-            className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/15"
-            placeholder="friend@example.com"
-          />
-          <button
-            disabled={busy}
-            className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
-          >
-            Add friend
-          </button>
-        </form>
-        <div className="mt-4 grid gap-3">
-          {social.profiles.map((profile) => (
-            <div
-              key={profile.id}
-              className="grid grid-cols-[1fr_auto] gap-3 rounded-md border border-slate-200 bg-white/65 p-3"
-            >
-              <div>
-                <p className="font-medium text-slate-900">
-                  {profile.name}
-                  {profile.isYou ? " (you)" : ""}
-                </p>
-                <p className="text-xs text-slate-500">{profile.handle}</p>
-              </div>
-              <div className="text-right text-sm">
-                <p className="font-semibold text-teal-800">{profile.pisScore.toFixed(1)} PIS</p>
-                <p className="text-xs text-slate-500">{profile.challengeCount} challenges</p>
-              </div>
-            </div>
-          ))}
-          {social.friends.length === 0 && (
-            <p className="text-sm leading-6 text-slate-600">
-              Add a friend by email to compare public profiles and shared challenge progress.
-            </p>
-          )}
-        </div>
-      </Panel>
-
-      <div className="lg:col-span-2">
-        <Panel icon={<Store size={20} />} title="Challenge marketplace">
-          <div className="grid gap-3 lg:grid-cols-3">
-            {social.marketplace.map((item) => (
+          <div className="grid gap-3 md:grid-cols-3">
+            {social.marketplace.slice(0, 3).map((item) => (
               <div
                 key={item.id}
-                className="flex min-h-[13rem] flex-col rounded-md border border-slate-200 bg-white/65 p-4"
+                className="flex min-h-[12rem] flex-col rounded-md border border-slate-200 bg-white/65 p-4"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -2558,32 +3169,108 @@ function SocialPanel({
               </div>
             ))}
           </div>
-        </Panel>
+        </div>
+
+        <aside className="rounded-md border border-slate-200 bg-white/60 p-4">
+          <form onSubmit={onAddFriend} className="grid gap-3">
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Add friend
+              <input
+                name="email"
+                type="email"
+                required
+                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/15"
+                placeholder="friend@example.com"
+              />
+            </label>
+            <button
+              disabled={busy}
+              className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              Add friend
+            </button>
+          </form>
+
+          <div className="mt-5 grid gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Public profiles
+            </p>
+            {social.profiles.map((profile) => (
+              <div
+                key={profile.id}
+                className="grid grid-cols-[1fr_auto] gap-3 rounded-md border border-slate-200 bg-white/70 p-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-slate-900">
+                    {profile.name}
+                    {profile.isYou ? " (you)" : ""}
+                  </p>
+                  <p className="truncate text-xs text-slate-500">{profile.handle}</p>
+                </div>
+                <div className="text-right text-sm">
+                  <p className="font-semibold text-teal-800">{profile.pisScore.toFixed(1)} PIS</p>
+                  <p className="text-xs text-slate-500">{profile.challengeCount} challenges</p>
+                </div>
+              </div>
+            ))}
+            {social.friends.length === 0 && (
+              <p className="text-sm leading-6 text-slate-600">
+                Add a friend by email to compare public profiles and shared challenge progress.
+              </p>
+            )}
+          </div>
+        </aside>
       </div>
-    </div>
+    </Panel>
   );
 }
 
 function NotebookPanel({
+  busy,
   entries,
   redemptions,
+  onAskExaminer,
 }: {
+  busy: boolean;
   entries: NotebookEntry[];
   redemptions: Redemption[];
+  onAskExaminer: () => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [localEntries, setLocalEntries] = useState(() => entries);
+
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
+    <div className="grid gap-5">
       <Panel icon={<NotebookTabs size={20} />} title="Engineering notebook">
-        <div className="grid gap-3">
-          {entries.length === 0 && <p className="text-sm text-slate-600">No graded entries yet.</p>}
-          {entries.map((entry) => (
-            <div key={entry.id} className="rounded-md border border-slate-200 p-3">
+        <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
+          <div>
+            <p className="text-sm leading-6 text-slate-600">
+              Search graded notes, add your own findings, revise lessons, and ask
+              the examiner to use the notebook as context.
+            </p>
+            <p className="mt-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              {localEntries.length} notes
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="interactive-lift h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white"
+          >
+            Open notebook
+          </button>
+        </div>
+        <div className="mt-4 grid gap-3">
+          {localEntries.length === 0 && <p className="text-sm text-slate-600">No notebook entries yet.</p>}
+          {localEntries.slice(0, 3).map((entry) => (
+            <div key={entry.id} className="rounded-md border border-slate-200 bg-white/60 p-3">
               <p className="font-medium text-slate-800">{entry.title}</p>
-              <p className="mt-1 text-sm leading-6 text-slate-600">{entry.summary}</p>
+              <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600">{entry.summary}</p>
             </div>
           ))}
         </div>
       </Panel>
+
       <Panel icon={<BookOpenText size={20} />} title="Redemption ledger">
         <div className="grid gap-3">
           {redemptions.length === 0 && <p className="text-sm text-slate-600">No redemptions yet.</p>}
@@ -2601,8 +3288,262 @@ function NotebookPanel({
           ))}
         </div>
       </Panel>
+
+      <NotebookAppModal
+        busy={busy}
+        entries={localEntries}
+        open={open}
+        onAskExaminer={onAskExaminer}
+        onEntriesChange={setLocalEntries}
+        onOpenChange={setOpen}
+      />
     </div>
   );
+}
+
+function NotebookAppModal({
+  busy,
+  entries,
+  open,
+  onAskExaminer,
+  onEntriesChange,
+  onOpenChange,
+}: {
+  busy: boolean;
+  entries: NotebookEntry[];
+  open: boolean;
+  onAskExaminer: () => void;
+  onEntriesChange: (entries: NotebookEntry[]) => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [notebookBusy, setNotebookBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [draft, setDraft] = useState({
+    title: "",
+    summary: "",
+    lessons: "",
+    tags: "",
+  });
+  const filtered = entries.filter((entry) => {
+    const haystack = `${entry.title} ${entry.summary} ${entry.lessons.join(" ")} ${entry.tags.join(" ")}`.toLowerCase();
+    return haystack.includes(query.toLowerCase());
+  });
+
+  function resetDraft() {
+    setEditingId(null);
+    setDraft({ title: "", summary: "", lessons: "", tags: "" });
+  }
+
+  function edit(entry: NotebookEntry) {
+    setEditingId(entry.id);
+    setDraft({
+      title: entry.title,
+      summary: entry.summary,
+      lessons: entry.lessons.join("\n"),
+      tags: entry.tags.join(", "),
+    });
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setNotebookBusy(true);
+    setStatus("");
+    const payload = {
+      title: draft.title,
+      summary: draft.summary,
+      lessons: splitLines(draft.lessons),
+      tags: splitTags(draft.tags),
+    };
+    try {
+      if (editingId) {
+        const result = await apiRequest<{ entry: NotebookEntry }>(`/api/notebook/${editingId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            summary: payload.summary,
+            lessons: payload.lessons,
+            tags: payload.tags,
+          }),
+        });
+        onEntriesChange(entries.map((entry) => (entry.id === editingId ? result.entry : entry)));
+        setStatus("Notebook entry updated.");
+      } else {
+        const result = await apiRequest<{ entry: NotebookEntry }>("/api/notebook", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        onEntriesChange([result.entry, ...entries]);
+        setStatus("Notebook entry created.");
+      }
+      resetDraft();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Notebook save failed");
+    } finally {
+      setNotebookBusy(false);
+    }
+  }
+
+  async function remove(entryId: string) {
+    setNotebookBusy(true);
+    setStatus("");
+    try {
+      await apiRequest<{ ok: true }>(`/api/notebook/${entryId}`, { method: "DELETE" });
+      onEntriesChange(entries.filter((entry) => entry.id !== entryId));
+      if (editingId === entryId) resetDraft();
+      setStatus("Notebook entry deleted.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Notebook delete failed");
+    } finally {
+      setNotebookBusy(false);
+    }
+  }
+
+  function askExaminerWithNotebook() {
+    onOpenChange(false);
+    onAskExaminer();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>Engineering notebook</DialogTitle>
+        </DialogHeader>
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(19rem,0.9fr)]">
+          <div className="grid gap-3">
+            <label className="flex h-11 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-600">
+              <Search size={16} className="text-teal-700" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent outline-none"
+                placeholder="Search notes, lessons, commands, tags"
+              />
+            </label>
+
+            <div className="max-h-[32rem] overflow-auto rounded-md border border-slate-200 bg-white/65 p-3">
+              {filtered.length === 0 ? (
+                <p className="grid h-32 place-items-center text-sm text-slate-500">
+                  No matching notes.
+                </p>
+              ) : (
+                <div className="grid gap-3">
+                  {filtered.map((entry) => (
+                    <article key={entry.id} className="rounded-md border border-slate-200 bg-white p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className="font-semibold text-slate-950">{entry.title}</h3>
+                          <p className="mt-1 text-sm leading-6 text-slate-600">{entry.summary}</p>
+                        </div>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => edit(entry)}
+                            className="grid size-8 place-items-center rounded-md border border-slate-200 text-slate-600 hover:text-teal-800"
+                            title="Edit note"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void remove(entry.id)}
+                            disabled={busy || notebookBusy}
+                            className="grid size-8 place-items-center rounded-md border border-slate-200 text-slate-600 hover:text-orange-700 disabled:opacity-50"
+                            title="Delete note"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      {entry.lessons.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {entry.lessons.slice(0, 3).map((lesson) => (
+                            <span key={lesson} className="rounded-md bg-teal-50 px-2 py-1 text-xs font-medium text-teal-900">
+                              {lesson}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <form onSubmit={save} className="grid gap-3 rounded-md border border-slate-200 bg-white/65 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-semibold text-slate-950">
+                {editingId ? "Edit note" : "Create note"}
+              </h3>
+              {editingId && (
+                <button type="button" onClick={resetDraft} className="text-xs font-semibold text-slate-500">
+                  New note
+                </button>
+              )}
+            </div>
+            <input
+              value={draft.title}
+              onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+              disabled={Boolean(editingId)}
+              className="h-10 rounded-md border border-slate-300 px-3 text-sm disabled:bg-slate-100"
+              placeholder="Title"
+            />
+            <textarea
+              value={draft.summary}
+              onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))}
+              className="min-h-36 rounded-md border border-slate-300 p-3 text-sm leading-6"
+              placeholder="What did you learn, observe, or want to reuse?"
+            />
+            <textarea
+              value={draft.lessons}
+              onChange={(event) => setDraft((current) => ({ ...current, lessons: event.target.value }))}
+              className="min-h-24 rounded-md border border-slate-300 p-3 text-sm leading-6"
+              placeholder="Lessons, one per line"
+            />
+            <input
+              value={draft.tags}
+              onChange={(event) => setDraft((current) => ({ ...current, tags: event.target.value }))}
+              className="h-10 rounded-md border border-slate-300 px-3 text-sm"
+              placeholder="Tags, comma separated"
+            />
+            <button
+              disabled={busy || notebookBusy || !draft.summary.trim() || (!editingId && !draft.title.trim())}
+              className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {editingId ? "Update note" : "Create note"}
+            </button>
+            <button
+              type="button"
+              onClick={askExaminerWithNotebook}
+              className="h-10 rounded-md border border-teal-700/20 bg-teal-50 px-4 text-sm font-semibold text-teal-800"
+            >
+              Ask examiner with notebook context
+            </button>
+            {status && <p className="text-sm font-medium text-teal-800">{status}</p>}
+          </form>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function splitLines(value: string) {
+  return value
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function splitTags(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 12);
 }
 
 function readAttachment(file: File): Promise<SubmissionAttachment> {
@@ -2629,7 +3570,7 @@ function readAttachment(file: File): Promise<SubmissionAttachment> {
 function Footer() {
   return (
     <footer className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-5 pb-8 pt-2 text-xs text-slate-500 sm:px-8 md:flex-row md:items-center md:justify-between">
-      <p>© {new Date().getFullYear()} Kikandi. All rights reserved.</p>
+      <p>© {new Date().getFullYear()} Kikandi. Licensed under Apache-2.0.</p>
       <p className="font-mono text-teal-800">GURUnet · Designed by Kikandi.</p>
     </footer>
   );

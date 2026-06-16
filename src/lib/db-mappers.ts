@@ -9,18 +9,21 @@ import type {
   Submission as DbSubmission,
   SubmissionAttachment as DbSubmissionAttachment,
   User as DbUser,
+  UserStudyProfile as DbUserStudyProfile,
   WeeklyDisciplineRecord as DbDisciplineRecord,
 } from "@prisma/client";
 import type {
   Challenge,
   ChallengeStatus,
   DisciplineRecord,
+  DisciplineSnapshot,
   Grade,
   LedgerEvent,
   MarketplaceChallenge,
   NotebookEntry,
   Redemption,
   Session,
+  StudyProfile,
   Submission,
   User,
 } from "@/lib/domain";
@@ -70,6 +73,7 @@ export function fromDbChallenge(challenge: DbChallenge): Challenge {
     status: fromDbStatus(challenge.status),
     isRecovery: challenge.isRecovery,
     isPressure: challenge.isPressure,
+    disciplineSnapshot: parseDisciplineSnapshot(challenge.disciplineSnapshot),
     createdAt: challenge.createdAt.toISOString(),
   };
 }
@@ -109,6 +113,7 @@ export function fromDbGrade(grade: DbGrade): Grade {
     correction: grade.correction,
     contentionNotes: grade.contentionNotes,
     nextImprovementTarget: grade.nextImprovementTarget,
+    rubricSnapshot: parseRubricSnapshot(grade.rubricSnapshot),
     pisChange: grade.pisChange,
     previousPis: grade.previousPis,
     updatedPis: grade.updatedPis,
@@ -116,6 +121,38 @@ export function fromDbGrade(grade: DbGrade): Grade {
     ertBalance: grade.ertBalance,
     createdAt: grade.createdAt.toISOString(),
   };
+}
+
+export function fromDbStudyProfile(profile: DbUserStudyProfile): StudyProfile {
+  return {
+    userId: profile.userId,
+    primaryDiscipline: profile.primaryDiscipline,
+    secondaryInterests: profile.secondaryInterests,
+    rankedTopics: profile.rankedTopics,
+    currentLevel: profile.currentLevel,
+    preferredFormats: profile.preferredFormats,
+    evidenceTypes: profile.evidenceTypes,
+    weeklyTimeBudgetHours: profile.weeklyTimeBudgetHours,
+    targetDifficulty: profile.targetDifficulty,
+    weakAreas: profile.weakAreas,
+    avoidAreas: profile.avoidAreas,
+    goals: profile.goals,
+    customDiscipline: profile.customDiscipline ?? undefined,
+    customStatus: profile.customStatus ?? undefined,
+    completedAt: profile.completedAt?.toISOString(),
+    createdAt: profile.createdAt.toISOString(),
+    updatedAt: profile.updatedAt.toISOString(),
+  };
+}
+
+function parseDisciplineSnapshot(value: unknown): DisciplineSnapshot | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return value as DisciplineSnapshot;
+}
+
+function parseRubricSnapshot(value: unknown): Grade["rubricSnapshot"] {
+  if (!value || typeof value !== "object") return undefined;
+  return value as Grade["rubricSnapshot"];
 }
 
 export function fromDbLedgerEvent(event: DbLedgerEvent): LedgerEvent {

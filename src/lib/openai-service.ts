@@ -4,7 +4,7 @@ import type {
   ChatCompletion,
   ChatCompletionCreateParamsNonStreaming,
 } from "openai/resources/chat/completions";
-import type { Challenge, Difficulty, Grade, Submission, User } from "@/lib/domain";
+import type { Challenge, Difficulty, DisciplineSnapshot, Grade, Submission, User } from "@/lib/domain";
 import { generateChallenge } from "@/lib/challenges";
 import { requireRuntimeEnv, getRuntimeEnv } from "@/lib/runtime-env";
 import { summarizeSubmissionForAi } from "@/lib/submission-content";
@@ -67,6 +67,7 @@ type ChallengeContext = {
   track?: string;
   topicFocus?: string;
   durationMinutes?: number;
+  disciplineSnapshot?: DisciplineSnapshot;
 };
 
 let client: OpenAI | null = null;
@@ -188,6 +189,7 @@ export async function generateAiChallenge(context: ChallengeContext) {
               track: context.track ?? "networking",
               topicFocus: context.topicFocus,
               durationMinutes: context.durationMinutes,
+              discipline: context.disciplineSnapshot,
             },
             outputShape: {
               title: "string",

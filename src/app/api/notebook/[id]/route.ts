@@ -46,3 +46,19 @@ export async function PATCH(
     return apiError(error);
   }
 }
+
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  try {
+    const user = await requireUser();
+    const { id } = await context.params;
+    const existing = await prisma.notebookEntry.findFirst({ where: { id, userId: user.id } });
+    if (!existing) throw new Response("Notebook entry not found", { status: 404 });
+    await prisma.notebookEntry.delete({ where: { id } });
+    return json({ ok: true });
+  } catch (error) {
+    return apiError(error);
+  }
+}

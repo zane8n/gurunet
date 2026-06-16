@@ -21,10 +21,28 @@ export function apiError(error: unknown) {
       { status: 400 },
     );
   }
+  if (isMissingDatabaseTableError(error)) {
+    return json(
+      {
+        error:
+          "Database migration required. The study profile tables are not present in the connected database yet. Run `pnpm prisma:deploy` against the same DATABASE_URL used by the app, then refresh.",
+      },
+      { status: 503 },
+    );
+  }
   return json(
     {
       error: error instanceof Error ? error.message : "Unexpected server error",
     },
     { status: 500 },
+  );
+}
+
+function isMissingDatabaseTableError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("does not exist in the current database") ||
+    (message.includes("The table") && message.includes("does not exist")) ||
+    message.includes("P2021")
   );
 }

@@ -50,17 +50,20 @@ export function needsVerification(content: string) {
   );
 }
 
-function categoryScores(content: string) {
+function categoryScores(content: string, challenge?: Challenge) {
   const analysis = submissionAnalysis(content);
   const plainText = analysis.plainText;
   const lower = plainText.toLowerCase();
   const wordCount = analysis.wordCount;
+  const disciplineEvidence = challenge?.disciplineSnapshot?.evidenceTypes?.some((item) =>
+    lower.includes(item.toLowerCase().split(" ")[0] ?? item.toLowerCase()),
+  );
 
   const hasSequence = /\b(first|then|next|after|finally|step)\b/i.test(plainText);
   const hasRisk = /\b(risk|rollback|change window|impact|safe|non-disruptive)\b/i.test(
     plainText,
   );
-  const hasEvidence = evidencePattern.test(plainText) || analysis.attachmentCount > 0;
+  const hasEvidence = evidencePattern.test(plainText) || Boolean(disciplineEvidence) || analysis.attachmentCount > 0;
   const hasTradeoff = /\b(trade[- ]?off|assumption|because|therefore|however)\b/i.test(
     plainText,
   );
@@ -113,13 +116,23 @@ function clampScore(score: number) {
   return Math.max(0, Math.min(7, score));
 }
 
-function technicalCapFor(content: string): TechnicalCap {
+function technicalCapFor(content: string, challenge?: Challenge): TechnicalCap {
   const analysis = submissionAnalysis(content);
   const plainText = analysis.plainText;
-  if (unsafePattern.test(plainText)) return "UNSAFE";
+  const lower = plainText.toLowerCase();
+  const hasDisciplineEvidence = challenge?.disciplineSnapshot?.evidenceTypes?.some((item) =>
+    lower.includes(item.toLowerCase().split(" ")[0] ?? item.toLowerCase()),
+  );
+  const hasUnsafeDisciplinePattern = challenge?.disciplineSnapshot?.unsafePatterns?.some((item) =>
+    lower.includes(item.toLowerCase().split(" ")[0] ?? item.toLowerCase()),
+  );
+  const hasWeakDisciplinePattern = challenge?.disciplineSnapshot?.weakPatterns?.some((item) =>
+    lower.includes(item.toLowerCase().split(" ")[0] ?? item.toLowerCase()),
+  );
+  if (unsafePattern.test(plainText) || hasUnsafeDisciplinePattern) return "UNSAFE";
   if (analysis.attachmentCount > 0 && analysis.wordCount < 45) return "INCOMPLETE";
   if (analysis.wordCount < 50) return "INCOMPLETE";
-  if (!evidencePattern.test(plainText) && !analysis.hasStructuredEvidence) return "MOSTLY_WRONG";
+  if ((!evidencePattern.test(plainText) && !hasDisciplineEvidence && !analysis.hasStructuredEvidence) || hasWeakDisciplinePattern) return "MOSTLY_WRONG";
   return "NONE";
 }
 
@@ -189,7 +202,7 @@ function ertEarned(
 }
 
 export function gradeSubmission({ challenge, submission, user }: GradeInput): Grade {
-  const scores = categoryScores(submission.content);
+  const scores = categoryScores(submission.content, challenge);
   const scoreValues = [
     scores.creativity,
     scores.ingenuity,
@@ -200,7 +213,7 @@ export function gradeSubmission({ challenge, submission, user }: GradeInput): Gr
   const rawScore = Number(((scoreValues.reduce((a, b) => a + b, 0) / 35) * 20).toFixed(2));
   const balancePenaltyValue = balancePenalty(scoreValues);
   const latePenalty = calculateLatePenalty(submission.submittedAt, challenge.deadlineAt);
-  const technicalCap = technicalCapFor(submission.content);
+  const technicalCap = technicalCapFor(submission.content, challenge);
   const capped = Math.min(rawScore - balancePenaltyValue - latePenalty, capValue(technicalCap));
   const hardCapped = isAfterHardCapWindow(submission.submittedAt, challenge.deadlineAt)
     ? Math.min(capped, 12)
@@ -234,7 +247,7 @@ export function gradeSubmission({ challenge, submission, user }: GradeInput): Gr
     technicalCap,
     finalScore,
     verdict: verdictFor(finalScore),
-    correction: correctionFor(technicalCap, submission.content),
+    correction: correctionFor(technicalCap, submission.content, challenge),
     contentionNotes: contentionNotes(scores, technicalCap, latePenalty),
     nextImprovementTarget: nextTarget(scores, technicalCap),
     pisChange,
@@ -258,7 +271,10 @@ export function createNotebookEntry(challenge: Challenge, grade: Grade): Noteboo
     commands: challenge.allowedTools,
     lessons: [
       grade.nextImprovementTarget,
-      "Tie every recommendation to evidence from commands, logs, configs, or packet behavior.",
+      `Tie every recommendation to evidence: ${
+        challenge.disciplineSnapshot?.evidenceTypes?.join(", ") ??
+        "commands, logs, configs, or packet behavior"
+      }.`,
     ],
     tags: [challenge.topic, challenge.difficulty],
     createdAt: nowIso(),
@@ -266,17 +282,19 @@ export function createNotebookEntry(challenge: Challenge, grade: Grade): Noteboo
   };
 }
 
-function correctionFor(cap: TechnicalCap, content: string) {
+function correctionFor(cap: TechnicalCap, content: string, challenge?: Challenge) {
   const plainText = submissionPlainText(content);
   const analysis = submissionAnalysis(content);
   if (cap === "UNSAFE") {
     return "The answer contains an unsafe operational recommendation. A safe response must verify state, reduce blast radius, and include rollback before any disruptive change.";
   }
   if (cap === "MOSTLY_WRONG") {
-    return "The answer is not tied to usable evidence. It needs command-level verification, scenario-specific reasoning, and a defensible recommendation.";
+    const evidence = challenge?.disciplineSnapshot?.evidenceTypes?.join(", ") || "command-level verification, scenario-specific reasoning, and a defensible recommendation";
+    return `The answer is not tied to usable evidence. It needs ${evidence}.`;
   }
   if (cap === "INCOMPLETE") {
-    return "The answer is too incomplete to prove competence. Provide hypothesis, verification sequence, risks, rollback, and final recommendation.";
+    const sections = challenge?.disciplineSnapshot?.responseSections?.join(", ") || "hypothesis, verification sequence, risks, rollback, and final recommendation";
+    return `The answer is too incomplete to prove competence. Provide ${sections}.`;
   }
   if (analysis.attachmentCount > 0 && !/\b(screenshot|attached|attachment|shows|indicates|evidence)\b/i.test(plainText)) {
     return "The submission includes attached evidence, but the answer does not explain what the evidence proves. Reference each important image or file and tie it to a decision.";
