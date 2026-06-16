@@ -1,0 +1,59 @@
+import { getEnv } from "./env";
+
+const hostedFallbacks = [
+  "POSTGRES_URL_NON_POOLING",
+  "POSTGRES_PRISMA_URL",
+  "POSTGRES_URL",
+  "NEON_DATABASE_URL",
+];
+
+export function databaseUrl() {
+  const candidates = [
+    ["DATABASE_URL", getEnv("DATABASE_URL")],
+    ...hostedFallbacks.map((name) => [name, getEnv(name)] as const),
+  ] as const;
+
+  const hosted = candidates.find(([, value]) => value && !isLocalDatabaseUrl(value));
+  const local = candidates.find(([, value]) => value);
+
+  if (isHostedRuntime()) {
+    if (hosted?.[1]) return hosted[1];
+    throw new Error(
+      "Missing hosted database URL. Set DATABASE_URL to your Neon connection string in Vercel, or provide POSTGRES_URL_NON_POOLING / POSTGRES_PRISMA_URL.",
+    );
+  }
+
+  if (local?.[1]) return local[1];
+  throw new Error("Missing DATABASE_URL.");
+}
+
+export function runtimeDatabaseUrl() {
+  const candidates = [
+    ["DATABASE_URL", getEnv("DATABASE_URL")],
+    ["POSTGRES_PRISMA_URL", getEnv("POSTGRES_PRISMA_URL")],
+    ["POSTGRES_URL", getEnv("POSTGRES_URL")],
+    ["POSTGRES_URL_NON_POOLING", getEnv("POSTGRES_URL_NON_POOLING")],
+    ["NEON_DATABASE_URL", getEnv("NEON_DATABASE_URL")],
+  ] as const;
+
+  const hosted = candidates.find(([, value]) => value && !isLocalDatabaseUrl(value));
+  const local = candidates.find(([, value]) => value);
+
+  if (isHostedRuntime()) {
+    if (hosted?.[1]) return hosted[1];
+    throw new Error(
+      "Missing hosted database URL. Set DATABASE_URL to your Neon connection string in Vercel.",
+    );
+  }
+
+  if (local?.[1]) return local[1];
+  throw new Error("Missing DATABASE_URL.");
+}
+
+function isHostedRuntime() {
+  return process.env.VERCEL === "1" || process.env.CI === "1" || process.env.NODE_ENV === "production";
+}
+
+function isLocalDatabaseUrl(value: string) {
+  return /@(localhost|127\.0\.0\.1)(:|\/)/i.test(value) || /\/\/(localhost|127\.0\.0\.1)(:|\/)/i.test(value);
+}

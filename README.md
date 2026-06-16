@@ -254,6 +254,11 @@ Deployment caveats:
 
 - `pnpm build` runs `prisma generate` before `next build` so Vercel does not
   typecheck against a stale Prisma Client.
+- On Vercel, database resolution skips localhost URLs and accepts
+  `DATABASE_URL`, `POSTGRES_URL_NON_POOLING`, `POSTGRES_PRISMA_URL`,
+  `POSTGRES_URL`, or `NEON_DATABASE_URL`. Prefer setting `DATABASE_URL` to the
+  Neon pooled connection string and `POSTGRES_URL_NON_POOLING` to the Neon direct
+  connection string if Neon provides both.
 - If your Postgres provider requires SSL, include the provider-specific SSL
   option in `DATABASE_URL`, for example `?sslmode=require`.
 - Local upload storage is suitable for development. Vercel serverless storage is

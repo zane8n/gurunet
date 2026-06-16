@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
-import { requireRuntimeEnv } from "@/lib/runtime-env";
+import { runtimeDatabaseUrl } from "@/lib/database-url";
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
@@ -11,7 +11,7 @@ const globalForPrisma = globalThis as unknown as {
 const pool =
   globalForPrisma.prismaPool ??
   new Pool({
-    connectionString: requireRuntimeEnv("DATABASE_URL"),
+    connectionString: runtimeDatabaseUrl(),
   });
 
 const adapter = new PrismaPg(pool);
