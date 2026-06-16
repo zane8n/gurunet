@@ -42,10 +42,14 @@ function sessionExpiresAt() {
   return new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
 }
 
-export async function createSession(userId: string) {
+export async function pruneExpiredLocalSessions() {
   await prisma.localSession.deleteMany({
     where: { expiresAt: { lte: new Date() } },
   });
+}
+
+export async function createSession(userId: string) {
+  await pruneExpiredLocalSessions();
 
   const session = await prisma.localSession.create({
     data: {
@@ -83,13 +87,14 @@ export async function getCurrentUser() {
   const cookieStore = await cookies();
   const sessionId = cookieStore.get(SESSION_COOKIE)?.value;
   if (sessionId) {
-    const session = await prisma.localSession.findFirst({
-      where: { id: sessionId, expiresAt: { gt: new Date() } },
+    const session = await prisma.localSession.findUnique({
+      where: { id: sessionId },
       include: { user: true },
     });
-    if (session) {
+    if (session && session.expiresAt > new Date()) {
       return fromDbUser(session.user);
     }
+    if (session) await prisma.localSession.deleteMany({ where: { id: sessionId } });
   }
 
   return getCurrentAuthJsUser();

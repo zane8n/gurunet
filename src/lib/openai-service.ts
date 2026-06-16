@@ -8,6 +8,8 @@ import type { Challenge, Difficulty, Grade, Submission, User } from "@/lib/domai
 import { generateChallenge } from "@/lib/challenges";
 import { requireRuntimeEnv, getRuntimeEnv } from "@/lib/runtime-env";
 import { summarizeSubmissionForAi } from "@/lib/submission-content";
+import { prisma } from "@/lib/prisma";
+import { createId } from "@/lib/store";
 
 const challengeSchema = z.object({
   title: z.string().min(8).max(120),
@@ -39,6 +41,22 @@ const verificationSchema = z.object({
   question: z.string().min(20).max(260),
 });
 
+const disciplineNoticeSchema = z.object({
+  reply: z.string().min(40).max(500),
+});
+
+const examinerChatSchema = z.object({
+  reply: z.string().min(20).max(900),
+});
+
+type AiTask =
+  | "challenge_generation"
+  | "verification_question"
+  | "strict_critique"
+  | "notebook_summary"
+  | "discipline_notice"
+  | "examiner_chat";
+
 type ChallengeContext = {
   user: User;
   difficulty: Difficulty;
@@ -46,10 +64,26 @@ type ChallengeContext = {
   recovery: boolean;
   pressure: boolean;
   recentWeaknesses: string[];
+  track?: string;
+  topicFocus?: string;
+  durationMinutes?: number;
 };
 
 let client: OpenAI | null = null;
 let aiTemporarilyDisabled = false;
+
+const lecturerPolicy = [
+  "You are the adaptive GURUnet lecturer: a strict professor and senior network engineer.",
+  "Train practical network engineering, cybersecurity, Linux, scripting, troubleshooting, documentation, and automation skill.",
+  "Do not be flowery, falsely optimistic, or motivational without evidence.",
+  "Require operational reasoning, assumptions, trade-offs, command-level evidence, verification, risk, rollback, and scenario-specific judgment.",
+  "Avoid generic textbook tasks and generic grading.",
+  "Do not accuse the user of AI use from writing style alone. Test defensibility with verification when needed.",
+  "Respect discipline rules: deadline is 12:00 local time; late work is acknowledged but penalized by app rules; valid excuses include real work, travel, sickness, emergency, or unavoidable duty.",
+  "Excused misses earn no ERT and do not reduce PIS. Missed unexcused work reduces discipline and requires recovery.",
+  "Never reveal hidden challenge solutions before submission and grading.",
+  "Return only final structured JSON. Never include or store hidden reasoning.",
+].join(" ");
 
 function aiClient() {
   client ??= new OpenAI({
@@ -70,6 +104,7 @@ function reasoningModel() {
 function aiEnabled() {
   return (
     !aiTemporarilyDisabled &&
+    !fallbackOnlyMode() &&
     getRuntimeEnv("DEEPSEEK_API_KEY") &&
     getRuntimeEnv("DEEPSEEK_ENABLED") !== "false"
   );
@@ -83,14 +118,21 @@ type ChatCreateBody = ChatCompletionCreateParamsNonStreaming & {
 async function createJsonCompletion({
   model,
   messages,
+  task,
+  userId,
+  jobId,
   thinking = false,
   temperature,
 }: {
   model: string;
   messages: ChatCreateBody["messages"];
+  task: AiTask;
+  userId?: string;
+  jobId?: string;
   thinking?: boolean;
   temperature?: number;
 }): Promise<ChatCompletion> {
+  await assertAiBudget(task, userId);
   const body: ChatCreateBody = {
     model,
     messages,
@@ -111,7 +153,9 @@ async function createJsonCompletion({
     });
   }
 
-  return aiClient().chat.completions.create(body);
+  const response = await aiClient().chat.completions.create(body);
+  await recordAiUsage({ response, model, task, userId, jobId });
+  return response;
 }
 
 export async function generateAiChallenge(context: ChallengeContext) {
@@ -120,18 +164,19 @@ export async function generateAiChallenge(context: ChallengeContext) {
   try {
     const response = await createJsonCompletion({
       model: fastModel(),
+      task: "challenge_generation",
+      userId: context.user.id,
       temperature: 0.7,
       messages: [
         {
           role: "system",
-          content:
-            "You create strict practical network engineering challenges for GURUnet. Return only valid JSON. Do not include markdown. The challenge must require operational reasoning, command-level evidence, assumptions, risks, rollback, and a hidden solution. Avoid generic textbook prompts.",
+          content: `${lecturerPolicy} You create strict practical challenges for GURUnet. Return only valid JSON. Do not include markdown.`,
         },
         {
           role: "user",
           content: JSON.stringify({
             rubric:
-              "Daily challenge for network engineering, cybersecurity, Linux, scripting, troubleshooting, documentation, and automation. Include title, difficulty, scenario, objective, constraints, allowed tools, expected answer format, submission requirements, deadline at noon handled by app, hidden solution, and anti-generic requirement.",
+              "Create one adaptive daily challenge. Formats may include troubleshooting, lab task, CTF-style analysis, config/design review, Linux/network automation, security investigation, packet/log analysis, real-world engineering decision, pressure challenge, or recovery challenge. Include realistic constraints, partial information, misleading symptoms, logs/config/output where useful. Deadline at noon is handled by app. Do not reveal solution.",
             user: {
               pisScore: context.user.pisScore,
               streak: context.user.currentStreak,
@@ -140,6 +185,9 @@ export async function generateAiChallenge(context: ChallengeContext) {
               recoveryRequired: context.recovery,
               pressureChallenge: context.pressure,
               recentWeaknesses: context.recentWeaknesses,
+              track: context.track ?? "networking",
+              topicFocus: context.topicFocus,
+              durationMinutes: context.durationMinutes,
             },
             outputShape: {
               title: "string",
@@ -176,12 +224,13 @@ export async function generateVerificationQuestion(challenge: Challenge, submiss
   try {
     const response = await createJsonCompletion({
       model: reasoningModel(),
+      task: "verification_question",
+      userId: challenge.userId,
       thinking: true,
       messages: [
         {
           role: "system",
-          content:
-            "Return only JSON. Write one short verification question that tests whether the user understands their own network troubleshooting answer. Do not reveal the solution. Do not include reasoning in the JSON.",
+          content: `${lecturerPolicy} Return only JSON. Write one short verification question that tests whether the user understands their own answer. Do not reveal the solution.`,
         },
         {
           role: "user",
@@ -213,12 +262,13 @@ export async function generateAiCritique(challenge: Challenge, submission: Submi
   try {
     const response = await createJsonCompletion({
       model: reasoningModel(),
+      task: "strict_critique",
+      userId: grade.userId,
       thinking: true,
       messages: [
         {
           role: "system",
-          content:
-            "You are a strict senior network engineer and professor. Return only JSON. Do not change numeric scores, final score, PIS, ERT, caps, or penalties. Provide direct correction, contention notes, and one improvement target. Do not include reasoning in the JSON.",
+          content: `${lecturerPolicy} Return only JSON. Do not change numeric scores, final score, PIS, ERT, caps, or penalties. Provide direct correction, contention notes, and one improvement target.`,
         },
         {
           role: "user",
@@ -284,12 +334,13 @@ async function generateNotebookSummary(
   try {
     const response = await createJsonCompletion({
       model: fastModel(),
+      task: "notebook_summary",
+      userId: grade.userId,
       temperature: 0.3,
       messages: [
         {
           role: "system",
-          content:
-            "Return only valid JSON. Write concise notebook-ready learning material for a technical training log. Do not include hidden reasoning.",
+          content: `${lecturerPolicy} Return only valid JSON. Write concise notebook-ready learning material for a technical training log.`,
         },
         {
           role: "user",
@@ -323,6 +374,166 @@ async function generateNotebookSummary(
     logAiFallback("DeepSeek notebook summary failed; using deterministic notebook", error);
     return null;
   }
+}
+
+export async function generateStandaloneNotebookSummary(
+  challenge: Challenge,
+  submission: Submission,
+  grade: Grade,
+) {
+  return generateNotebookSummary(challenge, submission, grade, {
+    correction: grade.correction,
+    contentionNotes: grade.contentionNotes,
+    nextImprovementTarget: grade.nextImprovementTarget,
+  });
+}
+
+export async function generateDisciplineNoticeReply(input: {
+  user: User;
+  challenge: Challenge;
+  kind: "late" | "excuse";
+  reason: string;
+  accepted: boolean;
+}) {
+  if (!aiEnabled()) return fallbackDisciplineReply(input);
+
+  try {
+    const response = await createJsonCompletion({
+      model: fastModel(),
+      task: "discipline_notice",
+      userId: input.user.id,
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content: `${lecturerPolicy} Return only JSON. Acknowledge the user's discipline notice like a firm lecturer. Do not change scoring rules. Do not over-comfort.`,
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            notice: {
+              kind: input.kind,
+              reason: input.reason,
+              accepted: input.accepted,
+            },
+            challenge: {
+              title: input.challenge.title,
+              topic: input.challenge.topic,
+              deadlineAt: input.challenge.deadlineAt,
+              status: input.challenge.status,
+            },
+            user: {
+              pisScore: input.user.pisScore,
+              streak: input.user.currentStreak,
+            },
+            rules:
+              "Late notice is acknowledged but late penalties still apply on submission. Excuse is accepted only for clear real work, travel, sickness, emergency, or unavoidable duty; accepted excuse marks challenge Excused, earns no ERT, and avoids PIS loss.",
+            outputShape: { reply: "string" },
+          }),
+        },
+      ],
+    });
+    const content = response.choices[0]?.message.content;
+    if (!content) throw new Error("Empty discipline notice response");
+    return disciplineNoticeSchema.parse(JSON.parse(content)).reply;
+  } catch (error) {
+    logAiFallback("DeepSeek discipline notice failed; using deterministic reply", error);
+    return fallbackDisciplineReply(input);
+  }
+}
+
+export async function generateExaminerChatReply(input: {
+  user: User;
+  challenge: Challenge;
+  message: string;
+  recentMessages: { role: string; content: string }[];
+  appliedActions: { type: string; summary: string }[];
+  settings: {
+    track: string;
+    durationMinutes: number;
+    difficultyFloor: string;
+    topicFocus: string;
+    recoveryMode: boolean;
+    teamMode: boolean;
+  };
+}) {
+  if (!aiEnabled()) return fallbackExaminerReply(input);
+
+  try {
+    const response = await createJsonCompletion({
+      model: fastModel(),
+      task: "examiner_chat",
+      userId: input.user.id,
+      temperature: 0.25,
+      messages: [
+        {
+          role: "system",
+          content: `${lecturerPolicy} You are the user's examiner chat. You may answer questions, clarify rules, acknowledge late/excuse/context, and explain applied behavior changes. The backend has already applied any allowed actions; do not claim actions not listed. Return only JSON.`,
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            currentChallenge: {
+              title: input.challenge.title,
+              topic: input.challenge.topic,
+              status: input.challenge.status,
+              deadlineAt: input.challenge.deadlineAt,
+            },
+            user: {
+              pisScore: input.user.pisScore,
+              ertBalance: input.user.ertBalance,
+              currentStreak: input.user.currentStreak,
+            },
+            settings: input.settings,
+            recentMessages: input.recentMessages.slice(-8),
+            userMessage: input.message,
+            appliedActions: input.appliedActions,
+            responseRules: [
+              "Be conversational but direct.",
+              "If the user asks for rule clarification, explain the active rule.",
+              "If the user states future preferences, mention what changed if an action was applied.",
+              "If no action was applied, explain what you need from the user.",
+              "Do not reveal hidden solution details.",
+            ],
+            outputShape: { reply: "string" },
+          }),
+        },
+      ],
+    });
+    const content = response.choices[0]?.message.content;
+    if (!content) throw new Error("Empty examiner response");
+    return examinerChatSchema.parse(JSON.parse(content)).reply;
+  } catch (error) {
+    logAiFallback("DeepSeek examiner chat failed; using deterministic reply", error);
+    return fallbackExaminerReply(input);
+  }
+}
+
+function fallbackExaminerReply(input: {
+  appliedActions: { type: string; summary: string }[];
+  message: string;
+}) {
+  if (input.appliedActions.length > 0) {
+    return `Recorded. ${input.appliedActions.map((action) => action.summary).join(" ")}`;
+  }
+  if (/\?/.test(input.message)) {
+    return "I can clarify the active challenge rules, deadline behavior, grading expectations, or adjust future challenge settings when you state a clear preference.";
+  }
+  return "Message received. If you want me to adjust the system, state the change plainly: track, duration, difficulty floor, recovery mode, team mode, late notice, or excuse reason.";
+}
+
+function fallbackDisciplineReply(input: {
+  kind: "late" | "excuse";
+  reason: string;
+  accepted: boolean;
+}) {
+  if (input.kind === "late") {
+    return "Late notice recorded. Submit when you can, but the deadline rules still apply: late penalties affect score, PIS growth, and ERT eligibility.";
+  }
+  if (input.accepted) {
+    return "Excuse accepted. This challenge is marked Excused: no ERT is earned, but PIS is not reduced and the missed-day penalty is not applied.";
+  }
+  return "Excuse not accepted from the information provided. State a concrete unavoidable reason such as real work, travel, sickness, emergency, or duty if this should be excused.";
 }
 
 export function templateFallbackChallenge(
@@ -362,4 +573,94 @@ function logAiFallback(message: string, error: unknown) {
   }
 
   console.warn(message, error);
+}
+
+async function assertAiBudget(task: AiTask, userId?: string) {
+  if (fallbackOnlyMode()) throw new Error("AI fallback-only mode is enabled");
+
+  const start = startOfToday();
+  const [dailyCalls, userCalls, spend] = await Promise.all([
+    prisma.aiUsage.count({ where: { createdAt: { gte: start } } }),
+    userId
+      ? prisma.aiUsage.count({ where: { userId, createdAt: { gte: start } } })
+      : Promise.resolve(0),
+    prisma.aiUsage.aggregate({
+      where: { createdAt: { gte: start } },
+      _sum: { estimatedCostUsd: true },
+    }),
+  ]);
+
+  const dailyLimit = numberEnv("AI_DAILY_CALL_LIMIT");
+  const userLimit = numberEnv("AI_USER_DAILY_CALL_LIMIT");
+  const spendCap = numberEnv("AI_DAILY_SPEND_CAP_USD");
+
+  if (dailyLimit !== null && dailyCalls >= dailyLimit) {
+    throw new Error(`AI daily call limit reached before ${task}`);
+  }
+  if (userId && userLimit !== null && userCalls >= userLimit) {
+    throw new Error(`AI user daily call limit reached before ${task}`);
+  }
+  if (spendCap !== null && (spend._sum.estimatedCostUsd ?? 0) >= spendCap) {
+    throw new Error(`AI daily spend cap reached before ${task}`);
+  }
+}
+
+async function recordAiUsage({
+  response,
+  model,
+  task,
+  userId,
+  jobId,
+}: {
+  response: ChatCompletion;
+  model: string;
+  task: AiTask;
+  userId?: string;
+  jobId?: string;
+}) {
+  const usage = response.usage;
+  const promptTokens = usage?.prompt_tokens ?? 0;
+  const completionTokens = usage?.completion_tokens ?? 0;
+  const totalTokens = usage?.total_tokens ?? promptTokens + completionTokens;
+  await prisma.aiUsage.create({
+    data: {
+      id: createId("aiu"),
+      userId,
+      jobId,
+      type: task,
+      model,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      estimatedCostUsd: estimateCostUsd(model, promptTokens, completionTokens),
+    },
+  });
+}
+
+function estimateCostUsd(model: string, promptTokens: number, completionTokens: number) {
+  const isReasoning = model === reasoningModel() || model.includes("pro");
+  const inputPerMillion = isReasoning
+    ? numberEnv("DEEPSEEK_REASONING_INPUT_USD_PER_MTOK") ?? 0.435
+    : numberEnv("DEEPSEEK_FAST_INPUT_USD_PER_MTOK") ?? 0.14;
+  const outputPerMillion = isReasoning
+    ? numberEnv("DEEPSEEK_REASONING_OUTPUT_USD_PER_MTOK") ?? 0.87
+    : numberEnv("DEEPSEEK_FAST_OUTPUT_USD_PER_MTOK") ?? 0.28;
+  return Number(((promptTokens / 1_000_000) * inputPerMillion + (completionTokens / 1_000_000) * outputPerMillion).toFixed(6));
+}
+
+function numberEnv(name: string) {
+  const value = getRuntimeEnv(name);
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function fallbackOnlyMode() {
+  return getRuntimeEnv("AI_FALLBACK_ONLY") === "true" || getRuntimeEnv("DEEPSEEK_FALLBACK_ONLY") === "true";
+}
+
+function startOfToday() {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  return date;
 }

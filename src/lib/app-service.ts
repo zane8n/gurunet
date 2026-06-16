@@ -1,12 +1,18 @@
 import { z } from "zod";
 import type {
   DisciplineRecord,
+  Difficulty,
   MarketplaceChallenge,
   User,
 } from "@/lib/domain";
 import { difficultyForPis } from "@/lib/challenges";
 import { gradeSubmission, createNotebookEntry, needsVerification } from "@/lib/scoring";
-import { generateVerificationQuestion, templateFallbackChallenge } from "@/lib/openai-service";
+import {
+  generateDisciplineNoticeReply,
+  generateExaminerChatReply,
+  generateVerificationQuestion,
+  templateFallbackChallenge,
+} from "@/lib/openai-service";
 import { createId } from "@/lib/store";
 import { prisma } from "@/lib/prisma";
 import {
@@ -55,6 +61,46 @@ export const enrollmentSchema = z.object({
   challengeId: z.string().trim().min(2).max(120),
 });
 
+export const challengeNoticeSchema = z.object({
+  kind: z.enum(["late", "excuse"]),
+  reason: z.string().trim().min(6).max(800),
+});
+
+const trackSchema = z.enum([
+  "networking",
+  "linux",
+  "security",
+  "automation",
+  "cloud",
+  "incident_command",
+  "documentation",
+]);
+
+export const challengeSettingsSchema = z.object({
+  track: trackSchema,
+  durationMinutes: z.coerce.number().int().min(15).max(180),
+  difficultyFloor: z.enum(["Guided", "Normal", "Advanced", "Production", "Expert"]),
+  topicFocus: z.string().trim().max(120).optional(),
+  recoveryMode: z.boolean().optional(),
+  teamMode: z.boolean().optional(),
+});
+
+export const cohortCreateSchema = z.object({
+  name: z.string().trim().min(3).max(80),
+  track: trackSchema,
+  difficulty: z.enum(["Guided", "Normal", "Advanced", "Production", "Expert"]),
+  completionWindowHours: z.coerce.number().int().min(4).max(168),
+});
+
+export const cohortJoinSchema = z.object({
+  inviteCode: z.string().trim().min(4).max(32).transform((value) => value.toUpperCase()),
+});
+
+export const examinerChatSchema = z.object({
+  message: z.string().trim().min(1).max(4000),
+  challengeId: z.string().trim().min(2).max(120).optional(),
+});
+
 export async function getDashboard(user: User) {
   await ensureMissedPreviousChallenge(user);
   const today = await getOrCreateTodayChallenge(user);
@@ -63,7 +109,7 @@ export async function getDashboard(user: User) {
   const dbUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
   const currentUser = fromDbUser(dbUser);
   const timezone = getUserTimezone(currentUser.timezone);
-  const [submissions, grades, notebookEntries, redemptions, challenges, socialData] =
+  const [submissions, grades, notebookEntries, redemptions, challenges, todayNotice, challengeSettings, cohorts, socialData] =
     await Promise.all([
       prisma.submission.findMany({
         where: { userId: user.id },
@@ -85,6 +131,9 @@ export async function getDashboard(user: User) {
         orderBy: { createdAt: "desc" },
         take: 8,
       }),
+      findLatestChallengeNotice(user.id, today.id),
+      getChallengeSettings(currentUser),
+      getCohortSnapshot(currentUser),
       getSocialData(user.id),
     ]);
 
@@ -98,6 +147,18 @@ export async function getDashboard(user: User) {
   return {
     user: currentUser,
     today,
+    todayNotice: todayNotice
+      ? {
+          id: todayNotice.id,
+          kind: todayNotice.kind,
+          reason: todayNotice.reason,
+          accepted: todayNotice.accepted,
+          reply: todayNotice.reply,
+          createdAt: todayNotice.createdAt.toISOString(),
+        }
+      : null,
+    challengeSettings,
+    cohorts,
     nextChallengeUnlockAt: nextChallengeUnlockIso(today.dateKey, timezone),
     todaySubmission,
     todayGrade: todayGradeDb ? fromDbGrade(todayGradeDb) : null,
@@ -147,12 +208,14 @@ export async function getOrCreateTodayChallenge(user: User) {
       select: { nextImprovementTarget: true, createdAt: true },
     }),
   ]);
+  const settings = await getChallengeSettings(currentUser);
 
   const challenge = createDailyChallenge(currentUser, {
     dateKey: today,
-    recovery: needsRecovery(records.map(fromDbDisciplineRecord), currentUser),
+    recovery: settings.recoveryMode || needsRecovery(records.map(fromDbDisciplineRecord), currentUser),
     pressure: false,
     recentWeaknesses: recentGrades.map((grade) => grade.nextImprovementTarget),
+    settings,
   });
 
   const created = await prisma.challenge.create({
@@ -184,6 +247,9 @@ export async function getOrCreateTodayChallenge(user: User) {
     challengeId: created.id,
     dateKey: today,
     difficulty: difficultyForPis(currentUser.pisScore),
+    track: settings.track,
+    topicFocus: settings.topicFocus,
+    durationMinutes: settings.durationMinutes,
   });
 
   return fromDbChallenge(created);
@@ -264,6 +330,9 @@ export async function submitChallenge(
     where: { id: challengeId, userId: user.id },
   });
   if (!challenge) throw new Response("Challenge not found", { status: 404 });
+  if (challenge.status === "Excused") {
+    throw new Response("This challenge has been excused. Generate or wait for the next challenge instead.", { status: 409 });
+  }
   const existing = await prisma.submission.findFirst({ where: { challengeId } });
   if (existing) throw new Response("Challenge already submitted", { status: 409 });
 
@@ -335,6 +404,295 @@ export async function submitChallenge(
   }
 
   return submissionWithAttachments({ ...submission, attachments });
+}
+
+export async function recordChallengeNotice(
+  user: User,
+  challengeId: string,
+  input: z.infer<typeof challengeNoticeSchema>,
+) {
+  const challenge = await prisma.challenge.findFirst({
+    where: { id: challengeId, userId: user.id },
+  });
+  if (!challenge) throw new Response("Challenge not found", { status: 404 });
+  const domainChallenge = fromDbChallenge(challenge);
+  const accepted = input.kind === "excuse" && isValidExcuseReason(input.reason);
+  const reply = await generateDisciplineNoticeReply({
+    user,
+    challenge: domainChallenge,
+    kind: input.kind,
+    reason: input.reason,
+    accepted,
+  });
+
+  const notice = await prisma.$transaction(async (tx) => {
+    if (accepted && challenge.status !== "Submitted" && challenge.status !== "Late") {
+      await tx.challenge.update({
+        where: { id: challenge.id },
+        data: { status: "Excused" },
+      });
+    }
+    return tx.challengeNotice.create({
+      data: {
+        id: createId("ntc"),
+        challengeId: challenge.id,
+        userId: user.id,
+        kind: input.kind,
+        reason: input.reason,
+        accepted,
+        reply,
+      },
+    });
+  });
+
+  return {
+    id: notice.id,
+    kind: notice.kind,
+    reason: notice.reason,
+    accepted: notice.accepted,
+    reply: notice.reply,
+    createdAt: notice.createdAt.toISOString(),
+  };
+}
+
+export async function getExaminerMessages(user: User) {
+  const delegate = (prisma as unknown as {
+    examinerMessage?: {
+      findMany: (args: {
+        where: { userId: string };
+        orderBy: { createdAt: "asc" };
+        take: number;
+      }) => Promise<
+        {
+          id: string;
+          role: string;
+          content: string;
+          actions: unknown;
+          createdAt: Date;
+        }[]
+      >;
+    };
+  }).examinerMessage;
+  if (!delegate) return [];
+  try {
+    const rows = await delegate.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "asc" },
+      take: 40,
+    });
+    return rows.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      actions: message.actions,
+      createdAt: message.createdAt.toISOString(),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function sendExaminerMessage(
+  user: User,
+  input: z.infer<typeof examinerChatSchema>,
+) {
+  const challenge =
+    input.challengeId
+      ? await prisma.challenge.findFirst({ where: { id: input.challengeId, userId: user.id } })
+      : await prisma.challenge.findFirst({
+          where: { userId: user.id },
+          orderBy: { createdAt: "desc" },
+        });
+  if (!challenge) throw new Response("Challenge not found", { status: 404 });
+
+  const currentUser = fromDbUser(await prisma.user.findUniqueOrThrow({ where: { id: user.id } }));
+  const settings = await getChallengeSettings(currentUser);
+  const recentMessages = await getExaminerMessages(currentUser);
+  const appliedActions = await applyExaminerActions(currentUser, fromDbChallenge(challenge), input.message, settings);
+  const reply = await generateExaminerChatReply({
+    user: currentUser,
+    challenge: fromDbChallenge(challenge),
+    message: input.message,
+    recentMessages: recentMessages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+    appliedActions,
+    settings: await getChallengeSettings(currentUser),
+  });
+
+  const delegate = (prisma as unknown as {
+    examinerMessage?: {
+      create: (args: {
+        data: {
+          id: string;
+          userId: string;
+          challengeId: string;
+          role: string;
+          content: string;
+          actions?: unknown;
+        };
+      }) => Promise<{
+        id: string;
+        role: string;
+        content: string;
+        actions: unknown;
+        createdAt: Date;
+      }>;
+    };
+  }).examinerMessage;
+  if (!delegate) {
+    return {
+      reply: {
+        id: createId("xmsg"),
+        role: "assistant",
+        content: reply,
+        actions: appliedActions,
+        createdAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  await delegate.create({
+    data: {
+      id: createId("xmsg"),
+      userId: user.id,
+      challengeId: challenge.id,
+      role: "user",
+      content: input.message,
+      actions: appliedActions,
+    },
+  });
+  const assistant = await delegate.create({
+    data: {
+      id: createId("xmsg"),
+      userId: user.id,
+      challengeId: challenge.id,
+      role: "assistant",
+      content: reply,
+      actions: appliedActions,
+    },
+  });
+
+  return {
+    reply: {
+      id: assistant.id,
+      role: assistant.role,
+      content: assistant.content,
+      actions: assistant.actions,
+      createdAt: assistant.createdAt.toISOString(),
+    },
+  };
+}
+
+async function applyExaminerActions(
+  user: User,
+  challenge: ReturnType<typeof fromDbChallenge>,
+  message: string,
+  settings: Awaited<ReturnType<typeof getChallengeSettings>>,
+) {
+  const actions: { type: string; summary: string }[] = [];
+  const lower = message.toLowerCase();
+  const nextSettings = { ...settings };
+  let settingsChanged = false;
+
+  const track = inferTrack(lower);
+  if (track) {
+    nextSettings.track = track;
+    settingsChanged = true;
+    actions.push({ type: "settings.track", summary: `Future challenge track set to ${trackLabel(track)}.` });
+  }
+
+  const duration = lower.match(/\b(\d{2,3})\s*(min|minute|minutes)\b/);
+  if (duration) {
+    nextSettings.durationMinutes = Math.max(15, Math.min(180, Number(duration[1])));
+    settingsChanged = true;
+    actions.push({ type: "settings.duration", summary: `Future challenge duration set to ${nextSettings.durationMinutes} minutes.` });
+  }
+
+  const difficulty = inferDifficulty(message);
+  if (difficulty) {
+    nextSettings.difficultyFloor = difficulty;
+    settingsChanged = true;
+    actions.push({ type: "settings.difficultyFloor", summary: `Difficulty floor set to ${difficulty}.` });
+  }
+
+  if (/\b(recovery mode|recovery challenge|need recovery)\b/i.test(message)) {
+    nextSettings.recoveryMode = true;
+    settingsChanged = true;
+    actions.push({ type: "settings.recoveryMode", summary: "Recovery mode enabled for future challenge generation." });
+  }
+  if (/\b(team mode|cohort mode|group mode)\b/i.test(message)) {
+    nextSettings.teamMode = true;
+    settingsChanged = true;
+    actions.push({ type: "settings.teamMode", summary: "Team/cohort mode enabled." });
+  }
+
+  if (settingsChanged) {
+    await updateChallengeSettings(user, challengeSettingsSchema.parse(nextSettings));
+  }
+
+  if (/\b(late|delay|delayed|after deadline|cannot submit on time|won't submit on time|will submit later)\b/i.test(message)) {
+    const notice = await recordChallengeNotice(user, challenge.id, {
+      kind: "late",
+      reason: message,
+    });
+    actions.push({ type: "late_notice", summary: notice.reply });
+  } else if (/\b(excuse|excused|sick|ill|hospital|doctor|emergency|travel|flight|work outage|real work|unavoidable|duty|load shedding|power outage)\b/i.test(message)) {
+    const notice = await recordChallengeNotice(user, challenge.id, {
+      kind: "excuse",
+      reason: message,
+    });
+    actions.push({ type: notice.accepted ? "excuse_accepted" : "excuse_reviewed", summary: notice.reply });
+  }
+
+  return actions;
+}
+
+function inferTrack(lower: string) {
+  if (/\b(linux|systemd|journalctl|bash|zsh)\b/.test(lower)) return "linux";
+  if (/\b(security|cyber|incident response|hardening|auth|forensic)\b/.test(lower)) return "security";
+  if (/\b(automation|script|python|ansible|terraform)\b/.test(lower)) return "automation";
+  if (/\b(cloud|aws|azure|gcp|vpc|iam)\b/.test(lower)) return "cloud";
+  if (/\b(incident command|commander|war room|coordination)\b/.test(lower)) return "incident_command";
+  if (/\b(documentation|runbook|postmortem|report)\b/.test(lower)) return "documentation";
+  if (/\b(network|networking|routing|switching|ospf|bgp|vlan|stp|firewall)\b/.test(lower)) return "networking";
+  return null;
+}
+
+function inferDifficulty(message: string): Difficulty | null {
+  for (const item of ["Guided", "Normal", "Advanced", "Production", "Expert"] as const) {
+    if (new RegExp(`\\b${item}\\b`, "i").test(message)) return item;
+  }
+  return null;
+}
+
+async function findLatestChallengeNotice(userId: string, challengeId: string) {
+  const delegate = (prisma as unknown as {
+    challengeNotice?: {
+      findFirst: (args: {
+        where: { userId: string; challengeId: string };
+        orderBy: { createdAt: "desc" };
+      }) => Promise<{
+        id: string;
+        kind: string;
+        reason: string;
+        accepted: boolean;
+        reply: string;
+        createdAt: Date;
+      } | null>;
+    };
+  }).challengeNotice;
+  if (!delegate) return null;
+
+  try {
+    return await delegate.findFirst({
+      where: { userId, challengeId },
+      orderBy: { createdAt: "desc" },
+    });
+  } catch {
+    return null;
+  }
 }
 
 export async function answerVerification(user: User, submissionId: string, answer: string) {
@@ -450,12 +808,21 @@ export async function gradeExistingSubmission(user: User, submissionId: string) 
     return dbGrade;
   });
 
-  await enqueueAiJob("StrictCritique", `critique:${submission.id}`, {
+  await enqueueAiJob("NotebookSummary", `notebook:${submission.id}`, {
     submissionId: submission.id,
     challengeId: challenge.id,
     gradeId: created.id,
     userId: user.id,
   });
+
+  if (shouldEscalateToStrictCritique(grade, domainSubmission.content)) {
+    await enqueueAiJob("StrictCritique", `critique:${submission.id}`, {
+      submissionId: submission.id,
+      challengeId: challenge.id,
+      gradeId: created.id,
+      userId: user.id,
+    });
+  }
 
   return fromDbGrade(created);
 }
@@ -560,6 +927,85 @@ export async function enrollMarketplaceChallenge(
   });
 }
 
+export async function updateChallengeSettings(
+  user: User,
+  input: z.infer<typeof challengeSettingsSchema>,
+) {
+  const settings = await prisma.userChallengeSettings.upsert({
+    where: { userId: user.id },
+    update: {
+      track: input.track,
+      durationMinutes: input.durationMinutes,
+      difficultyFloor: input.difficultyFloor,
+      topicFocus: input.topicFocus || null,
+      recoveryMode: input.recoveryMode ?? false,
+      teamMode: input.teamMode ?? false,
+    },
+    create: {
+      userId: user.id,
+      track: input.track,
+      durationMinutes: input.durationMinutes,
+      difficultyFloor: input.difficultyFloor,
+      topicFocus: input.topicFocus || null,
+      recoveryMode: input.recoveryMode ?? false,
+      teamMode: input.teamMode ?? false,
+    },
+  });
+  return mapChallengeSettings(settings);
+}
+
+export async function createCohortChallenge(
+  user: User,
+  input: z.infer<typeof cohortCreateSchema>,
+) {
+  const cohort = await prisma.$transaction(async (tx) => {
+    const created = await tx.cohortChallenge.create({
+      data: {
+        id: createId("coh"),
+        ownerId: user.id,
+        name: input.name,
+        track: input.track,
+        difficulty: input.difficulty,
+        completionWindowHours: input.completionWindowHours,
+        inviteCode: createInviteCode(),
+      },
+    });
+    await tx.cohortEnrollment.create({
+      data: {
+        id: createId("cen"),
+        cohortChallengeId: created.id,
+        userId: user.id,
+      },
+    });
+    return created;
+  });
+  return cohort;
+}
+
+export async function joinCohortChallenge(
+  user: User,
+  input: z.infer<typeof cohortJoinSchema>,
+) {
+  const cohort = await prisma.cohortChallenge.findUnique({
+    where: { inviteCode: input.inviteCode },
+  });
+  if (!cohort) throw new Response("Invite code not found", { status: 404 });
+  return prisma.cohortEnrollment.upsert({
+    where: {
+      cohortChallengeId_userId: {
+        cohortChallengeId: cohort.id,
+        userId: user.id,
+      },
+    },
+    update: {},
+    create: {
+      id: createId("cen"),
+      cohortChallengeId: cohort.id,
+      userId: user.id,
+    },
+  });
+}
+
 function needsRecovery(records: DisciplineRecord[], user: User) {
   return records.some(
     (record) =>
@@ -575,9 +1021,247 @@ function createDailyChallenge(
     recovery: boolean;
     pressure: boolean;
     recentWeaknesses: string[];
+    settings?: Awaited<ReturnType<typeof getChallengeSettings>>;
   },
 ) {
-  return templateFallbackChallenge(user, options.recovery, options.pressure, options.dateKey);
+  const challenge = templateFallbackChallenge(user, options.recovery, options.pressure, options.dateKey);
+  if (!options.settings) return challenge;
+  return {
+    ...challenge,
+    topic: trackLabel(options.settings.track),
+    difficulty: higherDifficulty(challenge.difficulty, options.settings.difficultyFloor),
+    objective: options.settings.topicFocus
+      ? `${challenge.objective} Focus the work on: ${options.settings.topicFocus}.`
+      : challenge.objective,
+    constraints: [
+      ...challenge.constraints,
+      `Target completion time: ${options.settings.durationMinutes} minutes.`,
+    ],
+  };
+}
+
+function isValidExcuseReason(reason: string) {
+  return /\b(work|shift|outage|incident|travel|flight|sick|sickness|ill|hospital|doctor|emergency|family emergency|duty|unavoidable|power outage|load shedding|bereavement)\b/i.test(
+    reason,
+  );
+}
+
+function shouldEscalateToStrictCritique(
+  grade: ReturnType<typeof gradeSubmission>,
+  content: string,
+) {
+  if (process.env.AI_STRICT_CRITIQUE_ALWAYS === "true") return true;
+  if (grade.technicalCap !== "NONE") return true;
+  if (grade.finalScore >= 9 && grade.finalScore <= 17) return true;
+  if (grade.latePenalty > 0) return true;
+  if (grade.contentionNotes.length > 0) return true;
+  if (/\b(ai|chatgpt|copilot|generated)\b/i.test(content)) return true;
+  return false;
+}
+
+async function getChallengeSettings(user: User) {
+  const fallback = defaultChallengeSettings(user);
+  const delegate = (prisma as unknown as {
+    userChallengeSettings?: {
+      upsert: (args: {
+        where: { userId: string };
+        update: Record<string, never>;
+        create: {
+          userId: string;
+          track: string;
+          durationMinutes: number;
+          difficultyFloor: Difficulty;
+        };
+      }) => Promise<{
+        track: string;
+        durationMinutes: number;
+        difficultyFloor: string;
+        topicFocus: string | null;
+        recoveryMode: boolean;
+        teamMode: boolean;
+      }>;
+    };
+  }).userChallengeSettings;
+  if (!delegate) return fallback;
+  try {
+    const settings = await delegate.upsert({
+      where: { userId: user.id },
+      update: {},
+      create: {
+        userId: user.id,
+        track: fallback.track,
+        durationMinutes: fallback.durationMinutes,
+        difficultyFloor: fallback.difficultyFloor as Difficulty,
+      },
+    });
+    return mapChallengeSettings(settings);
+  } catch {
+    return fallback;
+  }
+}
+
+async function getCohortSnapshot(user: User) {
+  const cohortDelegate = (prisma as unknown as { cohortChallenge?: unknown }).cohortChallenge;
+  const enrollmentDelegate = (prisma as unknown as { cohortEnrollment?: unknown }).cohortEnrollment;
+  if (!cohortDelegate || !enrollmentDelegate) return [];
+
+  type CohortWithEnrollments = {
+    id: string;
+    ownerId: string;
+    name: string;
+    track: string;
+    difficulty: string;
+    completionWindowHours: number;
+    inviteCode: string;
+    createdAt: Date;
+    enrollments: { userId: string }[];
+  };
+  let owned: CohortWithEnrollments[];
+  let joined: { cohortChallenge: CohortWithEnrollments }[];
+  let allUsers: Awaited<ReturnType<typeof prisma.user.findMany>>;
+  let grades: Awaited<ReturnType<typeof prisma.grade.findMany>>;
+  try {
+    [owned, joined, allUsers, grades] = await Promise.all([
+      prisma.cohortChallenge.findMany({
+        where: { ownerId: user.id },
+        include: { enrollments: true },
+        orderBy: { createdAt: "desc" },
+        take: 4,
+      }),
+      prisma.cohortEnrollment.findMany({
+        where: { userId: user.id },
+        include: {
+          cohortChallenge: {
+            include: { enrollments: true },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 6,
+      }),
+      prisma.user.findMany(),
+      prisma.grade.findMany({ orderBy: { createdAt: "desc" } }),
+    ]);
+  } catch {
+    return [];
+  }
+  const userMap = new Map(allUsers.map((item) => [item.id, fromDbUser(item)]));
+  const latestGradeByUser = new Map<string, number>();
+  for (const grade of grades) {
+    if (!latestGradeByUser.has(grade.userId)) latestGradeByUser.set(grade.userId, grade.finalScore);
+  }
+  const byId = new Map<string, ReturnType<typeof mapCohort>>();
+  for (const cohort of owned) byId.set(cohort.id, mapCohort(cohort, userMap, latestGradeByUser, user.id));
+  for (const enrollment of joined) {
+    byId.set(
+      enrollment.cohortChallenge.id,
+      mapCohort(enrollment.cohortChallenge, userMap, latestGradeByUser, user.id),
+    );
+  }
+  return Array.from(byId.values()).slice(0, 6);
+}
+
+function defaultChallengeSettings(user: User) {
+  return {
+    track: "networking",
+    durationMinutes: 45,
+    difficultyFloor: difficultyForPis(user.pisScore),
+    topicFocus: "",
+    recoveryMode: false,
+    teamMode: false,
+  };
+}
+
+function mapChallengeSettings(settings: {
+  track: string;
+  durationMinutes: number;
+  difficultyFloor: string;
+  topicFocus: string | null;
+  recoveryMode: boolean;
+  teamMode: boolean;
+}) {
+  return {
+    track: settings.track,
+    durationMinutes: settings.durationMinutes,
+    difficultyFloor: settings.difficultyFloor,
+    topicFocus: settings.topicFocus ?? "",
+    recoveryMode: settings.recoveryMode,
+    teamMode: settings.teamMode,
+  };
+}
+
+function mapCohort(
+  cohort: {
+    id: string;
+    ownerId: string;
+    name: string;
+    track: string;
+    difficulty: string;
+    completionWindowHours: number;
+    inviteCode: string;
+    createdAt: Date;
+    enrollments: { userId: string }[];
+  },
+  userMap: Map<string, User>,
+  latestGradeByUser: Map<string, number>,
+  viewerId: string,
+) {
+  const leaderboard = cohort.enrollments
+    .map((enrollment) => {
+      const member = userMap.get(enrollment.userId);
+      return member
+        ? {
+            id: member.id,
+            name: member.name,
+            pisScore: member.pisScore,
+            currentStreak: member.currentStreak,
+            latestScore: latestGradeByUser.get(member.id) ?? null,
+          }
+        : null;
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .sort(
+      (a, b) =>
+        b.pisScore - a.pisScore ||
+        b.currentStreak - a.currentStreak ||
+        (b.latestScore ?? -1) - (a.latestScore ?? -1),
+    )
+    .slice(0, 5)
+    .map((item, index) => ({ ...item, rank: index + 1 }));
+
+  return {
+    id: cohort.id,
+    name: cohort.name,
+    track: cohort.track,
+    difficulty: cohort.difficulty,
+    completionWindowHours: cohort.completionWindowHours,
+    inviteCode: cohort.inviteCode,
+    memberCount: cohort.enrollments.length,
+    isOwner: cohort.ownerId === viewerId,
+    createdAt: cohort.createdAt.toISOString(),
+    leaderboard,
+  };
+}
+
+function createInviteCode() {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+function trackLabel(track: string) {
+  const labels: Record<string, string> = {
+    networking: "Networking",
+    linux: "Linux",
+    security: "Security",
+    automation: "Automation",
+    cloud: "Cloud",
+    incident_command: "Incident command",
+    documentation: "Documentation",
+  };
+  return labels[track] ?? "Networking";
+}
+
+function higherDifficulty(current: string, floor: string) {
+  const order = ["Guided", "Normal", "Advanced", "Production", "Expert"];
+  return order[Math.max(order.indexOf(current), order.indexOf(floor))] as Difficulty;
 }
 
 function currentChallengeDateKey(

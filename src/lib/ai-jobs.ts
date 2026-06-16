@@ -5,6 +5,7 @@ import { nowIso } from "@/lib/time";
 import {
   generateAiChallenge,
   generateAiCritique,
+  generateStandaloneNotebookSummary,
   generateVerificationQuestion,
 } from "@/lib/openai-service";
 import { buildChallengeFromAi, difficultyForPis } from "@/lib/challenges";
@@ -105,7 +106,7 @@ async function runJob(type: AiJobType, payload: Record<string, unknown>) {
   if (type === "VerificationQuestion") return runVerificationJob(payload);
   if (type === "StrictCritique") return runStrictCritiqueJob(payload);
   if (type === "ChallengeGeneration") return runChallengeGenerationJob(payload);
-  if (type === "NotebookSummary") return { fallback: true, output: { skipped: true } };
+  if (type === "NotebookSummary") return runNotebookSummaryJob(payload);
   return { fallback: true, output: { skipped: true } };
 }
 
@@ -187,6 +188,9 @@ async function runChallengeGenerationJob(payload: Record<string, unknown>) {
     recovery: challenge.isRecovery,
     pressure: challenge.isPressure,
     recentWeaknesses: [],
+    track: typeof payload.track === "string" ? payload.track : challenge.topic,
+    topicFocus: typeof payload.topicFocus === "string" ? payload.topicFocus : undefined,
+    durationMinutes: typeof payload.durationMinutes === "number" ? payload.durationMinutes : undefined,
   });
   if (!ai) return { fallback: true, output: { skipped: "no generated challenge" } };
 
@@ -215,6 +219,40 @@ async function runChallengeGenerationJob(payload: Record<string, unknown>) {
     },
   });
   return { fallback: false, output: { challengeId: challenge.id } };
+}
+
+async function runNotebookSummaryJob(payload: Record<string, unknown>) {
+  const submissionId = String(payload.submissionId);
+  const submission = await prisma.submission.findUniqueOrThrow({
+    where: { id: submissionId },
+    include: { attachments: true, challenge: true, grade: true },
+  });
+  if (!submission.grade) return { fallback: true, output: { skipped: "missing grade" } };
+  const notebook = await generateStandaloneNotebookSummary(
+    fromDbChallenge(submission.challenge),
+    {
+      ...fromDbSubmission(submission),
+      content: contentWithAttachments(submission),
+    },
+    fromDbGrade(submission.grade),
+  );
+  if (!notebook) return { fallback: true, output: { skipped: "no notebook summary" } };
+
+  const existing = await prisma.notebookEntry.findFirst({
+    where: { challengeId: submission.challengeId, userId: submission.userId },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!existing) return { fallback: true, output: { skipped: "missing notebook" } };
+
+  await prisma.notebookEntry.update({
+    where: { id: existing.id },
+    data: {
+      summary: notebook.notebookSummary,
+      mistakes: notebook.notebookMistakes,
+      lessons: notebook.notebookLessons,
+    },
+  });
+  return { fallback: false, output: notebook };
 }
 
 function contentWithAttachments(submission: {

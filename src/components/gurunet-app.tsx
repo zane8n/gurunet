@@ -4,7 +4,6 @@ import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, FormEvent, ReactNode } from "react";
 import {
-  AlertTriangle,
   BookOpenText,
   Bold,
   CalendarClock,
@@ -105,9 +104,58 @@ type SocialSnapshot = {
   enrollments: { id: string; marketplaceChallengeId: string; createdAt: string }[];
 };
 
+type ChallengeNotice = {
+  id: string;
+  kind: string;
+  reason: string;
+  accepted: boolean;
+  reply: string;
+  createdAt: string;
+};
+
+type ChallengeSettings = {
+  track: string;
+  durationMinutes: number;
+  difficultyFloor: string;
+  topicFocus: string;
+  recoveryMode: boolean;
+  teamMode: boolean;
+};
+
+type CohortSummary = {
+  id: string;
+  name: string;
+  track: string;
+  difficulty: string;
+  completionWindowHours: number;
+  inviteCode: string;
+  memberCount: number;
+  isOwner: boolean;
+  createdAt: string;
+  leaderboard: {
+    id: string;
+    rank: number;
+    name: string;
+    pisScore: number;
+    currentStreak: number;
+    latestScore: number | null;
+  }[];
+};
+
+type ExaminerMessage = {
+  id: string;
+  role: string;
+  content: string;
+  actions?: unknown;
+  createdAt: string;
+};
+
 type Dashboard = {
   user: SafeUser;
   today: Challenge;
+  todayNotice: ChallengeNotice | null;
+  challengeSettings: ChallengeSettings;
+  cohorts: CohortSummary[];
   nextChallengeUnlockAt: string;
   todaySubmission: Submission | null;
   todayGrade: Grade | null;
@@ -155,13 +203,87 @@ Do not clear STP or reload devices during business hours. If a trunk fix is need
 Recommendation:
 Correct the trunk mismatch only after both sides are captured, then verify stable STP counters, MAC learning, and user application reachability.`;
 
+const responseTemplates = [
+  {
+    label: "Triage",
+    body: `## Hypothesis
+
+## Evidence
+- 
+
+## Checks
+1. 
+2. 
+3. 
+
+## Risk and rollback
+
+## Recommendation
+`,
+  },
+  {
+    label: "Incident",
+    body: `## Impact
+
+## Timeline
+- 
+
+## Findings
+- 
+
+## Containment
+
+## Follow-up
+`,
+  },
+  {
+    label: "Change",
+    body: `## Goal
+
+## Pre-checks
+- 
+
+## Change steps
+1. 
+
+## Validation
+- 
+
+## Rollback
+`,
+  },
+];
+
+const responseOutlineChips = [
+  "Hypothesis",
+  "Evidence",
+  "Checks",
+  "Risk and rollback",
+  "Recommendation",
+];
+
+const trackOptions = [
+  ["networking", "Networking"],
+  ["linux", "Linux"],
+  ["security", "Security"],
+  ["automation", "Automation"],
+  ["cloud", "Cloud"],
+  ["incident_command", "Incident command"],
+  ["documentation", "Documentation"],
+] as const;
+
+const difficultyOptions = ["Guided", "Normal", "Advanced", "Production", "Expert"] as const;
+
 export function GurunetApp() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [bootstrapped, setBootstrapped] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("signup");
   const [authError, setAuthError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [responseOpen, setResponseOpen] = useState(false);
+  const [examinerOpen, setExaminerOpen] = useState(false);
+  const [examinerMessages, setExaminerMessages] = useState<ExaminerMessage[]>([]);
   const [draftBody, setDraftBody] = useState("");
   const [draftAttachments, setDraftAttachments] = useState<SubmissionAttachment[]>([]);
   const [draftSavedAt, setDraftSavedAt] = useState("");
@@ -188,6 +310,8 @@ export function GurunetApp() {
       } catch (error) {
         console.error("Session bootstrap failed", error);
         setDashboard(null);
+      } finally {
+        setBootstrapped(true);
       }
     }
 
@@ -320,6 +444,41 @@ export function GurunetApp() {
       setStatus("Submission saved. Grade it when verification is complete.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Submission failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openExaminer() {
+    setExaminerOpen(true);
+    try {
+      const data = await apiRequest<{ messages: ExaminerMessage[] }>("/api/examiner/chat");
+      setExaminerMessages(data.messages);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Examiner chat failed");
+    }
+  }
+
+  async function sendExaminerMessage(message: string) {
+    if (!today || !message.trim()) return;
+    setBusy(true);
+    setStatus("");
+    try {
+      const optimistic: ExaminerMessage = {
+        id: `local-${Date.now()}`,
+        role: "user",
+        content: message,
+        createdAt: new Date().toISOString(),
+      };
+      setExaminerMessages((items) => [...items, optimistic]);
+      const response = await apiRequest<{ reply: ExaminerMessage }>("/api/examiner/chat", {
+        method: "POST",
+        body: JSON.stringify({ message, challengeId: today.id }),
+      });
+      setExaminerMessages((items) => [...items, response.reply]);
+      await loadDashboard();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Examiner chat failed");
     } finally {
       setBusy(false);
     }
@@ -480,6 +639,68 @@ export function GurunetApp() {
     }
   }
 
+  async function saveChallengeSettings(input: ChallengeSettings) {
+    setBusy(true);
+    setStatus("");
+    try {
+      await apiRequest("/api/challenge-settings", {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      });
+      await loadDashboard();
+      setStatus("Challenge settings saved. The next generated challenge will use them.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Settings update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createCohort(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setStatus("");
+    const form = new FormData(event.currentTarget);
+    try {
+      await apiRequest("/api/cohorts", {
+        method: "POST",
+        body: JSON.stringify({
+          name: String(form.get("name") || ""),
+          track: String(form.get("track") || "networking"),
+          difficulty: String(form.get("difficulty") || "Normal"),
+          completionWindowHours: Number(form.get("completionWindowHours") || 24),
+        }),
+      });
+      event.currentTarget.reset();
+      await loadDashboard();
+      setStatus("Cohort challenge created.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Cohort creation failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function joinCohort(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setStatus("");
+    const form = new FormData(event.currentTarget);
+    try {
+      await apiRequest("/api/cohorts/join", {
+        method: "POST",
+        body: JSON.stringify({ inviteCode: String(form.get("inviteCode") || "") }),
+      });
+      event.currentTarget.reset();
+      await loadDashboard();
+      setStatus("Cohort joined.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Cohort join failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const deadline = useMemo(
     () =>
       today
@@ -504,6 +725,16 @@ export function GurunetApp() {
         : "",
     [nextChallengeUnlockAt],
   );
+
+  if (!bootstrapped) {
+    return (
+      <main className="app-background min-h-screen text-slate-950">
+        <AppHeader />
+        <DashboardSkeleton />
+        <Footer />
+      </main>
+    );
+  }
 
   if (!dashboard || !user || !today) {
     return (
@@ -596,8 +827,9 @@ export function GurunetApp() {
   return (
     <main className="app-background min-h-screen text-slate-950">
       <AppHeader user={user} onLogout={logout} />
+      <SectionNav />
 
-      <section className="soft-enter border-b border-teal-950/10">
+      <section id="daily-challenge" className="scroll-mt-28 border-b border-teal-950/10">
         <div className="mx-auto w-full max-w-7xl px-5 py-6 sm:px-8">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <StatusPill status={today.status} />
@@ -639,6 +871,8 @@ export function GurunetApp() {
                 setVerification={setVerification}
                 onVerify={answerVerification}
                 onGrade={gradeSubmission}
+                notice={dashboard.todayNotice}
+                onExaminer={openExaminer}
               />
             </article>
 
@@ -655,49 +889,27 @@ export function GurunetApp() {
         </div>
       </section>
 
-      <section className="border-b border-teal-950/10 bg-white/25">
+      <section id="metrics" className="scroll-mt-28 border-b border-teal-950/10 bg-white/25">
         <div className="mx-auto grid w-full max-w-7xl gap-5 px-5 py-6 sm:px-8">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <ScoreMeter value={user.pisScore} label="PIS" />
-            <Metric icon={<Trophy size={18} />} label="ERT balance" value={String(user.ertBalance)} />
-            <Metric icon={<Flame size={18} />} label="Current streak" value={`${user.currentStreak} days`} />
-            <Metric icon={<CalendarClock size={18} />} label="Next challenge" value={nextUnlock} />
-          </div>
-
-          <div className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
-            <Panel icon={<CircleGauge size={19} />} title="Discipline pulse">
-              <FrequencyPolygon rows={dashboard.progress} />
-            </Panel>
-            <Panel icon={<CalendarClock size={19} />} title="Discipline map">
-              <ActivityGrid rows={dashboard.progress} />
-            </Panel>
-            <Panel icon={<AlertTriangle size={19} />} title="Penalty engine">
-              <List
-                items={[
-                  "Missed challenge: 0/20, -1 PIS, streak reset.",
-                  "After 16:00: no PIS growth and no ERT.",
-                  "Unsafe answer: score cap and no rewards.",
-                  "Two misses in a week: PIS gain cap reduced.",
-                ]}
-              />
-            </Panel>
-            {todayGrade ? (
-              <GradeSummary grade={todayGrade} />
-            ) : (
-              <Panel icon={<FileText size={19} />} title="Daily scoresheet">
-                <p className="text-sm leading-6 text-slate-600">
-                  The scoresheet appears here after grading.
-                </p>
-              </Panel>
-            )}
-          </div>
-
-          <ProgressPanel rows={dashboard.progress} />
+          <MetricsBand
+            grade={todayGrade}
+            nextUnlock={nextUnlock}
+            rows={dashboard.progress}
+            user={user}
+          />
         </div>
       </section>
 
-      <section>
+      <section id="social" className="scroll-mt-28">
         <div className="mx-auto grid w-full max-w-7xl gap-5 px-5 py-6 sm:px-8">
+          <VersatilityPanel
+            busy={busy}
+            cohorts={dashboard.cohorts}
+            settings={dashboard.challengeSettings}
+            onCreateCohort={createCohort}
+            onJoinCohort={joinCohort}
+            onSaveSettings={saveChallengeSettings}
+          />
           <SocialPanel
             social={dashboard.social}
             busy={busy}
@@ -722,6 +934,14 @@ export function GurunetApp() {
         onOpenChange={setResponseOpen}
         onRemoveAttachment={removeDraftAttachment}
         onSubmit={submitAnswer}
+      />
+      <ExaminerChatModal
+        busy={busy}
+        messages={examinerMessages}
+        notice={dashboard.todayNotice}
+        open={examinerOpen}
+        onOpenChange={setExaminerOpen}
+        onSend={sendExaminerMessage}
       />
       <Footer />
     </main>
@@ -853,69 +1073,63 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
   const line = points.map((point) => `${point.x},${point.y}`).join(" ");
 
   return (
-    <div className="grid gap-4">
-      <div className="rounded-md border border-teal-950/10 bg-white/50 p-3">
-        {graded.length === 0 ? (
-          <p className="grid h-28 place-items-center text-sm text-slate-500">
-            No graded attempts yet.
-          </p>
-        ) : (
-          <svg
-            viewBox={`0 0 ${width} ${height}`}
-            className="h-32 w-full"
-            role="img"
-            aria-label="Final score frequency polygon"
-          >
-            <line
-              x1={padX}
-              x2={width - padX}
-              y1={height - padY}
-              y2={height - padY}
-              stroke="rgba(15,23,42,0.18)"
-            />
-            <line
-              x1={padX}
-              x2={padX}
-              y1={padY}
-              y2={height - padY}
-              stroke="rgba(15,23,42,0.12)"
-            />
-            <polyline
-              points={line}
-              fill="none"
-              stroke="#0f766e"
-              strokeWidth="3"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-            {points.map((point, index) => (
-              <g key={bins[index].label}>
-                <circle cx={point.x} cy={point.y} r="4" fill="#0f766e" />
-                <text
-                  x={point.x}
-                  y={height - 3}
-                  textAnchor="middle"
-                  className="fill-slate-500 text-[9px]"
-                >
-                  {bins[index].label}
-                </text>
-                <text
-                  x={point.x}
-                  y={Math.max(10, point.y - 8)}
-                  textAnchor="middle"
-                  className="fill-slate-700 text-[10px] font-semibold"
-                >
-                  {point.count}
-                </text>
-              </g>
-            ))}
-          </svg>
-        )}
-      </div>
-      <p className="text-sm leading-6 text-slate-600">
-        Final scores are grouped into ranges, then connected to show where recent
-        performance is clustering.
-      </p>
+    <div className="rounded-md border border-teal-950/10 bg-white/50 p-3">
+      {graded.length === 0 ? (
+        <p className="grid h-28 place-items-center text-sm text-slate-500">
+          No graded attempts yet.
+        </p>
+      ) : (
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="h-32 w-full"
+          role="img"
+          aria-label="Final score frequency polygon"
+        >
+          <line
+            x1={padX}
+            x2={width - padX}
+            y1={height - padY}
+            y2={height - padY}
+            stroke="rgba(15,23,42,0.18)"
+          />
+          <line
+            x1={padX}
+            x2={padX}
+            y1={padY}
+            y2={height - padY}
+            stroke="rgba(15,23,42,0.12)"
+          />
+          <polyline
+            points={line}
+            fill="none"
+            stroke="#0f766e"
+            strokeWidth="3"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+          {points.map((point, index) => (
+            <g key={bins[index].label}>
+              <circle cx={point.x} cy={point.y} r="4" fill="#0f766e" />
+              <text
+                x={point.x}
+                y={height - 3}
+                textAnchor="middle"
+                className="fill-slate-500 text-[9px]"
+              >
+                {bins[index].label}
+              </text>
+              <text
+                x={point.x}
+                y={Math.max(10, point.y - 8)}
+                textAnchor="middle"
+                className="fill-slate-700 text-[10px] font-semibold"
+              >
+                {point.count}
+              </text>
+            </g>
+          ))}
+        </svg>
+      )}
     </div>
   );
 }
@@ -1003,6 +1217,189 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
       <div className="flex items-center gap-2 text-teal-700">{icon}</div>
       <p className="mt-4 text-sm font-medium text-slate-500">{label}</p>
       <p className="text-2xl font-semibold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function SectionNav() {
+  const items = [
+    { href: "#daily-challenge", label: "Challenge", icon: <ShieldCheck size={15} /> },
+    { href: "#metrics", label: "Metrics", icon: <CircleGauge size={15} /> },
+    { href: "#social", label: "Social", icon: <Users size={15} /> },
+  ];
+  return (
+    <nav className="sticky top-0 z-30 border-b border-teal-950/10 bg-white/72 backdrop-blur-xl">
+      <div className="mx-auto flex w-full max-w-7xl gap-2 overflow-x-auto px-5 py-2 sm:px-8">
+        {items.map((item) => (
+          <a
+            key={item.href}
+            href={item.href}
+            className="interactive-lift flex h-9 shrink-0 items-center gap-2 rounded-md border border-teal-700/10 bg-white/70 px-3 text-xs font-semibold text-slate-700"
+          >
+            <span className="text-teal-700">{item.icon}</span>
+            {item.label}
+          </a>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <section className="mx-auto grid w-full max-w-7xl gap-5 px-5 py-6 sm:px-8">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
+        <div className="glass-panel rounded-md p-5">
+          <SkeletonLine className="h-5 w-32" />
+          <SkeletonLine className="mt-4 h-10 w-2/3" />
+          <SkeletonLine className="mt-4 h-4 w-full" />
+          <SkeletonLine className="mt-2 h-4 w-5/6" />
+          <div className="mt-6 grid gap-2">
+            <SkeletonLine className="h-12 w-full" />
+            <SkeletonLine className="h-12 w-full" />
+            <SkeletonLine className="h-12 w-full" />
+          </div>
+        </div>
+        <div className="quiet-panel rounded-md p-5">
+          <SkeletonLine className="h-5 w-36" />
+          <SkeletonLine className="mt-4 h-4 w-full" />
+          <SkeletonLine className="mt-2 h-4 w-4/5" />
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="rounded-md border border-teal-950/10 bg-white/55 p-4">
+            <SkeletonLine className="h-4 w-16" />
+            <SkeletonLine className="mt-5 h-8 w-24" />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-md bg-slate-200/80 ${className}`} />;
+}
+
+function MetricsBand({
+  grade,
+  nextUnlock,
+  rows,
+  user,
+}: {
+  grade: Grade | null;
+  nextUnlock: string;
+  rows: ProgressRow[];
+  user: SafeUser;
+}) {
+  return (
+    <>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.55fr)]">
+        <Panel icon={<CircleGauge size={19} />} title="PIS trend">
+          <PisTrendChart currentPis={user.pisScore} rows={rows} />
+        </Panel>
+        <div className="grid gap-3">
+          <ScoreMeter value={user.pisScore} label="PIS" />
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+            <Metric icon={<Trophy size={18} />} label="ERT balance" value={String(user.ertBalance)} />
+            <Metric icon={<Flame size={18} />} label="Current streak" value={`${user.currentStreak} days`} />
+            <Metric icon={<CalendarClock size={18} />} label="Next challenge" value={nextUnlock} />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-3">
+        <Panel icon={<Medal size={19} />} title="Score distribution">
+          <FrequencyPolygon rows={rows} />
+        </Panel>
+        <Panel icon={<CalendarClock size={19} />} title="Streak map">
+          <ActivityGrid rows={rows} />
+        </Panel>
+        {grade ? (
+          <GradeSummary grade={grade} />
+        ) : (
+          <Panel icon={<FileText size={19} />} title="Daily scoresheet">
+            <div className="grid gap-2">
+              <SkeletonLine className="h-4 w-28" />
+              <SkeletonLine className="h-4 w-full" />
+              <SkeletonLine className="h-4 w-2/3" />
+            </div>
+          </Panel>
+        )}
+      </div>
+
+      <ProgressPanel rows={rows} />
+    </>
+  );
+}
+
+function PisTrendChart({ currentPis, rows }: { currentPis: number; rows: ProgressRow[] }) {
+  const series = rows
+    .slice()
+    .reverse()
+    .slice(-14)
+    .map((row) => ({ label: row.date.slice(5), value: row.pis }));
+  if (series.length === 0) {
+    series.push({ label: "Now", value: currentPis });
+  }
+  const values = series.map((item) => item.value);
+  const min = Math.min(0, Math.floor(Math.min(...values) / 10) * 10);
+  const max = Math.max(100, Math.ceil(Math.max(...values) / 10) * 10);
+  const width = 620;
+  const height = 190;
+  const padX = 34;
+  const padY = 24;
+  const range = Math.max(1, max - min);
+  const points = series.map((item, index) => {
+    const x = padX + (series.length === 1 ? 0.5 : index / (series.length - 1)) * (width - padX * 2);
+    const y = height - padY - ((item.value - min) / range) * (height - padY * 2);
+    return { ...item, x, y };
+  });
+  const line = points.map((point) => `${point.x},${point.y}`).join(" ");
+  const last = points[points.length - 1];
+
+  return (
+    <div className="grid gap-3">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="h-56 w-full rounded-md border border-teal-950/10 bg-white/55"
+        role="img"
+        aria-label="PIS trend over recent challenges"
+      >
+        {[25, 50, 75].map((tick) => {
+          const y = height - padY - ((tick - min) / range) * (height - padY * 2);
+          return (
+            <g key={tick}>
+              <line x1={padX} x2={width - padX} y1={y} y2={y} stroke="rgba(15,23,42,0.08)" />
+              <text x={8} y={y + 4} className="fill-slate-500 text-[10px]">
+                {tick}
+              </text>
+            </g>
+          );
+        })}
+        <polyline
+          points={line}
+          fill="none"
+          stroke="#0f766e"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="4"
+        />
+        {points.map((point, index) => (
+          <g key={`${point.label}-${index}`}>
+            <circle cx={point.x} cy={point.y} r={index === points.length - 1 ? 5 : 3.5} fill="#0f766e" />
+            {(index === 0 || index === points.length - 1 || index % 4 === 0) && (
+              <text x={point.x} y={height - 6} textAnchor="middle" className="fill-slate-500 text-[10px]">
+                {point.label}
+              </text>
+            )}
+          </g>
+        ))}
+        <text x={last.x} y={Math.max(14, last.y - 12)} textAnchor="middle" className="fill-teal-800 text-[12px] font-semibold">
+          {last.value.toFixed(1)}
+        </text>
+      </svg>
     </div>
   );
 }
@@ -1105,6 +1502,8 @@ function SubmissionControl({
   setVerification,
   onVerify,
   onGrade,
+  notice,
+  onExaminer,
 }: {
   busy: boolean;
   draftSavedAt: string;
@@ -1118,6 +1517,8 @@ function SubmissionControl({
   setVerification: (value: string) => void;
   onVerify: () => void;
   onGrade: () => void;
+  notice: ChallengeNotice | null;
+  onExaminer: () => void;
 }) {
   return (
     <div className="quiet-panel rounded-md p-4">
@@ -1170,8 +1571,118 @@ function SubmissionControl({
           )}
         </div>
       )}
+      {!submission && (
+        <div className="mt-4 rounded-md border border-slate-200 bg-white/65 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Examiner</p>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                Ask questions, explain constraints, state delays or excuses, or adjust future challenge behavior.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onExaminer}
+              className="interactive-lift h-10 rounded-md border border-teal-700/20 bg-teal-50 px-4 text-sm font-semibold text-teal-800"
+            >
+              Talk to examiner
+            </button>
+          </div>
+          {notice && (
+            <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600">
+              {notice.reply}
+            </p>
+          )}
+        </div>
+      )}
       {status && <p className="mt-3 text-sm font-medium text-teal-800">{status}</p>}
     </div>
+  );
+}
+
+function ExaminerChatModal({
+  busy,
+  messages,
+  notice,
+  open,
+  onOpenChange,
+  onSend,
+}: {
+  busy: boolean;
+  messages: ExaminerMessage[];
+  notice: ChallengeNotice | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSend: (message: string) => void;
+}) {
+  const [message, setMessage] = useState("");
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!message.trim()) return;
+    onSend(message);
+    setMessage("");
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[88vh] overflow-hidden sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Examiner chat</DialogTitle>
+        </DialogHeader>
+
+        <div className="grid min-h-0 gap-3">
+          {notice && (
+            <div className="rounded-md border border-teal-700/15 bg-teal-50 px-3 py-2 text-sm leading-6 text-teal-900">
+              {notice.reply}
+            </div>
+          )}
+          <div className="max-h-[26rem] min-h-[16rem] overflow-auto rounded-md border border-slate-200 bg-white/70 p-3">
+            {messages.length === 0 ? (
+              <div className="grid h-44 place-items-center text-center text-sm leading-6 text-slate-500">
+                <p>
+                  Ask the examiner about rules, grading expectations, late work,
+                  excuses, or future challenge preferences.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {messages.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`max-w-[88%] rounded-md px-3 py-2 text-sm leading-6 ${
+                      item.role === "user"
+                        ? "ml-auto bg-teal-700 text-white"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {item.content}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <form onSubmit={submit} className="grid gap-2">
+            <textarea
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              className="min-h-24 resize-none rounded-md border border-slate-300 bg-white p-3 text-sm outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/15"
+              placeholder="Example: I will be late because of a work outage. Also make my next challenge Linux-focused and 60 minutes."
+            />
+            <div className="flex justify-end">
+              <button
+                disabled={busy || !message.trim()}
+                className="flex h-10 items-center justify-center gap-2 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {busy ? <Loader2 className="animate-spin" size={16} /> : <ChevronRight size={16} />}
+                Send
+              </button>
+            </div>
+          </form>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1200,6 +1711,10 @@ function ResponseEditorModal({
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const readiness = useMemo(
+    () => responseReadiness(body, attachments),
+    [attachments, body],
+  );
   const canSubmit = body.trim().length > 0 || attachments.length > 0;
 
   function insert(before: string, after = "", fallback = "text") {
@@ -1231,6 +1746,16 @@ function ResponseEditorModal({
     void onAddFiles(files);
   }
 
+  function applyTemplate(templateBody: string) {
+    const next = body.trim() ? `${body.trimEnd()}\n\n${templateBody}` : templateBody;
+    onBodyChange(next);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
+  function insertSection(title: string) {
+    insert(`${body.trim() ? "\n\n" : ""}## `, "\n", title);
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -1243,6 +1768,30 @@ function ResponseEditorModal({
 
         <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(18rem,0.9fr)]">
           <div className="grid min-h-0 gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {responseTemplates.map((template) => (
+                <button
+                  key={template.label}
+                  type="button"
+                  onClick={() => applyTemplate(template.body)}
+                  className="h-8 rounded-md border border-teal-700/15 bg-teal-50 px-3 text-xs font-semibold text-teal-800"
+                >
+                  {template.label}
+                </button>
+              ))}
+              <span className="mx-1 h-5 w-px bg-slate-200" />
+              {responseOutlineChips.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => insertSection(chip)}
+                  className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+
             <div className="flex flex-wrap gap-2 rounded-md border border-slate-200 bg-white/70 p-2">
               <EditorButton label="Heading" onClick={() => insert("## ", "", "Section")}>
                 <Heading2 size={15} />
@@ -1292,6 +1841,7 @@ function ResponseEditorModal({
           </div>
 
           <div className="grid min-h-0 gap-3">
+            <ResponseReadinessPanel readiness={readiness} />
             <div className="max-h-[22rem] overflow-auto rounded-md border border-slate-200 bg-white/70 p-4">
               <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                 Preview
@@ -1335,6 +1885,80 @@ function ResponseEditorModal({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function responseReadiness(body: string, attachments: SubmissionAttachment[]) {
+  const text = body.trim();
+  const checks = [
+    {
+      label: "Clear hypothesis",
+      complete: /\b(hypothesis|likely|root cause|suspect)\b/i.test(text),
+    },
+    {
+      label: "Evidence trail",
+      complete: /^\s*(-|\*|\d+\.)\s+\S/m.test(text) || attachments.length > 0,
+    },
+    {
+      label: "Commands or artifacts",
+      complete: /```[\s\S]+```/.test(text) || /\b(show|journalctl|tcpdump|dig|curl|kubectl|grep|awk|systemctl|ip\s)\b/i.test(text),
+    },
+    {
+      label: "Risk / rollback",
+      complete: /\b(risk|rollback|contain|do not|avoid|blast radius)\b/i.test(text),
+    },
+    {
+      label: "Recommendation",
+      complete: /\b(recommend|fix|correct|next|validate|verify)\b/i.test(text),
+    },
+  ];
+  const score = Math.round((checks.filter((check) => check.complete).length / checks.length) * 100);
+  return { checks, score };
+}
+
+function ResponseReadinessPanel({
+  readiness,
+}: {
+  readiness: ReturnType<typeof responseReadiness>;
+}) {
+  const tone =
+    readiness.score >= 80
+      ? "text-teal-800"
+      : readiness.score >= 50
+        ? "text-amber-800"
+        : "text-slate-600";
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white/70 p-4">
+      <div className="mb-3 flex items-end justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Submit readiness
+          </p>
+          <p className={`text-2xl font-semibold ${tone}`}>{readiness.score}%</p>
+        </div>
+        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+          {readiness.checks.filter((check) => check.complete).length}/{readiness.checks.length}
+        </span>
+      </div>
+      <div className="h-2 rounded-full bg-slate-200">
+        <div
+          className="h-full rounded-full bg-teal-700"
+          style={{ width: `${readiness.score}%` }}
+        />
+      </div>
+      <div className="mt-3 grid gap-2">
+        {readiness.checks.map((check) => (
+          <div key={check.label} className="flex items-center gap-2 text-sm text-slate-600">
+            <CheckCircle2
+              size={15}
+              className={check.complete ? "text-teal-700" : "text-slate-300"}
+            />
+            <span>{check.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1635,6 +2259,178 @@ function ProgressPanel({ rows }: { rows: ProgressRow[] }) {
       </div>
     </div>
   );
+}
+
+function VersatilityPanel({
+  busy,
+  cohorts,
+  settings,
+  onCreateCohort,
+  onJoinCohort,
+  onSaveSettings,
+}: {
+  busy: boolean;
+  cohorts: CohortSummary[];
+  settings: ChallengeSettings;
+  onCreateCohort: (event: FormEvent<HTMLFormElement>) => void;
+  onJoinCohort: (event: FormEvent<HTMLFormElement>) => void;
+  onSaveSettings: (settings: ChallengeSettings) => void;
+}) {
+  return (
+    <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+      <Panel icon={<CircleGauge size={20} />} title="Challenge tracks">
+        <form
+          className="grid gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            onSaveSettings({
+              track: String(form.get("track") || "networking"),
+              durationMinutes: Number(form.get("durationMinutes") || 45),
+              difficultyFloor: String(form.get("difficultyFloor") || "Normal"),
+              topicFocus: String(form.get("topicFocus") || ""),
+              recoveryMode: form.get("recoveryMode") === "on",
+              teamMode: form.get("teamMode") === "on",
+            });
+          }}
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Track
+              <select
+                name="track"
+                defaultValue={settings.track}
+                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
+              >
+                {trackOptions.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Difficulty floor
+              <select
+                name="difficultyFloor"
+                defaultValue={settings.difficultyFloor}
+                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
+              >
+                {difficultyOptions.map((value) => (
+                  <option key={value} value={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[0.55fr_1fr]">
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Duration
+              <input
+                name="durationMinutes"
+                type="number"
+                min={15}
+                max={180}
+                defaultValue={settings.durationMinutes}
+                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Topic focus
+              <input
+                name="topicFocus"
+                defaultValue={settings.topicFocus}
+                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
+                placeholder="BGP policy, journald, packet captures..."
+              />
+            </label>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white/60 px-3 py-2 text-sm text-slate-700">
+              <input
+                name="recoveryMode"
+                type="checkbox"
+                defaultChecked={settings.recoveryMode}
+              />
+              Recovery mode
+            </label>
+            <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white/60 px-3 py-2 text-sm text-slate-700">
+              <input
+                name="teamMode"
+                type="checkbox"
+                defaultChecked={settings.teamMode}
+              />
+              Team/cohort mode
+            </label>
+          </div>
+          <button
+            disabled={busy}
+            className="h-10 w-fit rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            Save settings
+          </button>
+        </form>
+      </Panel>
+
+      <Panel icon={<Users size={20} />} title="Cohort challenges">
+        <div className="grid gap-4">
+          <form onSubmit={onCreateCohort} className="grid gap-2 lg:grid-cols-[1fr_0.7fr_0.7fr_0.45fr_auto]">
+            <input name="name" required className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Cohort name" />
+            <select name="track" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" defaultValue={settings.track}>
+              {trackOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            <select name="difficulty" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" defaultValue={settings.difficultyFloor}>
+              {difficultyOptions.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+            <input name="completionWindowHours" type="number" min={4} max={168} defaultValue={24} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" />
+            <button disabled={busy} className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
+              Create
+            </button>
+          </form>
+          <form onSubmit={onJoinCohort} className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <input name="inviteCode" required className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm uppercase" placeholder="Invite code" />
+            <button disabled={busy} className="h-10 rounded-md border border-teal-700/20 bg-teal-50 px-4 text-sm font-semibold text-teal-800 disabled:opacity-60">
+              Join
+            </button>
+          </form>
+          <div className="grid gap-3">
+            {cohorts.length === 0 && (
+              <p className="text-sm leading-6 text-slate-600">
+                Create a cohort challenge to share an invite code, completion window, and team leaderboard.
+              </p>
+            )}
+            {cohorts.map((cohort) => (
+              <div key={cohort.id} className="rounded-md border border-slate-200 bg-white/65 p-3">
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <div>
+                    <p className="font-semibold text-slate-900">{cohort.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {trackName(cohort.track)} · {cohort.difficulty} · {cohort.completionWindowHours}h · {cohort.memberCount} members
+                    </p>
+                  </div>
+                  <span className="h-fit rounded-md bg-slate-100 px-2 py-1 font-mono text-xs font-semibold text-slate-700">
+                    {cohort.inviteCode}
+                  </span>
+                </div>
+                {cohort.leaderboard.length > 0 && (
+                  <div className="mt-3 grid gap-1">
+                    {cohort.leaderboard.map((row) => (
+                      <div key={row.id} className="grid grid-cols-[auto_1fr_auto] gap-3 text-sm text-slate-600">
+                        <span className="font-semibold text-teal-800">#{row.rank}</span>
+                        <span>{row.name}</span>
+                        <span>{row.pisScore.toFixed(1)} PIS</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function trackName(track: string) {
+  return trackOptions.find(([value]) => value === track)?.[1] ?? track;
 }
 
 function SocialPanel({

@@ -72,6 +72,9 @@ model User {
 
   sessions          Session[]
   localSessions     LocalSession[]
+  challengeNotices  ChallengeNotice[]
+  examinerMessages  ExaminerMessage[]
+  challengeSettings UserChallengeSettings?
   accounts          Account[]
   challenges        Challenge[]
   submissions       Submission[]
@@ -84,6 +87,8 @@ model User {
   friendshipsStarted Friendship[] @relation("FriendshipsStarted")
   friendshipsReceived Friendship[] @relation("FriendshipsReceived")
   challengeEnrollments ChallengeEnrollment[]
+  ownedCohortChallenges CohortChallenge[] @relation("OwnedCohortChallenges")
+  cohortEnrollments CohortEnrollment[]
 }
 
 model Account {
@@ -160,8 +165,56 @@ model Challenge {
   submissions     Submission[]
   grades          Grade[]
   notebookEntries NotebookEntry[]
+  notices         ChallengeNotice[]
+  examinerMessages ExaminerMessage[]
 
   @@unique([userId, dateKey])
+}
+
+model ExaminerMessage {
+  id          String   @id
+  userId      String
+  challengeId String?
+  role        String
+  content     String
+  actions     Json?
+  createdAt   DateTime @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge Challenge? @relation(fields: [challengeId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([challengeId])
+}
+
+model ChallengeNotice {
+  id          String   @id
+  challengeId String
+  userId      String
+  kind        String
+  reason      String
+  accepted    Boolean  @default(false)
+  reply       String
+  createdAt   DateTime @default(now())
+
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([challengeId])
+  @@index([userId, createdAt])
+}
+
+model UserChallengeSettings {
+  userId          String     @id
+  track           String     @default("networking")
+  durationMinutes Int        @default(45)
+  difficultyFloor Difficulty @default(Normal)
+  topicFocus      String?
+  recoveryMode    Boolean    @default(false)
+  teamMode        Boolean    @default(false)
+  updatedAt       DateTime   @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Submission {
@@ -325,6 +378,35 @@ model ChallengeEnrollment {
   @@unique([userId, marketplaceChallengeId])
 }
 
+model CohortChallenge {
+  id                    String     @id
+  ownerId               String
+  name                  String
+  track                 String
+  difficulty            Difficulty
+  completionWindowHours Int        @default(24)
+  inviteCode            String     @unique
+  createdAt             DateTime   @default(now())
+
+  owner       User               @relation("OwnedCohortChallenges", fields: [ownerId], references: [id], onDelete: Cascade)
+  enrollments CohortEnrollment[]
+
+  @@index([ownerId])
+}
+
+model CohortEnrollment {
+  id                String   @id
+  cohortChallengeId String
+  userId            String
+  createdAt         DateTime @default(now())
+
+  cohortChallenge CohortChallenge @relation(fields: [cohortChallengeId], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([cohortChallengeId, userId])
+  @@index([userId])
+}
+
 model AiJob {
   id          String      @id
   type        AiJobType
@@ -342,4 +424,21 @@ model AiJob {
 
   @@index([status, runAfter])
   @@index([type])
+}
+
+model AiUsage {
+  id               String   @id
+  userId           String?
+  jobId            String?
+  type             String
+  model            String
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  totalTokens      Int      @default(0)
+  estimatedCostUsd Float    @default(0)
+  createdAt        DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
 }

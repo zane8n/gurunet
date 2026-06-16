@@ -54,7 +54,7 @@ export function runtimeDatabaseUrl() {
 }
 
 function isHostedRuntime() {
-  return process.env.VERCEL === "1" || process.env.CI === "1" || process.env.NODE_ENV === "production";
+  return process.env.VERCEL === "1" || process.env.CI === "1";
 }
 
 function isLocalDatabaseUrl(value: string) {

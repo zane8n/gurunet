@@ -130,8 +130,13 @@ AUTH_GOOGLE_SECRET="..."
 DEEPSEEK_API_KEY="..."
 DEEPSEEK_BASE_URL="https://api.deepseek.com"
 DEEPSEEK_ENABLED="true"
+DEEPSEEK_FALLBACK_ONLY="false"
 DEEPSEEK_FAST_MODEL="deepseek-v4-flash"
 DEEPSEEK_REASONING_MODEL="deepseek-v4-pro"
+AI_DAILY_CALL_LIMIT="100"
+AI_USER_DAILY_CALL_LIMIT="20"
+AI_DAILY_SPEND_CAP_USD="5"
+AI_STRICT_CRITIQUE_ALWAYS="false"
 JOB_SECRET="..."
 IMPORT_SECRET="..."
 GURUNET_UPLOAD_DIR=".data/uploads"
@@ -156,11 +161,17 @@ DeepSeek usage:
 
 - Challenge generation and notebook summaries use `DEEPSEEK_FAST_MODEL`.
 - Strict verification and correction use `DEEPSEEK_REASONING_MODEL` with
-  thinking enabled.
+  thinking enabled only when the deterministic backend marks the case as
+  uncertain, weak, late, capped, or contentious.
 - The app reads only final JSON content from DeepSeek responses. It does not
   display or persist `reasoning_content`.
 - The app falls back to local templates if the API is disabled or unavailable.
 - Keep `DEEPSEEK_ENABLED="false"` for offline/dev-only testing.
+- Use `DEEPSEEK_FALLBACK_ONLY="true"` or `AI_FALLBACK_ONLY="true"` to force
+  deterministic fallback behavior while keeping the rest of the app online.
+- `AI_DAILY_CALL_LIMIT`, `AI_USER_DAILY_CALL_LIMIT`, and
+  `AI_DAILY_SPEND_CAP_USD` gate DeepSeek calls. Token usage and estimated cost
+  are logged in `AiUsage`.
 - Scoring math, late penalties, technical caps, PIS, ERT, streaks, and
   redemption balances remain deterministic backend logic.
 
@@ -177,6 +188,7 @@ Implemented dynamic flows:
 - `POST /api/challenges/generate`
 - `GET /api/challenges/history`
 - `POST /api/challenges/:id/submit`
+- `POST /api/challenges/:id/notice`
 - `POST /api/submissions/:id/verification`
 - `POST /api/submissions/:id/grade`
 - `GET /api/pis`
