@@ -43,6 +43,7 @@ import {
   challengeDateKeyFor,
   dateKeyFor,
   getUserTimezone,
+  localDeadlineIso,
   nextChallengeUnlockIso,
   weekKeyFor,
 } from "@/lib/time";
@@ -233,7 +234,7 @@ export async function getDashboard(user: User) {
   const currentUser = fromDbUser(dbUser);
   const profileState = await getStudyProfile(currentUser);
   const timezone = getUserTimezone(currentUser.timezone);
-  const [submissions, grades, notebookEntries, redemptions, challenges, todayNotice, challengeSettings, cohorts, socialData] =
+  const [submissions, grades, notebookEntries, redemptions, challenges, gradedChallenges, todayNotice, challengeSettings, cohorts, socialData] =
     await Promise.all([
       prisma.submission.findMany({
         where: { userId: user.id },
@@ -255,6 +256,11 @@ export async function getDashboard(user: User) {
         orderBy: { createdAt: "desc" },
         take: 8,
       }),
+      prisma.challenge.findMany({
+        where: { userId: user.id, grades: { some: {} } },
+        orderBy: { createdAt: "desc" },
+        take: 12,
+      }),
       findLatestChallengeNotice(user.id, today.id),
       getChallengeSettings(currentUser),
       getCohortSnapshot(currentUser),
@@ -267,6 +273,11 @@ export async function getDashboard(user: User) {
     ? submissionWithAttachments(todaySubmissionDb)
     : null;
   const todayGradeDb = grades.find((item) => item.challengeId === today.id) ?? null;
+  const progressChallenges = Array.from(
+    new Map([...challenges, ...gradedChallenges].map((challenge) => [challenge.id, challenge])).values(),
+  )
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 14);
 
   return {
     user: currentUser,
@@ -289,7 +300,7 @@ export async function getDashboard(user: User) {
     nextChallengeUnlockAt: nextChallengeUnlockIso(today.dateKey, timezone),
     todaySubmission,
     todayGrade: todayGradeDb ? fromDbGrade(todayGradeDb) : null,
-    progress: challenges.map((challenge) => {
+    progress: progressChallenges.map((challenge) => {
       const grade = grades.find((item) => item.challengeId === challenge.id);
       const submission = submissions.find((item) => item.challengeId === challenge.id);
       return {
@@ -325,9 +336,13 @@ export async function getOrCreateTodayChallenge(user: User) {
 
   const existing = await prisma.challenge.findFirst({
     where: { userId: user.id, dateKey: today },
+    include: { submissions: true, grades: true },
     orderBy: { createdAt: "desc" },
   });
-  if (existing) return fromDbChallenge(existing);
+  if (existing) {
+    const normalized = await normalizeActiveChallengeDeadline(currentUser, existing);
+    return fromDbChallenge(normalized);
+  }
 
   const [records, recentGrades] = await Promise.all([
     prisma.weeklyDisciplineRecord.findMany({ where: { userId: user.id } }),
@@ -1528,6 +1543,35 @@ function currentChallengeDateKey(
     (item) => item.userId === user.id && item.dateKey === rolledKey,
   );
   return hasPreviousChallenge ? rolledKey : calendarToday;
+}
+
+async function normalizeActiveChallengeDeadline<T extends {
+  id: string;
+  dateKey: string;
+  deadlineAt: Date;
+  status: string;
+  submissions: unknown[];
+  grades: unknown[];
+}>(
+  user: User,
+  challenge: T,
+) {
+  if (
+    challenge.submissions.length > 0 ||
+    challenge.grades.length > 0 ||
+    !["Active", "RecoveryChallenge", "PressureChallenge"].includes(challenge.status)
+  ) {
+    return challenge;
+  }
+  const expected = new Date(localDeadlineIso(challenge.dateKey, getUserTimezone(user.timezone), 15));
+  if (Math.abs(challenge.deadlineAt.getTime() - expected.getTime()) < 60000) {
+    return challenge;
+  }
+  const updated = await prisma.challenge.update({
+    where: { id: challenge.id },
+    data: { deadlineAt: expected },
+  });
+  return { ...challenge, deadlineAt: updated.deadlineAt };
 }
 
 async function findSupportTargetUser(input: { email?: string; userId?: string }) {

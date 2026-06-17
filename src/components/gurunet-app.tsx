@@ -377,7 +377,7 @@ export function GurunetApp() {
     activeDiscipline: ActiveDiscipline;
   } | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
-  const [authMode, setAuthMode] = useState<AuthMode>("signup");
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authError, setAuthError] = useState("");
   const [profileErrors, setProfileErrors] = useState<string[]>([]);
   const [status, setStatus] = useState("");
@@ -1820,7 +1820,7 @@ function SectionNav() {
           <a
             key={item.href}
             href={item.href}
-            className="group flex h-8 shrink-0 items-center gap-2 border-b-2 border-transparent text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 transition-colors hover:border-cyan-700 hover:text-cyan-800"
+            className="nav-link group flex h-8 shrink-0 items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 transition-colors hover:text-cyan-800"
           >
             <span className="text-cyan-700/80 group-hover:text-cyan-800">{item.icon}</span>
             {item.label}
@@ -3635,7 +3635,7 @@ function readAttachment(file: File): Promise<SubmissionAttachment> {
 function Footer() {
   return (
     <footer className="flex w-full flex-col gap-2 px-2 pb-6 pt-2 text-xs text-slate-500 sm:px-3 md:flex-row md:items-center md:justify-between">
-      <p>© {new Date().getFullYear()} Kikandi. Licensed under Apache-2.0.</p>
+      <p>© {new Date().getFullYear()} GURUnet. Licensed under Apache-2.0.</p>
       <div className="flex items-center gap-3">
         <a href="/admin" className="text-slate-400 transition-colors hover:text-cyan-800" aria-label="System settings" title="System">
           <Settings size={15} />

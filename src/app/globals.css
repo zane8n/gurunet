@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600&family=Fira+Sans:wght@300;400;500;600;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -6,10 +6,10 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --font-app-sans: "Ubuntu Light", Ubuntu, "Space Grotesk", Inter, Aptos,
-    "Segoe UI", Arial, ui-sans-serif, system-ui, sans-serif;
-  --font-app-mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code",
-    Consolas, "Liberation Mono", ui-monospace, monospace;
+  --font-app-sans: "Fira Sans", Inter, Aptos, "Segoe UI", Arial,
+    ui-sans-serif, system-ui, sans-serif;
+  --font-app-mono: "Fira Code", "JetBrains Mono", "SFMono-Regular",
+    "Cascadia Code", Consolas, "Liberation Mono", ui-monospace, monospace;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -131,9 +131,11 @@
   }
   html {
     @apply font-sans;
+    font-weight: 300;
   }
   body {
     min-height: 100vh;
+    font-weight: 300;
   }
   button,
   a,
@@ -153,21 +155,21 @@
 @layer components {
   .app-background {
     background:
-      radial-gradient(circle at 12% 18%, rgba(8, 145, 178, 0.1) 0 1px, transparent 1.5px),
-      radial-gradient(circle at 86% 30%, rgba(14, 116, 144, 0.08) 0 1px, transparent 1.5px),
-      linear-gradient(90deg, rgba(8, 145, 178, 0.055) 1px, transparent 1px),
-      linear-gradient(0deg, rgba(14, 116, 144, 0.045) 1px, transparent 1px),
+      url("data:image/svg+xml,%3Csvg width='180' height='180' viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%230891b2' stroke-opacity='.16' stroke-width='1'%3E%3Cpath d='M18 42h42v26h38v36h50'/%3E%3Cpath d='M28 132h34V94h34V56h38'/%3E%3Cpath d='M122 26v32h30v48h-26v34'/%3E%3Ccircle cx='18' cy='42' r='3' fill='%230891b2' fill-opacity='.14'/%3E%3Ccircle cx='98' cy='104' r='3' fill='%230891b2' fill-opacity='.14'/%3E%3Ccircle cx='148' cy='104' r='3' fill='%230891b2' fill-opacity='.14'/%3E%3Ccircle cx='134' cy='56' r='3' fill='%230891b2' fill-opacity='.14'/%3E%3C/g%3E%3C/svg%3E"),
+      radial-gradient(circle at 12% 18%, rgba(8, 145, 178, 0.08) 0 1px, transparent 1.5px),
+      radial-gradient(circle at 86% 30%, rgba(14, 116, 144, 0.065) 0 1px, transparent 1.5px),
       linear-gradient(135deg, rgba(207, 250, 254, 0.58), rgba(224, 242, 254, 0.38) 34%, rgba(248, 250, 252, 0.72) 62%, rgba(236, 253, 245, 0.38)),
       #f7f8f4;
     background-size:
+      180px 180px,
       56px 56px,
       72px 72px,
-      44px 44px,
-      44px 44px,
       auto;
   }
 
   .glass-panel {
+    position: relative;
+    overflow: hidden;
     border: 1px solid rgba(8, 145, 178, 0.13);
     background: rgba(255, 255, 255, 0.8);
     box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
@@ -175,18 +177,79 @@
   }
 
   .quiet-panel {
+    position: relative;
+    overflow: hidden;
     border: 1px solid rgba(8, 145, 178, 0.1);
     background: rgba(255, 255, 255, 0.56);
     box-shadow: 0 8px 22px rgba(15, 23, 42, 0.035);
     backdrop-filter: blur(10px);
   }
 
+  .glass-panel::before,
+  .quiet-panel::before,
+  .interactive-lift::before {
+    pointer-events: none;
+    content: "";
+    position: absolute;
+    inset: -1px;
+    opacity: 0;
+    transform: translateX(-28%);
+    background:
+      linear-gradient(110deg, transparent 0%, rgba(125, 211, 252, 0.1) 42%, rgba(8, 145, 178, 0.18) 50%, rgba(186, 230, 253, 0.12) 58%, transparent 100%);
+    transition:
+      opacity 220ms ease,
+      transform 620ms ease;
+  }
+
+  .glass-panel:hover::before,
+  .quiet-panel:hover::before,
+  .interactive-lift:hover::before {
+    opacity: 1;
+    transform: translateX(28%);
+  }
+
   .interactive-lift {
+    position: relative;
+    overflow: hidden;
     transition:
       transform 180ms ease,
       border-color 180ms ease,
       box-shadow 180ms ease,
       background-color 180ms ease;
+  }
+
+  .nav-link {
+    position: relative;
+  }
+
+  .nav-link::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -2px;
+    height: 2px;
+    transform: scaleX(0.18);
+    transform-origin: left;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(8, 145, 178, 0.15), rgba(8, 145, 178, 0.9), rgba(125, 211, 252, 0.4));
+    opacity: 0;
+    transition:
+      transform 220ms ease,
+      opacity 220ms ease;
+  }
+
+  .nav-link:hover::after {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+
+  .font-semibold {
+    font-weight: 500;
+  }
+
+  .font-medium {
+    font-weight: 400;
   }
 
   .interactive-lift:hover {
@@ -222,5 +285,16 @@
   }
   50% {
     transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }
