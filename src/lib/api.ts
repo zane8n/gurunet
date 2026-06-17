@@ -25,7 +25,7 @@ export function apiError(error: unknown) {
     return json(
       {
         error:
-          "Database migration required. The study profile tables are not present in the connected database yet. Run `pnpm prisma:deploy` against the same DATABASE_URL used by the app, then refresh.",
+          "Database migration required. One or more required tables are missing in the connected database. Run `pnpm prisma:deploy` against the same DATABASE_URL used by the app, then refresh.",
       },
       { status: 503 },
     );

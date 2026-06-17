@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 
@@ -20,9 +21,7 @@ export async function requireAdminSecret(request: Request) {
     if (provided !== secret) throw new Response("Unauthorized", { status: 401 });
     return "support-admin";
   }
-  const credential = await prisma.adminCredential.findUnique({
-    where: { id: ADMIN_CREDENTIAL_ID },
-  });
+  const credential = await findAdminCredentialIfAvailable();
   if (credential) {
     const ok = await bcrypt.compare(provided, credential.passwordHash);
     if (!ok) throw new Response("Unauthorized", { status: 401 });
@@ -51,4 +50,17 @@ export async function changeAdminPassword(currentPassword: string, newPassword: 
     create: { id: ADMIN_CREDENTIAL_ID, passwordHash },
   });
   return { ok: true };
+}
+
+async function findAdminCredentialIfAvailable() {
+  try {
+    return await prisma.adminCredential.findUnique({
+      where: { id: ADMIN_CREDENTIAL_ID },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2021") {
+      return null;
+    }
+    throw error;
+  }
 }

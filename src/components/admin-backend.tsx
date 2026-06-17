@@ -77,6 +77,7 @@ async function adminRequest<T>(url: string, password: string, init?: RequestInit
 
 export function AdminBackend() {
   const [password, setPassword] = useState("");
+  const [authenticated, setAuthenticated] = useState(false);
   const [lookup, setLookup] = useState("");
   const [reason, setReason] = useState("");
   const [snapshot, setSnapshot] = useState<AdminSnapshot | null>(null);
@@ -90,6 +91,21 @@ export function AdminBackend() {
       ? `email=${encodeURIComponent(trimmed)}`
       : `userId=${encodeURIComponent(trimmed)}`;
   }, [lookup]);
+
+  async function login(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setStatus("");
+    try {
+      await adminRequest("/api/admin/session", password);
+      setAuthenticated(true);
+      setStatus("Backend unlocked.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Login failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function load(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -158,19 +174,32 @@ export function AdminBackend() {
           <h1 className="mt-2 text-2xl font-semibold">Support console</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
             Read user configuration, regenerate one unsubmitted daily challenge,
-            or clear study configuration. Default first-run password is admin admin.
+            or clear study configuration.
           </p>
         </div>
 
+        {!authenticated ? (
+          <form onSubmit={login} className="quiet-panel grid max-w-md gap-3 rounded-md p-4">
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Backend password
+              <input
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                type="password"
+                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
+                placeholder="First run: admin admin"
+              />
+            </label>
+            <button disabled={busy || !password} className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
+              Unlock backend
+            </button>
+            {status && <p className="text-sm font-medium text-teal-800">{status}</p>}
+          </form>
+        ) : (
+          <>
+
         <form onSubmit={load} className="quiet-panel grid gap-3 rounded-md p-4">
           <div className="grid gap-3 md:grid-cols-[0.85fr_1fr_auto]">
-            <input
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              type="password"
-              className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
-              placeholder="Backend password"
-            />
             <input
               value={lookup}
               onChange={(event) => setLookup(event.target.value)}
@@ -248,6 +277,8 @@ export function AdminBackend() {
             </button>
           </div>
         </form>
+          </>
+        )}
       </section>
     </main>
   );
