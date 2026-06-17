@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
+import { Home, Settings } from "lucide-react";
+import Link from "next/link";
 
 type AdminSnapshot = {
   user: {
@@ -166,9 +168,24 @@ export function AdminBackend() {
 
   return (
     <main className="app-background min-h-screen text-slate-950">
+      <nav className="border-b border-cyan-950/10 bg-white/60 backdrop-blur-xl">
+        <div className="flex w-full items-center justify-between px-2 py-3 sm:px-3">
+          <div className="flex items-center gap-2 text-cyan-800">
+            <Settings size={17} />
+            <span className="text-sm font-semibold">System</span>
+          </div>
+          <Link
+            href="/"
+            className="flex h-9 items-center gap-2 rounded-sm border border-slate-200 bg-white/65 px-3 text-sm font-semibold text-slate-700 hover:border-cyan-700/30 hover:text-cyan-800"
+          >
+            <Home size={15} />
+            Home
+          </Link>
+        </div>
+      </nav>
       <section className="grid w-full gap-4 px-2 py-4 sm:px-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-800">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-800">
             GURUnet backend
           </p>
           <h1 className="mt-2 text-2xl font-semibold">Support console</h1>
@@ -190,10 +207,10 @@ export function AdminBackend() {
                 placeholder="First run: admin admin"
               />
             </label>
-            <button disabled={busy || !password} className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
+            <button disabled={busy || !password} className="h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
               Unlock backend
             </button>
-            {status && <p className="text-sm font-medium text-teal-800">{status}</p>}
+            {status && <p className="text-sm font-medium text-cyan-800">{status}</p>}
           </form>
         ) : (
           <>
@@ -206,11 +223,11 @@ export function AdminBackend() {
               className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
               placeholder="User email or id"
             />
-            <button disabled={busy || !password || !lookupQuery} className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
+            <button disabled={busy || !password || !lookupQuery} className="h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
               Load
             </button>
           </div>
-          {status && <p className="text-sm font-medium text-teal-800">{status}</p>}
+          {status && <p className="text-sm font-medium text-cyan-800">{status}</p>}
         </form>
 
         {snapshot && (
@@ -251,7 +268,7 @@ export function AdminBackend() {
               placeholder="Reason for support action"
             />
             <div className="flex flex-wrap gap-2">
-              <button disabled={busy} onClick={() => void action("RegenerateTodayChallenge")} className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
+              <button disabled={busy} onClick={() => void action("RegenerateTodayChallenge")} className="h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
                 Regenerate once
               </button>
               <button disabled={busy} onClick={() => void action("ClearStudyConfiguration")} className="h-10 rounded-md border border-orange-300 bg-orange-50 px-4 text-sm font-semibold text-orange-800 disabled:opacity-60">
@@ -272,7 +289,7 @@ export function AdminBackend() {
               className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
               placeholder="New password, minimum 8 characters"
             />
-            <button disabled={busy || !password || newPassword.length < 8} className="h-10 rounded-md border border-teal-700/20 bg-teal-50 px-4 text-sm font-semibold text-teal-800 disabled:opacity-60">
+            <button disabled={busy || !password || newPassword.length < 8} className="h-10 rounded-md border border-cyan-700/20 bg-cyan-50 px-4 text-sm font-semibold text-cyan-800 disabled:opacity-60">
               Change
             </button>
           </div>

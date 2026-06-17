@@ -27,6 +27,7 @@ import {
   NotebookTabs,
   Pencil,
   Search,
+  Settings,
   ShieldCheck,
   Trash2,
   Trophy,
@@ -903,7 +904,7 @@ export function GurunetApp() {
         <AppHeader />
         <section className="soft-enter grid w-full gap-6 px-2 py-6 sm:px-3 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="flex flex-col justify-center rounded-md px-1 py-4">
-            <p className="w-fit rounded-md border border-teal-700/20 bg-teal-50 px-3 py-1 font-mono text-xs uppercase tracking-[0.16em] text-teal-800">
+            <p className="w-fit rounded-md border border-cyan-700/20 bg-cyan-50 px-3 py-1 font-mono text-xs uppercase tracking-[0.16em] text-cyan-800">
               Personal engineering discipline
             </p>
             <h1 className="mt-5 max-w-3xl text-4xl font-semibold tracking-normal sm:text-5xl">
@@ -915,7 +916,7 @@ export function GurunetApp() {
             </p>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               <Metric icon={<CircleGauge size={18} />} label="PIS starts" value="50" />
-              <Metric icon={<CalendarClock size={18} />} label="Deadline" value="12:00" />
+              <Metric icon={<CalendarClock size={18} />} label="Deadline" value="15:00" />
               <Metric icon={<LockKeyhole size={18} />} label="Solutions" value="Locked" />
             </div>
           </div>
@@ -928,7 +929,7 @@ export function GurunetApp() {
               <button
                 type="button"
                 onClick={() => setAuthMode("signup")}
-                className={`interactive-lift flex h-10 flex-1 items-center justify-center gap-2 rounded-md text-sm font-semibold ${authMode === "signup" ? "bg-white text-teal-800 shadow-sm" : "text-slate-600"}`}
+                className={`interactive-lift flex h-10 flex-1 items-center justify-center gap-2 rounded-md text-sm font-semibold ${authMode === "signup" ? "bg-white text-cyan-800 shadow-sm" : "text-slate-600"}`}
               >
                 <UserPlus size={16} />
                 Sign up
@@ -936,7 +937,7 @@ export function GurunetApp() {
               <button
                 type="button"
                 onClick={() => setAuthMode("login")}
-                className={`interactive-lift flex h-10 flex-1 items-center justify-center gap-2 rounded-md text-sm font-semibold ${authMode === "login" ? "bg-white text-teal-800 shadow-sm" : "text-slate-600"}`}
+                className={`interactive-lift flex h-10 flex-1 items-center justify-center gap-2 rounded-md text-sm font-semibold ${authMode === "login" ? "bg-white text-cyan-800 shadow-sm" : "text-slate-600"}`}
               >
                 <KeyRound size={16} />
                 Login
@@ -973,7 +974,7 @@ export function GurunetApp() {
 
             <button
               disabled={busy}
-              className="interactive-lift mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white shadow-sm shadow-teal-900/15 disabled:opacity-60"
+              className="interactive-lift mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white shadow-sm shadow-cyan-900/15 disabled:opacity-60"
             >
               {busy ? <Loader2 className="animate-spin" size={16} /> : <ChevronRight size={16} />}
               Enter GURUnet
@@ -990,11 +991,11 @@ export function GurunetApp() {
       <AppHeader user={user} onLogout={logout} />
       <SectionNav />
 
-      <section id="daily-challenge" className="scroll-mt-28 border-b border-teal-950/10">
+      <section id="daily-challenge" className="scroll-mt-28 border-b border-cyan-950/10">
         <div className="w-full px-2 py-4 sm:px-3">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <StatusPill status={today.status} />
-            <span className="rounded-md border border-teal-700/15 bg-white/70 px-3 py-1 font-mono text-xs uppercase tracking-[0.14em] text-teal-800">
+            <span className="rounded-md border border-cyan-700/15 bg-white/70 px-3 py-1 font-mono text-xs uppercase tracking-[0.14em] text-cyan-800">
               {today.dateKey} · {today.difficulty}
             </span>
             <span className="rounded-md border border-amber-700/15 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
@@ -1005,8 +1006,8 @@ export function GurunetApp() {
           <div className="grid gap-4">
             <article className="glass-panel rounded-md p-4 sm:p-5">
               {todaySubmission ? (
-                <div className="rounded-md border border-teal-700/15 bg-gradient-to-br from-teal-50 to-white p-4">
-                  <p className="text-sm font-semibold text-teal-800">Submitted response</p>
+                <div className="rounded-md border border-cyan-700/15 bg-gradient-to-br from-cyan-50 to-white p-4">
+                  <p className="text-sm font-semibold text-cyan-800">Submitted response</p>
                   <h1 className="mt-2 text-2xl font-semibold tracking-normal">
                     {today.title}
                   </h1>
@@ -1017,7 +1018,7 @@ export function GurunetApp() {
                 </div>
               ) : (
                 <>
-                  <p className="text-sm font-semibold text-teal-800">{today.topic}</p>
+                  <p className="text-sm font-semibold text-cyan-800">{today.topic}</p>
                   <h1 className="mt-2 text-3xl font-semibold tracking-normal">
                     {today.title}
                   </h1>
@@ -1036,10 +1037,10 @@ export function GurunetApp() {
                 <details className="my-5 rounded-md border border-slate-200 bg-white/55">
                   <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-semibold text-slate-900 marker:hidden">
                     Challenge prompt
-                    <ChevronRight size={16} className="text-teal-700" />
+                    <ChevronRight size={16} className="text-cyan-700" />
                   </summary>
                   <div className="border-t border-slate-200 px-4 py-4">
-                    <p className="text-sm font-semibold text-teal-800">{today.topic}</p>
+                    <p className="text-sm font-semibold text-cyan-800">{today.topic}</p>
                     <p className="mt-2 text-lg font-semibold text-slate-950">{today.title}</p>
                     <p className="mt-2 leading-7 text-slate-600">{today.scenario}</p>
                     <p className="mt-4 font-semibold text-slate-900">Objective</p>
@@ -1072,7 +1073,7 @@ export function GurunetApp() {
             <details className="quiet-panel rounded-md p-4">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-900 marker:hidden">
                 Assessment teaching
-                <ChevronRight size={16} className="text-teal-700" />
+                <ChevronRight size={16} className="text-cyan-700" />
               </summary>
               <div className="mt-4">
                 <TeachingPanel challenge={today} grade={todayGrade} submission={todaySubmission ?? null} plain />
@@ -1082,7 +1083,7 @@ export function GurunetApp() {
         </div>
       </section>
 
-      <section id="metrics" className="scroll-mt-28 border-b border-teal-950/10 bg-white/25">
+      <section id="metrics" className="scroll-mt-28 border-b border-cyan-950/10 bg-white/25">
         <div className="grid w-full gap-4 px-2 py-4 sm:px-3">
           <MetricsBand
             grade={todayGrade}
@@ -1212,7 +1213,7 @@ function StudyProfileOnboarding({
   return (
     <section className="grid w-full gap-5 px-2 py-4 sm:px-3">
       <div>
-        <p className="font-mono text-xs uppercase tracking-[0.16em] text-teal-800">
+        <p className="font-mono text-xs uppercase tracking-[0.16em] text-cyan-800">
           Study profile
         </p>
         <h1 className="mt-2 text-3xl font-semibold tracking-normal">
@@ -1223,7 +1224,7 @@ function StudyProfileOnboarding({
           standards. The examiner will use this to shape challenges, response
           templates, grading language, and notebook guidance.
         </p>
-        <div className="mt-4 grid gap-2 rounded-md border border-teal-700/15 bg-teal-50 p-4 text-sm leading-6 text-teal-950">
+        <div className="mt-4 grid gap-2 rounded-md border border-cyan-700/15 bg-cyan-50 p-4 text-sm leading-6 text-cyan-950">
           <p className="font-semibold">How validation works</p>
           <p>
             Pick focused options, not every option. GURUnet uses these choices to
@@ -1377,7 +1378,7 @@ function StudyProfileOnboarding({
           <div className={`rounded-md border p-4 text-sm leading-6 ${
             visibleErrors.length > 0
               ? "border-orange-200 bg-orange-50 text-orange-900"
-              : "border-teal-700/15 bg-teal-50 text-teal-900"
+              : "border-cyan-700/15 bg-cyan-50 text-cyan-900"
           }`}>
             {status && <p className="font-semibold">{status}</p>}
             {visibleErrors.length > 0 && (
@@ -1389,7 +1390,7 @@ function StudyProfileOnboarding({
             )}
           </div>
         )}
-        <button disabled={busy} className="h-11 w-fit rounded-md bg-teal-700 px-5 text-sm font-semibold text-white disabled:opacity-60">
+        <button disabled={busy} className="h-11 w-fit rounded-md bg-cyan-700 px-5 text-sm font-semibold text-white disabled:opacity-60">
           Save profile
         </button>
       </form>
@@ -1458,7 +1459,7 @@ function CheckboxGrid({
     min && selected.length < min
       ? "text-orange-700"
       : max && selected.length >= max
-        ? "text-teal-800"
+        ? "text-cyan-800"
         : "text-slate-500";
 
   return (
@@ -1484,7 +1485,7 @@ function CheckboxGrid({
               key={`${name}-${value}`}
               className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${
                 checked
-                  ? "border-teal-700/30 bg-teal-50 text-teal-950"
+                  ? "border-cyan-700/30 bg-cyan-50 text-cyan-950"
                   : disabled
                     ? "border-slate-200 bg-slate-50 text-slate-400"
                     : "border-slate-200 bg-white/60 text-slate-700"
@@ -1515,7 +1516,7 @@ function StatusPill({ status }: { status: string }) {
       ? "border-amber-200 bg-amber-50 text-amber-800"
       : status.includes("Recovery")
         ? "border-sky-200 bg-sky-50 text-sky-800"
-        : "border-teal-200 bg-teal-50 text-teal-800";
+        : "border-cyan-200 bg-cyan-50 text-cyan-800";
 
   return (
     <span className={`rounded-md border px-3 py-1 text-xs font-semibold ${tone}`}>
@@ -1528,12 +1529,12 @@ function ScoreMeter({ value, label }: { value: number; label: string }) {
   const clamped = Math.max(0, Math.min(100, value));
   const tone =
     clamped >= 70
-      ? "text-teal-800"
+      ? "text-cyan-800"
       : clamped >= 45
         ? "text-slate-800"
         : "text-amber-800";
   return (
-    <div className="rounded-md border border-teal-950/10 bg-white/60 p-4">
+    <div className="rounded-md border border-cyan-950/10 bg-white/60 p-4">
       <div className="flex items-end justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -1541,13 +1542,13 @@ function ScoreMeter({ value, label }: { value: number; label: string }) {
           </p>
           <p className={`mt-1 text-4xl font-semibold ${tone}`}>{clamped.toFixed(1)}</p>
         </div>
-        <span className="mb-1 rounded-md border border-teal-700/15 bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-800">
+        <span className="mb-1 rounded-md border border-cyan-700/15 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-800">
           {clamped >= 70 ? "Strong" : clamped >= 45 ? "Stable" : "Recovery"}
         </span>
       </div>
       <div className="mt-4 h-2 rounded-full bg-slate-200">
         <div
-          className="h-full rounded-full bg-teal-700"
+          className="h-full rounded-full bg-cyan-700"
           style={{ width: `${clamped}%` }}
         />
       </div>
@@ -1578,7 +1579,8 @@ function ActivityGrid({ rows }: { rows: ProgressRow[] }) {
           <span
             key={`${row?.id ?? "empty"}-${index}`}
             title={activityTitle(row)}
-            className={`size-3.5 rounded-[3px] transition-transform hover:scale-125 ${activityTone(row)}`}
+            className="size-3.5 rounded-[2px] border transition-transform hover:scale-125"
+            style={activityStyle(row)}
           />
         ))}
       </div>
@@ -1599,27 +1601,44 @@ function minutesBeforeDeadline(row: ProgressRow) {
   return Math.round((new Date(row.deadlineAt).getTime() - new Date(row.submittedAt).getTime()) / 60000);
 }
 
-function activityTone(row?: ProgressRow) {
-  if (!row) return "bg-slate-200/80";
-  if (row.status.includes("Missed")) return "bg-red-500";
-  if (!row.submittedAt) return "bg-slate-300";
+function activityStyle(row?: ProgressRow) {
+  if (!row) return { backgroundColor: "rgba(203, 213, 225, 0.72)", borderColor: "rgba(148, 163, 184, 0.45)" };
+  if (row.status.includes("Missed")) return { backgroundColor: "#b91c1c", borderColor: "#991b1b" };
+  if (!row.submittedAt) return { backgroundColor: "rgba(148, 163, 184, 0.82)", borderColor: "rgba(100, 116, 139, 0.5)" };
 
   const minutesEarly = minutesBeforeDeadline(row);
   const score = row.finalScore ?? 0;
-  if (minutesEarly < 0 || score < 8) return "bg-orange-500";
-  if (score >= 16 && minutesEarly >= 90) return "bg-teal-800";
-  if (score >= 13 && minutesEarly >= 30) return "bg-teal-600";
-  if (score >= 10) return "bg-amber-400";
-  return "bg-orange-400";
+  const scoreQuality = Math.max(0, Math.min(1, score / 20));
+  const timingQuality = Math.max(0, Math.min(1, (minutesEarly + 20) / 160));
+  const quality = Math.max(0, Math.min(1, scoreQuality * 0.72 + timingQuality * 0.28));
+  const palette = [
+    "#b91c1c",
+    "#dc2626",
+    "#ea580c",
+    "#d97706",
+    "#ca8a04",
+    "#65a30d",
+    "#0d9488",
+    "#0891b2",
+    "#0e7490",
+  ];
+  const index = Math.max(0, Math.min(palette.length - 1, Math.floor(quality * (palette.length - 1))));
+  const color = minutesEarly < -120 || score < 5 ? palette[0] : palette[index];
+  return { backgroundColor: color, borderColor: "rgba(15, 23, 42, 0.18)" };
 }
 
 function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
   const bins = [
-    { label: "0-4", min: 0, max: 4 },
-    { label: "5-8", min: 5, max: 8 },
-    { label: "9-12", min: 9, max: 12 },
-    { label: "13-16", min: 13, max: 16 },
-    { label: "17-20", min: 17, max: 20 },
+    { label: "0-2", min: 0, max: 2 },
+    { label: "3-4", min: 3, max: 4 },
+    { label: "5-6", min: 5, max: 6 },
+    { label: "7-8", min: 7, max: 8 },
+    { label: "9-10", min: 9, max: 10 },
+    { label: "11-12", min: 11, max: 12 },
+    { label: "13-14", min: 13, max: 14 },
+    { label: "15-16", min: 15, max: 16 },
+    { label: "17-18", min: 17, max: 18 },
+    { label: "19-20", min: 19, max: 20 },
   ];
   const graded = rows
     .map((row) => row.finalScore)
@@ -1628,7 +1647,7 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
     (bin) => graded.filter((score) => score >= bin.min && score <= bin.max).length,
   );
   const max = Math.max(1, ...frequencies);
-  const width = 260;
+  const width = 420;
   const height = 116;
   const padX = 18;
   const padY = 18;
@@ -1669,14 +1688,14 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
           <polyline
             points={line}
             fill="none"
-            stroke="#0f766e"
+            stroke="#0891b2"
             strokeWidth="3"
             strokeLinejoin="round"
             strokeLinecap="round"
           />
           {points.map((point, index) => (
             <g key={bins[index].label}>
-              <circle cx={point.x} cy={point.y} r="4" fill="#0f766e" />
+              <circle cx={point.x} cy={point.y} r="4" fill="#0891b2" />
               <text
                 x={point.x}
                 y={height - 3}
@@ -1703,7 +1722,7 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
 
 function AppHeader({ user, onLogout }: { user?: SafeUser; onLogout?: () => void }) {
   return (
-    <header className="border-b border-teal-950/10 bg-white/55 backdrop-blur-xl">
+    <header className="border-b border-cyan-950/10 bg-white/55 backdrop-blur-xl">
       <div className="flex w-full items-center justify-between px-2 py-3 sm:px-3">
         <div className="flex items-center gap-3">
           <Image
@@ -1715,7 +1734,7 @@ function AppHeader({ user, onLogout }: { user?: SafeUser; onLogout?: () => void 
             priority
           />
           <div>
-            <p className="font-mono text-xs uppercase tracking-[0.18em] text-teal-700">
+            <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-700">
               GURUnet
             </p>
             <h2 className="text-lg font-semibold">Engineering discipline</h2>
@@ -1765,7 +1784,7 @@ function Field({
         required
         minLength={name === "password" ? 8 : name === "name" ? 2 : undefined}
         autoComplete={autoCompleteFor(name, type)}
-        className="h-11 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/15"
+        className="h-11 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
       />
     </label>
   );
@@ -1780,8 +1799,8 @@ function autoCompleteFor(name: string, type: string) {
 
 function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-md border border-teal-950/10 bg-white/55 p-4">
-      <div className="flex items-center gap-2 text-teal-700">{icon}</div>
+    <div className="rounded-md border border-cyan-950/10 bg-white/55 p-4">
+      <div className="flex items-center gap-2 text-cyan-700">{icon}</div>
       <p className="mt-4 text-sm font-medium text-slate-500">{label}</p>
       <p className="text-2xl font-semibold text-slate-950">{value}</p>
     </div>
@@ -1795,15 +1814,15 @@ function SectionNav() {
     { href: "#social", label: "Social", icon: <Users size={15} /> },
   ];
   return (
-    <nav className="sticky top-0 z-30 border-b border-teal-950/10 bg-white/72 backdrop-blur-xl">
+    <nav className="sticky top-0 z-30 border-b border-cyan-950/10 bg-white/72 backdrop-blur-xl">
       <div className="flex w-full gap-6 overflow-x-auto px-2 py-2 sm:px-3">
         {items.map((item) => (
           <a
             key={item.href}
             href={item.href}
-            className="group flex h-8 shrink-0 items-center gap-2 border-b-2 border-transparent text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 transition-colors hover:border-teal-700 hover:text-teal-800"
+            className="group flex h-8 shrink-0 items-center gap-2 border-b-2 border-transparent text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 transition-colors hover:border-cyan-700 hover:text-cyan-800"
           >
-            <span className="text-teal-700/80 group-hover:text-teal-800">{item.icon}</span>
+            <span className="text-cyan-700/80 group-hover:text-cyan-800">{item.icon}</span>
             {item.label}
           </a>
         ))}
@@ -1835,7 +1854,7 @@ function DashboardSkeleton() {
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} className="rounded-md border border-teal-950/10 bg-white/55 p-4">
+          <div key={index} className="rounded-md border border-cyan-950/10 bg-white/55 p-4">
             <SkeletonLine className="h-4 w-16" />
             <SkeletonLine className="mt-5 h-8 w-24" />
           </div>
@@ -1932,7 +1951,7 @@ function PisTrendChart({ currentPis, rows }: { currentPis: number; rows: Progres
     <div className="grid gap-3">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-56 w-full rounded-md border border-teal-950/10 bg-white/55"
+        className="h-56 w-full rounded-md border border-cyan-950/10 bg-white/55"
         role="img"
         aria-label="PIS trend over recent challenges"
       >
@@ -1950,14 +1969,14 @@ function PisTrendChart({ currentPis, rows }: { currentPis: number; rows: Progres
         <polyline
           points={line}
           fill="none"
-          stroke="#0f766e"
+          stroke="#0891b2"
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth="4"
         />
         {points.map((point, index) => (
           <g key={`${point.label}-${index}`}>
-            <circle cx={point.x} cy={point.y} r={index === points.length - 1 ? 5 : 3.5} fill="#0f766e" />
+            <circle cx={point.x} cy={point.y} r={index === points.length - 1 ? 5 : 3.5} fill="#0891b2" />
             {(index === 0 || index === points.length - 1 || index % 4 === 0) && (
               <text x={point.x} y={height - 6} textAnchor="middle" className="fill-slate-500 text-[10px]">
                 {point.label}
@@ -1965,7 +1984,7 @@ function PisTrendChart({ currentPis, rows }: { currentPis: number; rows: Progres
             )}
           </g>
         ))}
-        <text x={last.x} y={Math.max(14, last.y - 12)} textAnchor="middle" className="fill-teal-800 text-[12px] font-semibold">
+        <text x={last.x} y={Math.max(14, last.y - 12)} textAnchor="middle" className="fill-cyan-800 text-[12px] font-semibold">
           {last.value.toFixed(1)}
         </text>
       </svg>
@@ -2010,14 +2029,14 @@ function AccordionPanel({
 }) {
   return (
     <details
-      className="group rounded-md border border-teal-950/10 bg-white/55"
+      className="group rounded-md border border-cyan-950/10 bg-white/55"
       open={defaultOpen}
     >
       <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-semibold text-slate-900 marker:hidden">
         {title}
         <ChevronRight
           size={16}
-          className="text-teal-700 transition-transform group-open:rotate-90"
+          className="text-cyan-700 transition-transform group-open:rotate-90"
         />
       </summary>
       <div className="border-t border-slate-200 px-4 pb-4 pt-2">{children}</div>
@@ -2030,7 +2049,7 @@ function List({ items }: { items: string[] }) {
     <div className="mt-2 grid gap-2">
       {items.map((item) => (
         <div key={item} className="flex gap-2 text-sm leading-6 text-slate-600">
-          <CheckCircle2 className="mt-1 shrink-0 text-teal-700" size={14} />
+          <CheckCircle2 className="mt-1 shrink-0 text-cyan-700" size={14} />
           <span>{item}</span>
         </div>
       ))}
@@ -2051,7 +2070,7 @@ function Panel({
 }) {
   return (
     <section className={`quiet-panel rounded-md ${compact ? "p-4" : "p-5"}`}>
-      <div className={`${compact ? "mb-3" : "mb-4"} flex items-center gap-2 text-teal-700`}>
+      <div className={`${compact ? "mb-3" : "mb-4"} flex items-center gap-2 text-cyan-700`}>
         {icon}
         <h3 className="font-semibold text-slate-950">{title}</h3>
       </div>
@@ -2073,7 +2092,7 @@ function CompactDetails({
     <details className="quiet-panel rounded-md p-4" open={defaultOpen}>
       <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-900 marker:hidden">
         {title}
-        <ChevronRight size={16} className="text-teal-700" />
+        <ChevronRight size={16} className="text-cyan-700" />
       </summary>
       <div className="mt-4">{children}</div>
     </details>
@@ -2115,11 +2134,11 @@ function SubmissionControl({
     <div className="quiet-panel rounded-md p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-          <LockKeyhole size={16} className="text-teal-700" />
+          <LockKeyhole size={16} className="text-cyan-700" />
           Submission
         </div>
         {!submission && hasDraft && (
-          <span className="rounded-md bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-800">
+          <span className="rounded-md bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-800">
             Draft saved
           </span>
         )}
@@ -2140,7 +2159,7 @@ function SubmissionControl({
           <button
             type="button"
             onClick={onOpen}
-            className="interactive-lift flex h-11 items-center justify-center gap-2 rounded-md bg-teal-700 px-5 text-sm font-semibold text-white shadow-sm shadow-teal-900/15"
+            className="interactive-lift flex h-11 items-center justify-center gap-2 rounded-md bg-cyan-700 px-5 text-sm font-semibold text-white shadow-sm shadow-cyan-900/15"
           >
             <FileText size={16} />
             {hasDraft ? "Continue response" : "Respond"}
@@ -2174,7 +2193,7 @@ function SubmissionControl({
             <button
               type="button"
               onClick={onExaminer}
-              className="interactive-lift h-10 rounded-md border border-teal-700/20 bg-teal-50 px-4 text-sm font-semibold text-teal-800"
+              className="interactive-lift h-10 rounded-md border border-cyan-700/20 bg-cyan-50 px-4 text-sm font-semibold text-cyan-800"
             >
               Talk to examiner
             </button>
@@ -2186,7 +2205,7 @@ function SubmissionControl({
           )}
         </div>
       )}
-      {status && <p className="mt-3 text-sm font-medium text-teal-800">{status}</p>}
+      {status && <p className="mt-3 text-sm font-medium text-cyan-800">{status}</p>}
     </div>
   );
 }
@@ -2227,7 +2246,7 @@ function TeachingPanel({
             Your response is recorded. Grade it to unlock the worked solution,
             correction notes, and the next learning target.
           </p>
-          <p className="rounded-md bg-teal-50 px-3 py-2 font-medium text-teal-900">
+          <p className="rounded-md bg-cyan-50 px-3 py-2 font-medium text-cyan-900">
             Gate status: awaiting assessment
           </p>
         </div>
@@ -2241,11 +2260,11 @@ function TeachingPanel({
 
   return wrap(
       <div className="grid gap-4">
-        <div className="rounded-md border border-teal-700/15 bg-teal-50 p-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-teal-800">
+        <div className="rounded-md border border-cyan-700/15 bg-cyan-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-800">
             Worked solution
           </p>
-          <p className="mt-2 text-sm leading-6 text-teal-950">{challenge.solution}</p>
+          <p className="mt-2 text-sm leading-6 text-cyan-950">{challenge.solution}</p>
         </div>
 
         <div className="grid gap-2 text-sm leading-6 text-slate-600">
@@ -2271,7 +2290,7 @@ function TeachingPanel({
           />
         </div>
 
-        <p className="rounded-md bg-white/70 px-3 py-2 text-sm font-semibold leading-6 text-teal-900">
+        <p className="rounded-md bg-white/70 px-3 py-2 text-sm font-semibold leading-6 text-cyan-900">
           Next assessment focus: {grade.nextImprovementTarget}
         </p>
       </div>
@@ -2290,7 +2309,7 @@ function AssessmentLine({
   return (
     <div className="rounded-md border border-slate-200 bg-white/65 p-3">
       <div className="flex items-center gap-2">
-        <CheckCircle2 size={15} className={complete ? "text-teal-700" : "text-amber-600"} />
+        <CheckCircle2 size={15} className={complete ? "text-cyan-700" : "text-amber-600"} />
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
           {label}
         </p>
@@ -2333,7 +2352,7 @@ function ExaminerChatModal({
 
         <div className="grid min-h-0 gap-3">
           {notice && (
-            <div className="rounded-md border border-teal-700/15 bg-teal-50 px-3 py-2 text-sm leading-6 text-teal-900">
+            <div className="rounded-md border border-cyan-700/15 bg-cyan-50 px-3 py-2 text-sm leading-6 text-cyan-900">
               {notice.reply}
             </div>
           )}
@@ -2352,7 +2371,7 @@ function ExaminerChatModal({
                     key={item.id}
                     className={`max-w-[88%] rounded-md px-3 py-2 text-sm leading-6 ${
                       item.role === "user"
-                        ? "ml-auto bg-teal-700 text-white"
+                        ? "ml-auto bg-cyan-700 text-white"
                         : "bg-slate-100 text-slate-700"
                     }`}
                   >
@@ -2367,13 +2386,13 @@ function ExaminerChatModal({
             <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}
-              className="min-h-24 resize-none rounded-md border border-slate-300 bg-white p-3 text-sm outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/15"
+              className="min-h-24 resize-none rounded-md border border-slate-300 bg-white p-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
               placeholder="Example: I will be late because of a work outage. Also make my next challenge Linux-focused and 60 minutes."
             />
             <div className="flex justify-end">
               <button
                 disabled={busy || !message.trim()}
-                className="flex h-10 items-center justify-center gap-2 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                className="flex h-10 items-center justify-center gap-2 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
               >
                 {busy ? <Loader2 className="animate-spin" size={16} /> : <ChevronRight size={16} />}
                 Send
@@ -2474,7 +2493,7 @@ function ResponseEditorModal({
                   key={template.label}
                   type="button"
                   onClick={() => applyTemplate(template.body)}
-                  className="h-8 rounded-md border border-teal-700/15 bg-teal-50 px-3 text-xs font-semibold text-teal-800"
+                  className="h-8 rounded-md border border-cyan-700/15 bg-cyan-50 px-3 text-xs font-semibold text-cyan-800"
                 >
                   {template.label}
                 </button>
@@ -2535,7 +2554,7 @@ function ResponseEditorModal({
               value={body}
               onChange={(event) => onBodyChange(event.target.value)}
               onPaste={handlePaste}
-              className="min-h-[24rem] max-h-[55vh] resize-y overflow-auto rounded-md border border-slate-300 bg-white p-4 font-mono text-sm leading-6 outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/15"
+              className="min-h-[24rem] max-h-[55vh] resize-y overflow-auto rounded-md border border-slate-300 bg-white p-4 font-mono text-sm leading-6 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
               placeholder="Write with headings, bullets, command output, code blocks, and attached screenshots or files."
             />
           </div>
@@ -2576,7 +2595,7 @@ function ResponseEditorModal({
               type="button"
               onClick={onSubmit}
               disabled={busy || !canSubmit}
-              className="flex h-10 items-center justify-center gap-2 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+              className="flex h-10 items-center justify-center gap-2 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
             >
               {busy ? <Loader2 className="animate-spin" size={16} /> : <ChevronRight size={16} />}
               Submit response
@@ -2623,7 +2642,7 @@ function ResponseReadinessPanel({
 }) {
   const tone =
     readiness.score >= 80
-      ? "text-teal-800"
+      ? "text-cyan-800"
       : readiness.score >= 50
         ? "text-amber-800"
         : "text-slate-600";
@@ -2643,7 +2662,7 @@ function ResponseReadinessPanel({
       </div>
       <div className="h-2 rounded-full bg-slate-200">
         <div
-          className="h-full rounded-full bg-teal-700"
+          className="h-full rounded-full bg-cyan-700"
           style={{ width: `${readiness.score}%` }}
         />
       </div>
@@ -2652,7 +2671,7 @@ function ResponseReadinessPanel({
           <div key={check.label} className="flex items-center gap-2 text-sm text-slate-600">
             <CheckCircle2
               size={15}
-              className={check.complete ? "text-teal-700" : "text-slate-300"}
+              className={check.complete ? "text-cyan-700" : "text-slate-300"}
             />
             <span>{check.label}</span>
           </div>
@@ -2677,7 +2696,7 @@ function EditorButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className="grid size-9 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 hover:border-teal-700/30 hover:text-teal-800"
+      className="grid size-9 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 hover:border-cyan-700/30 hover:text-cyan-800"
     >
       {children}
     </button>
@@ -2727,7 +2746,7 @@ function SubmittedPanel({
         <button
           onClick={onGrade}
           disabled={busy || submission.requiresVerification}
-          className="interactive-lift flex h-11 w-fit items-center justify-center gap-2 rounded-md bg-teal-700 px-5 text-sm font-semibold text-white shadow-sm shadow-teal-900/15 disabled:opacity-60"
+          className="interactive-lift flex h-11 w-fit items-center justify-center gap-2 rounded-md bg-cyan-700 px-5 text-sm font-semibold text-white shadow-sm shadow-cyan-900/15 disabled:opacity-60"
         >
           {busy ? <Loader2 className="animate-spin" size={16} /> : <ChevronRight size={16} />}
           Grade submission
@@ -2847,14 +2866,14 @@ function RichSubmissionBody({ body }: { body: string }) {
     } else if (/^\s*(-|\*)\s+\S/.test(line)) {
       nodes.push(
         <div key={`bullet-${index}`} className="flex gap-2">
-          <span className="text-teal-700">-</span>
+          <span className="text-cyan-700">-</span>
           <span>{line.replace(/^\s*(-|\*)\s+/, "")}</span>
         </div>,
       );
     } else if (/^\s*\d+\.\s+\S/.test(line)) {
       nodes.push(
         <div key={`number-${index}`} className="flex gap-2">
-          <span className="font-semibold text-teal-800">
+          <span className="font-semibold text-cyan-800">
             {line.match(/^\s*(\d+\.)/)?.[1]}
           </span>
           <span>{line.replace(/^\s*\d+\.\s+/, "")}</span>
@@ -2891,7 +2910,7 @@ function GradeSummary({ grade }: { grade: Grade }) {
           </p>
           <p className="mt-2 text-sm leading-6 text-slate-600">{grade.correction}</p>
         </div>
-        <p className="rounded-md bg-teal-50 px-3 py-2 text-sm font-semibold leading-6 text-teal-900">
+        <p className="rounded-md bg-cyan-50 px-3 py-2 text-sm font-semibold leading-6 text-cyan-900">
           Next target: {grade.nextImprovementTarget}
         </p>
       </div>
@@ -2924,7 +2943,7 @@ function RewardPanel({
           <input name="date" type="date" className="h-10 rounded-md border border-slate-300 px-3 text-sm" />
         </div>
         <input name="note" className="h-10 rounded-md border border-slate-300 px-3 text-sm" placeholder="Note" />
-        <button disabled={busy} className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
+        <button disabled={busy} className="h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
           Redeem
         </button>
       </form>
@@ -3065,7 +3084,7 @@ function VersatilityPanel({
           </div>
           <button
             disabled={busy}
-            className="h-10 w-fit rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+            className="h-10 w-fit rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
           >
             Save settings
           </button>
@@ -3083,13 +3102,13 @@ function VersatilityPanel({
               {difficultyOptions.map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
             <input name="completionWindowHours" type="number" min={4} max={168} defaultValue={24} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" />
-            <button disabled={busy} className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
+            <button disabled={busy} className="h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60">
               Create
             </button>
           </form>
           <form onSubmit={onJoinCohort} className="grid gap-2 sm:grid-cols-[1fr_auto]">
             <input name="inviteCode" required className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm uppercase" placeholder="Invite code" />
-            <button disabled={busy} className="h-10 rounded-md border border-teal-700/20 bg-teal-50 px-4 text-sm font-semibold text-teal-800 disabled:opacity-60">
+            <button disabled={busy} className="h-10 rounded-md border border-cyan-700/20 bg-cyan-50 px-4 text-sm font-semibold text-cyan-800 disabled:opacity-60">
               Join
             </button>
           </form>
@@ -3116,7 +3135,7 @@ function VersatilityPanel({
                   <div className="mt-3 grid gap-1">
                     {cohort.leaderboard.map((row) => (
                       <div key={row.id} className="grid grid-cols-[auto_1fr_auto] gap-3 text-sm text-slate-600">
-                        <span className="font-semibold text-teal-800">#{row.rank}</span>
+                        <span className="font-semibold text-cyan-800">#{row.rank}</span>
                         <span>{row.name}</span>
                         <span>{row.pisScore.toFixed(1)} PIS</span>
                       </div>
@@ -3165,7 +3184,7 @@ function SocialPanel({
               <tbody>
                 {social.leaderboard.map((row) => (
                   <tr key={row.id} className="border-b border-slate-100 last:border-0">
-                    <td className="px-3 py-3 font-semibold text-teal-800">#{row.rank}</td>
+                    <td className="px-3 py-3 font-semibold text-cyan-800">#{row.rank}</td>
                     <td className="px-3 py-3">
                       <p className="font-medium text-slate-900">
                         {row.name}
@@ -3197,7 +3216,7 @@ function SocialPanel({
                   className="grid gap-3 rounded-md border border-slate-200 bg-white/65 p-3 sm:grid-cols-[1fr_auto]"
                 >
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-teal-800">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-800">
                       {item.topic} · {item.difficulty}
                     </p>
                     <h3 className="mt-1 font-semibold text-slate-950">{item.title}</h3>
@@ -3207,7 +3226,7 @@ function SocialPanel({
                     type="button"
                     onClick={() => onEnroll(item.id)}
                     disabled={busy || item.isEnrolled}
-                    className="h-9 rounded-md border border-teal-700/20 bg-teal-50 px-3 text-sm font-semibold text-teal-800 disabled:opacity-60"
+                    className="h-9 rounded-md border border-cyan-700/20 bg-cyan-50 px-3 text-sm font-semibold text-cyan-800 disabled:opacity-60"
                   >
                     {item.isEnrolled ? "Enrolled" : "Enroll"}
                   </button>
@@ -3225,13 +3244,13 @@ function SocialPanel({
                 name="email"
                 type="email"
                 required
-                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/15"
+                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
                 placeholder="friend@example.com"
               />
             </label>
             <button
               disabled={busy}
-              className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+              className="h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
             >
               Add friend
             </button>
@@ -3254,7 +3273,7 @@ function SocialPanel({
                   <p className="truncate text-xs text-slate-500">{profile.handle}</p>
                 </div>
                 <div className="text-right text-sm">
-                  <p className="font-semibold text-teal-800">{profile.pisScore.toFixed(1)} PIS</p>
+                  <p className="font-semibold text-cyan-800">{profile.pisScore.toFixed(1)} PIS</p>
                   <p className="text-xs text-slate-500">{profile.challengeCount} challenges</p>
                 </div>
               </div>
@@ -3301,7 +3320,7 @@ function NotebookPanel({
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="interactive-lift h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white"
+            className="interactive-lift h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white"
           >
             Open notebook
           </button>
@@ -3327,7 +3346,7 @@ function NotebookPanel({
                 <p className="text-sm text-slate-500">{item.date}</p>
               </div>
               <div className="text-right">
-                <p className="font-semibold text-teal-800">-{item.cost}</p>
+                <p className="font-semibold text-cyan-800">-{item.cost}</p>
                 <p className="text-xs text-slate-500">Bal {item.balanceAfter}</p>
               </div>
             </div>
@@ -3460,7 +3479,7 @@ function NotebookAppModal({
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(19rem,0.9fr)]">
           <div className="grid gap-3">
             <label className="flex h-11 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-600">
-              <Search size={16} className="text-teal-700" />
+              <Search size={16} className="text-cyan-700" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -3487,7 +3506,7 @@ function NotebookAppModal({
                           <button
                             type="button"
                             onClick={() => edit(entry)}
-                            className="grid size-8 place-items-center rounded-md border border-slate-200 text-slate-600 hover:text-teal-800"
+                            className="grid size-8 place-items-center rounded-md border border-slate-200 text-slate-600 hover:text-cyan-800"
                             title="Edit note"
                           >
                             <Pencil size={14} />
@@ -3506,7 +3525,7 @@ function NotebookAppModal({
                       {entry.lessons.length > 0 && (
                         <div className="mt-3 flex flex-wrap gap-2">
                           {entry.lessons.slice(0, 3).map((lesson) => (
-                            <span key={lesson} className="rounded-md bg-teal-50 px-2 py-1 text-xs font-medium text-teal-900">
+                            <span key={lesson} className="rounded-md bg-cyan-50 px-2 py-1 text-xs font-medium text-cyan-900">
                               {lesson}
                             </span>
                           ))}
@@ -3557,18 +3576,18 @@ function NotebookAppModal({
             />
             <button
               disabled={busy || notebookBusy || !draft.summary.trim() || (!editingId && !draft.title.trim())}
-              className="h-10 rounded-md bg-teal-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+              className="h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
             >
               {editingId ? "Update note" : "Create note"}
             </button>
             <button
               type="button"
               onClick={askExaminerWithNotebook}
-              className="h-10 rounded-md border border-teal-700/20 bg-teal-50 px-4 text-sm font-semibold text-teal-800"
+              className="h-10 rounded-md border border-cyan-700/20 bg-cyan-50 px-4 text-sm font-semibold text-cyan-800"
             >
               Ask examiner with notebook context
             </button>
-            {status && <p className="text-sm font-medium text-teal-800">{status}</p>}
+            {status && <p className="text-sm font-medium text-cyan-800">{status}</p>}
           </form>
         </div>
       </DialogContent>
@@ -3618,10 +3637,10 @@ function Footer() {
     <footer className="flex w-full flex-col gap-2 px-2 pb-6 pt-2 text-xs text-slate-500 sm:px-3 md:flex-row md:items-center md:justify-between">
       <p>© {new Date().getFullYear()} Kikandi. Licensed under Apache-2.0.</p>
       <div className="flex items-center gap-3">
-        <a href="/admin" className="text-slate-400 transition-colors hover:text-teal-800">
-          Backend
+        <a href="/admin" className="text-slate-400 transition-colors hover:text-cyan-800" aria-label="System settings" title="System">
+          <Settings size={15} />
         </a>
-        <p className="font-mono text-teal-800">GURUnet · Designed by Kikandi.</p>
+        <p className="font-mono text-cyan-800">GURUnet · Designed by Kikandi.</p>
       </div>
     </footer>
   );

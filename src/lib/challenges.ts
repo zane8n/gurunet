@@ -175,7 +175,7 @@ export function generateChallenge(
       "Rollback or safety note",
       "Final recommendation",
     ],
-    deadlineAt: localDeadlineIso(today, timezone, 12),
+    deadlineAt: localDeadlineIso(today, timezone, 15),
     solution: template.solution,
     antiGenericRequirement:
       "Explain why your first three checks are ordered that way and what result would disprove your hypothesis.",

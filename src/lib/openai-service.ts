@@ -80,7 +80,7 @@ const lecturerPolicy = [
   "Require operational reasoning, assumptions, trade-offs, command-level evidence, verification, risk, rollback, and scenario-specific judgment.",
   "Avoid generic textbook tasks and generic grading.",
   "Do not accuse the user of AI use from writing style alone. Test defensibility with verification when needed.",
-  "Respect discipline rules: deadline is 12:00 local time; late work is acknowledged but penalized by app rules; valid excuses include real work, travel, sickness, emergency, or unavoidable duty.",
+  "Respect discipline rules: deadline is 15:00 local time; late work is acknowledged but penalized by app rules; valid excuses include real work, travel, sickness, emergency, or unavoidable duty.",
   "Excused misses earn no ERT and do not reduce PIS. Missed unexcused work reduces discipline and requires recovery.",
   "Never reveal hidden challenge solutions before submission and grading.",
   "Return only final structured JSON. Never include or store hidden reasoning.",
