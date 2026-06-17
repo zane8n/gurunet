@@ -904,16 +904,32 @@ export function GurunetApp() {
         <AppHeader />
         <section className="soft-enter grid w-full gap-6 px-2 py-6 sm:px-3 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="flex flex-col justify-center rounded-md px-1 py-4">
-            <p className="w-fit rounded-md border border-cyan-700/20 bg-cyan-50 px-3 py-1 font-mono text-xs uppercase tracking-[0.16em] text-cyan-800">
-              Personal engineering discipline
+            <p className="w-fit rounded-md border border-slate-300 bg-white/75 px-3 py-1 font-mono text-xs uppercase tracking-[0.16em] text-slate-600">
+              Daily capacity builder
             </p>
             <h1 className="mt-5 max-w-3xl text-4xl font-semibold tracking-normal sm:text-5xl">
-              Daily practical challenges with strict scoring and real consequences.
+              Build professional judgment through one serious challenge a day.
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
-              GURUnet tracks challenge submissions, missed days, PIS, ERT,
-              recovery work, redemptions, and a reusable engineering notebook.
+              GURUnet is a structured practice platform for technical learners.
+              It gives you a daily assessment, grades the evidence you submit,
+              tracks discipline over time, and turns corrections into a reusable
+              engineering notebook.
             </p>
+            <div className="mt-6 grid gap-3 text-sm leading-6 text-slate-600 md:grid-cols-3">
+              <div className="rounded-md border border-slate-200 bg-white/60 p-4">
+                <p className="font-semibold text-slate-950">Practice loop</p>
+                <p className="mt-2">Receive one tailored challenge, submit work before the deadline, and review the correction.</p>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white/60 p-4">
+                <p className="font-semibold text-slate-950">Evidence first</p>
+                <p className="mt-2">Responses can include notes, commands, screenshots, files, and structured reasoning.</p>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white/60 p-4">
+                <p className="font-semibold text-slate-950">Long memory</p>
+                <p className="mt-2">PIS, ERT, streaks, and notebook entries show whether your discipline is compounding.</p>
+              </div>
+            </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               <Metric icon={<CircleGauge size={18} />} label="PIS starts" value="50" />
               <Metric icon={<CalendarClock size={18} />} label="Deadline" value="15:00" />
@@ -929,7 +945,7 @@ export function GurunetApp() {
               <button
                 type="button"
                 onClick={() => setAuthMode("signup")}
-                className={`interactive-lift flex h-10 flex-1 items-center justify-center gap-2 rounded-md text-sm font-semibold ${authMode === "signup" ? "bg-white text-cyan-800 shadow-sm" : "text-slate-600"}`}
+                className={`interactive-lift flex h-10 flex-1 items-center justify-center gap-2 rounded-md text-sm font-semibold ${authMode === "signup" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}
               >
                 <UserPlus size={16} />
                 Sign up
@@ -937,7 +953,7 @@ export function GurunetApp() {
               <button
                 type="button"
                 onClick={() => setAuthMode("login")}
-                className={`interactive-lift flex h-10 flex-1 items-center justify-center gap-2 rounded-md text-sm font-semibold ${authMode === "login" ? "bg-white text-cyan-800 shadow-sm" : "text-slate-600"}`}
+                className={`interactive-lift flex h-10 flex-1 items-center justify-center gap-2 rounded-md text-sm font-semibold ${authMode === "login" ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"}`}
               >
                 <KeyRound size={16} />
                 Login
@@ -974,7 +990,7 @@ export function GurunetApp() {
 
             <button
               disabled={busy}
-              className="interactive-lift mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white shadow-sm shadow-cyan-900/15 disabled:opacity-60"
+              className="interactive-lift mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm shadow-slate-900/15 disabled:opacity-60"
             >
               {busy ? <Loader2 className="animate-spin" size={16} /> : <ChevronRight size={16} />}
               Enter GURUnet
@@ -1002,6 +1018,11 @@ export function GurunetApp() {
               Due {deadline}
             </span>
           </div>
+          <p className="mb-4 max-w-4xl text-sm leading-6 text-slate-600">
+            Today&apos;s work is the operating loop: understand the prompt, produce
+            defensible evidence, submit before the deadline, then use the correction
+            and notebook to tighten tomorrow&apos;s attempt.
+          </p>
 
           <div className="grid gap-4">
             <article className="glass-panel rounded-md p-4 sm:p-5">
@@ -1213,30 +1234,31 @@ function StudyProfileOnboarding({
   return (
     <section className="grid w-full gap-5 px-2 py-4 sm:px-3">
       <div>
-        <p className="font-mono text-xs uppercase tracking-[0.16em] text-cyan-800">
+        <p className="font-mono text-xs uppercase tracking-[0.16em] text-slate-500">
           Study profile
         </p>
         <h1 className="mt-2 text-3xl font-semibold tracking-normal">
-          Configure GURUnet as a rigorous capacity builder.
+          Calibrate the system before it starts challenging you.
         </h1>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-          Choose a governed STEM/technical discipline and concrete evidence
-          standards. The examiner will use this to shape challenges, response
-          templates, grading language, and notebook guidance.
+          GURUnet is not trying to guess your field from vague prompts. This
+          profile gives the examiner enough structure to generate useful work,
+          expect the right evidence, and grade you against standards that fit the
+          discipline.
         </p>
-        <div className="mt-4 grid gap-2 rounded-md border border-cyan-700/15 bg-cyan-50 p-4 text-sm leading-6 text-cyan-950">
-          <p className="font-semibold">How validation works</p>
-          <p>
-            Pick focused options, not every option. GURUnet uses these choices to
-            generate daily challenges, select evidence standards, tune grading
-            language, and shape the notebook. Broad selections make the system
-            less rigorous, so some groups have maximum limits.
-          </p>
-          <p>
-            Required: primary discipline, at least 3 ranked topics, at least 2
-            formats, at least 2 evidence types, at least 1 weak area, at least 1
-            professional goal, 1-40 weekly hours, and a difficulty target.
-          </p>
+        <div className="mt-4 grid gap-3 rounded-md border border-slate-200 bg-white/65 p-4 text-sm leading-6 text-slate-600 md:grid-cols-3">
+          <div>
+            <p className="font-semibold text-slate-950">What it controls</p>
+            <p className="mt-1">Challenge topics, formats, response templates, evidence standards, grading language, and notebook emphasis.</p>
+          </div>
+          <div>
+            <p className="font-semibold text-slate-950">What to avoid</p>
+            <p className="mt-1">Selecting everything. A focused profile gives the examiner sharper judgment and better recovery work.</p>
+          </div>
+          <div>
+            <p className="font-semibold text-slate-950">Minimum signal</p>
+            <p className="mt-1">Pick 3+ topics, 2+ formats, 2+ evidence types, 1 weak area, 1 goal, and 1-40 weekly hours.</p>
+          </div>
         </div>
       </div>
 
@@ -1378,7 +1400,7 @@ function StudyProfileOnboarding({
           <div className={`rounded-md border p-4 text-sm leading-6 ${
             visibleErrors.length > 0
               ? "border-orange-200 bg-orange-50 text-orange-900"
-              : "border-cyan-700/15 bg-cyan-50 text-cyan-900"
+              : "border-slate-200 bg-white/70 text-slate-700"
           }`}>
             {status && <p className="font-semibold">{status}</p>}
             {visibleErrors.length > 0 && (
@@ -1390,7 +1412,7 @@ function StudyProfileOnboarding({
             )}
           </div>
         )}
-        <button disabled={busy} className="h-11 w-fit rounded-md bg-cyan-700 px-5 text-sm font-semibold text-white disabled:opacity-60">
+        <button disabled={busy} className="h-11 w-fit rounded-md bg-slate-950 px-5 text-sm font-semibold text-white disabled:opacity-60">
           Save profile
         </button>
       </form>
@@ -1458,8 +1480,8 @@ function CheckboxGrid({
   const countTone =
     min && selected.length < min
       ? "text-orange-700"
-      : max && selected.length >= max
-        ? "text-cyan-800"
+    : max && selected.length >= max
+        ? "text-slate-700"
         : "text-slate-500";
 
   return (
@@ -1485,7 +1507,7 @@ function CheckboxGrid({
               key={`${name}-${value}`}
               className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${
                 checked
-                  ? "border-cyan-700/30 bg-cyan-50 text-cyan-950"
+                  ? "border-slate-400 bg-slate-50 text-slate-950"
                   : disabled
                     ? "border-slate-200 bg-slate-50 text-slate-400"
                     : "border-slate-200 bg-white/60 text-slate-700"
@@ -1758,7 +1780,7 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
 
 function AppHeader({ user, onLogout }: { user?: SafeUser; onLogout?: () => void }) {
   return (
-    <header className="border-b border-cyan-950/10 bg-white/55 backdrop-blur-xl">
+    <header className="border-b border-slate-200/80 bg-white/62 backdrop-blur-xl">
       <div className="flex w-full items-center justify-between px-2 py-3 sm:px-3">
         <div className="flex items-center gap-3">
           <Image
@@ -1770,10 +1792,10 @@ function AppHeader({ user, onLogout }: { user?: SafeUser; onLogout?: () => void 
             priority
           />
           <div>
-            <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-700">
+            <p className="font-mono text-xs uppercase tracking-[0.18em] text-slate-500">
               GURUnet
             </p>
-            <h2 className="text-lg font-semibold">Engineering discipline</h2>
+            <h2 className="text-lg font-semibold">Structured capacity builder</h2>
           </div>
         </div>
         {user && (
@@ -1820,7 +1842,7 @@ function Field({
         required
         minLength={name === "password" ? 8 : name === "name" ? 2 : undefined}
         autoComplete={autoCompleteFor(name, type)}
-        className="h-11 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
+        className="h-11 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-500/10"
       />
     </label>
   );
@@ -1835,8 +1857,8 @@ function autoCompleteFor(name: string, type: string) {
 
 function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-md border border-cyan-950/10 bg-white/55 p-4">
-      <div className="flex items-center gap-2 text-cyan-700">{icon}</div>
+    <div className="rounded-md border border-slate-200 bg-white/58 p-4">
+      <div className="flex items-center gap-2 text-slate-600">{icon}</div>
       <p className="mt-4 text-sm font-medium text-slate-500">{label}</p>
       <p className="text-2xl font-semibold text-slate-950">{value}</p>
     </div>
@@ -1850,15 +1872,15 @@ function SectionNav() {
     { href: "#social", label: "Social", icon: <Users size={15} /> },
   ];
   return (
-    <nav className="sticky top-0 z-30 border-b border-cyan-950/10 bg-white/72 backdrop-blur-xl">
+    <nav className="sticky top-0 z-30 border-b border-slate-200/85 bg-white/76 backdrop-blur-xl">
       <div className="flex w-full gap-6 overflow-x-auto px-2 py-2 sm:px-3">
         {items.map((item) => (
           <a
             key={item.href}
             href={item.href}
-            className="nav-link group flex h-8 shrink-0 items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 transition-colors hover:text-cyan-800"
+            className="nav-link group flex h-8 shrink-0 items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 transition-colors hover:text-slate-950"
           >
-            <span className="text-cyan-700/80 group-hover:text-cyan-800">{item.icon}</span>
+            <span className="text-slate-500 group-hover:text-slate-900">{item.icon}</span>
             {item.label}
           </a>
         ))}
@@ -3670,13 +3692,13 @@ function readAttachment(file: File): Promise<SubmissionAttachment> {
 
 function Footer() {
   return (
-    <footer className="flex w-full flex-col gap-2 px-2 pb-6 pt-2 text-xs text-slate-500 sm:px-3 md:flex-row md:items-center md:justify-between">
+    <footer className="mt-auto flex w-full flex-col gap-2 px-2 pb-6 pt-4 text-xs text-slate-500 sm:px-3 md:flex-row md:items-center md:justify-between">
       <p>© {new Date().getFullYear()} GURUnet. Licensed under Apache-2.0.</p>
       <div className="flex items-center gap-3">
-        <a href="/admin" className="text-slate-400 transition-colors hover:text-cyan-800" aria-label="System settings" title="System">
+        <a href="/admin" className="text-slate-400 transition-colors hover:text-slate-800" aria-label="System settings" title="System">
           <Settings size={15} />
         </a>
-        <p className="font-mono text-cyan-800">GURUnet · Designed by Kikandi.</p>
+        <p className="font-mono text-slate-600">GURUnet · Designed by Kikandi.</p>
       </div>
     </footer>
   );
