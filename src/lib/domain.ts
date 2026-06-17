@@ -46,6 +46,7 @@ export type DisciplineSnapshot = {
   rubric: Record<string, RubricAxis>;
   targetDifficulty: Difficulty;
   weeklyTimeBudgetHours: number;
+  preferenceNotes?: string;
 };
 
 export type StudyProfile = {
@@ -63,6 +64,7 @@ export type StudyProfile = {
   goals: string[];
   customDiscipline?: string;
   customStatus?: string;
+  preferenceNotes?: string;
   completedAt?: string;
   createdAt: string;
   updatedAt: string;

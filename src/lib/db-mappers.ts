@@ -139,6 +139,7 @@ export function fromDbStudyProfile(profile: DbUserStudyProfile): StudyProfile {
     goals: profile.goals,
     customDiscipline: profile.customDiscipline ?? undefined,
     customStatus: profile.customStatus ?? undefined,
+    preferenceNotes: profile.preferenceNotes ?? undefined,
     completedAt: profile.completedAt?.toISOString(),
     createdAt: profile.createdAt.toISOString(),
     updatedAt: profile.updatedAt.toISOString(),

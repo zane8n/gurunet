@@ -169,6 +169,7 @@ type StudyProfile = {
   goals: string[];
   customDiscipline?: string;
   customStatus?: string;
+  preferenceNotes?: string;
   completedAt?: string;
 };
 
@@ -273,6 +274,7 @@ function profileFieldLabel(field: string) {
     avoidAreas: "Avoid areas",
     goals: "Professional goals",
     customDiscipline: "Custom request",
+    preferenceNotes: "Written preferences",
   };
   return labels[field] ?? field;
 }
@@ -1198,6 +1200,7 @@ function StudyProfileOnboarding({
       avoidAreas: form.getAll("avoidAreas").map(String),
       goals: form.getAll("goals").map(String),
       customDiscipline: String(form.get("customDiscipline") || "") || undefined,
+      preferenceNotes: String(form.get("preferenceNotes") || "") || undefined,
     };
     const nextErrors = validateStudyProfileInput(input);
     setClientErrors(nextErrors);
@@ -1325,6 +1328,18 @@ function StudyProfileOnboarding({
               <input name="customDiscipline" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Optional" />
             </label>
           </div>
+          <label className="mt-4 grid gap-1.5 text-sm font-medium text-slate-700">
+            Written preferences
+            <textarea
+              name="preferenceNotes"
+              className="min-h-24 rounded-md border border-slate-300 bg-white p-3 text-sm leading-6"
+              maxLength={1000}
+              placeholder="Example: I prefer hands-on lab challenges with clear setup, tasks, evidence capture, and validation. Avoid purely theoretical questions unless needed."
+            />
+            <span className="text-xs font-normal leading-5 text-slate-500">
+              Optional. Use this for bespoke preferences that do not fit the checkboxes. The backend stores this as guidance; it does not override safety or grading rules.
+            </span>
+          </label>
         </div>
 
         <div className="grid gap-5 lg:grid-cols-2">

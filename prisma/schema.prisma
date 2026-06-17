@@ -76,6 +76,7 @@ model User {
   examinerMessages  ExaminerMessage[]
   challengeSettings UserChallengeSettings?
   studyProfile      UserStudyProfile?
+  supportActions    SupportAction[]
   accounts          Account[]
   challenges        Challenge[]
   submissions       Submission[]
@@ -234,11 +235,26 @@ model UserStudyProfile {
   goals                 String[]
   customDiscipline      String?
   customStatus          String?
+  preferenceNotes       String?
   completedAt           DateTime?
   createdAt             DateTime   @default(now())
   updatedAt             DateTime   @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SupportAction {
+  id        String   @id
+  userId    String
+  actor     String
+  type      String
+  dedupeKey String   @unique
+  reason    String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 model Submission {

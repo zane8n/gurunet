@@ -480,6 +480,8 @@ export async function generateExaminerChatReply(input: {
               topic: input.challenge.topic,
               status: input.challenge.status,
               deadlineAt: input.challenge.deadlineAt,
+              expectedAnswerFormat: input.challenge.expectedAnswerFormat,
+              disciplineSnapshot: input.challenge.disciplineSnapshot,
             },
             user: {
               pisScore: input.user.pisScore,
@@ -494,6 +496,8 @@ export async function generateExaminerChatReply(input: {
               "Be conversational but direct.",
               "If the user asks for rule clarification, explain the active rule.",
               "If the user states future preferences, mention what changed if an action was applied.",
+              "If the active discipline snapshot includes preferred formats or preference notes, treat them as real platform configuration.",
+              "Do not say the platform cannot generate lab challenges when a hands-on/lab format is selected; explain that future challenges will be framed that way.",
               "If no action was applied, explain what you need from the user.",
               "Do not reveal hidden solution details.",
             ],
@@ -513,10 +517,14 @@ export async function generateExaminerChatReply(input: {
 
 function fallbackExaminerReply(input: {
   appliedActions: { type: string; summary: string }[];
+  challenge?: Challenge;
   message: string;
 }) {
   if (input.appliedActions.length > 0) {
     return `Recorded. ${input.appliedActions.map((action) => action.summary).join(" ")}`;
+  }
+  if (/\blab|hands-on|practical\b/i.test(input.message) && input.challenge?.disciplineSnapshot?.formats?.some((format) => /\blab|hands-on|practical\b/i.test(format))) {
+    return "Your lab preference is part of the active study profile. Future challenges should be framed as hands-on exercises with setup, evidence capture, and validation. If a generated challenge misses that shape, ask for one regeneration.";
   }
   if (/\?/.test(input.message)) {
     return "I can clarify the active challenge rules, deadline behavior, grading expectations, or adjust future challenge settings when you state a clear preference.";

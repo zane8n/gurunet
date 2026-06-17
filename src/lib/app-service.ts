@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import type {
   DisciplineRecord,
@@ -135,6 +136,19 @@ export const studyProfileSchema = z.object({
   avoidAreas: z.array(z.string().trim().min(2).max(80)).max(8).default([]),
   goals: z.array(z.string().trim().min(5).max(140)).min(1).max(6),
   customDiscipline: z.string().trim().min(3).max(80).optional(),
+  preferenceNotes: z.string().trim().max(1000).optional(),
+});
+
+export const supportUserLookupSchema = z.object({
+  email: z.string().trim().email().max(160).optional(),
+  userId: z.string().trim().min(2).max(120).optional(),
+}).refine((value) => value.email || value.userId, {
+  message: "Provide email or userId.",
+});
+
+export const supportActionSchema = supportUserLookupSchema.extend({
+  action: z.enum(["RegenerateTodayChallenge", "ClearStudyConfiguration"]),
+  reason: z.string().trim().min(3).max(400).optional(),
 });
 
 export function getDisciplineCatalog() {
@@ -172,6 +186,7 @@ export async function updateStudyProfile(
       goals: input.goals,
       customDiscipline: input.customDiscipline,
       customStatus,
+      preferenceNotes: input.preferenceNotes,
       completedAt: new Date(),
     },
     create: {
@@ -189,6 +204,7 @@ export async function updateStudyProfile(
       goals: input.goals,
       customDiscipline: input.customDiscipline,
       customStatus,
+      preferenceNotes: input.preferenceNotes,
       completedAt: new Date(),
     },
   });
@@ -376,6 +392,72 @@ export async function getOrCreateTodayChallenge(user: User) {
 
 export async function forceGenerateChallenge(user: User) {
   return getOrCreateTodayChallenge(user);
+}
+
+export async function getSupportUserSnapshot(input: z.infer<typeof supportUserLookupSchema>) {
+  const target = await findSupportTargetUser(input);
+  const user = fromDbUser(target);
+  const [profileState, settings, latestChallenges, supportActions] = await Promise.all([
+    getStudyProfile(user),
+    getChallengeSettings(user),
+    prisma.challenge.findMany({
+      where: { userId: user.id },
+      include: { submissions: true, grades: true },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+    prisma.supportAction.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    }),
+  ]);
+
+  return {
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      timezone: user.timezone,
+      pisScore: user.pisScore,
+      ertBalance: user.ertBalance,
+      currentStreak: user.currentStreak,
+    },
+    studyProfile: profileState.studyProfile,
+    activeDiscipline: profileState.activeDiscipline,
+    challengeSettings: settings,
+    latestChallenges: latestChallenges.map((challenge) => ({
+      id: challenge.id,
+      dateKey: challenge.dateKey,
+      title: challenge.title,
+      topic: challenge.topic,
+      status: fromDbStatus(challenge.status),
+      difficulty: challenge.difficulty,
+      submissions: challenge.submissions.length,
+      grades: challenge.grades.length,
+      preferredFormat: fromDbChallenge(challenge).disciplineSnapshot?.formats?.[0] ?? null,
+      createdAt: challenge.createdAt.toISOString(),
+    })),
+    supportActions: supportActions.map((action) => ({
+      id: action.id,
+      type: action.type,
+      actor: action.actor,
+      reason: action.reason,
+      createdAt: action.createdAt.toISOString(),
+    })),
+  };
+}
+
+export async function runSupportAction(
+  actor: string,
+  input: z.infer<typeof supportActionSchema>,
+) {
+  const target = await findSupportTargetUser(input);
+  const user = fromDbUser(target);
+  if (input.action === "RegenerateTodayChallenge") {
+    return regenerateTodayChallengeOnce(actor, user, input.reason);
+  }
+  return clearStudyConfiguration(actor, user, input.reason);
 }
 
 export async function ensureMissedPreviousChallenge(user: User) {
@@ -1159,9 +1241,12 @@ function createDailyChallenge(
   const challenge = templateFallbackChallenge(user, options.recovery, options.pressure, options.dateKey);
   if (!options.settings && !options.discipline) return challenge;
   const discipline = options.discipline ?? defaultDisciplineSnapshot();
+  const preferredFormat = discipline.formats[0] ?? "Practical assessment";
+  const isLab = /\blab|hands-on|practical|exercise\b/i.test(preferredFormat);
   return {
     ...challenge,
     topic: discipline.label,
+    title: isLab ? `${discipline.label} lab: ${challenge.title}` : `${preferredFormat}: ${challenge.title}`,
     difficulty: higherDifficulty(challenge.difficulty, options.settings?.difficultyFloor ?? discipline.targetDifficulty),
     objective: options.settings?.topicFocus
       ? `${challenge.objective} Focus the work on: ${options.settings.topicFocus}.`
@@ -1170,10 +1255,19 @@ function createDailyChallenge(
       : challenge.objective,
     constraints: [
       ...challenge.constraints,
+      `Preferred challenge format: ${preferredFormat}.`,
+      ...(isLab
+        ? [
+            "Frame this as a lab-style exercise with a concrete setup, task, evidence capture, and validation step.",
+          ]
+        : []),
+      ...(discipline.preferenceNotes
+        ? [`User preference notes: ${discipline.preferenceNotes}.`]
+        : []),
       `Target completion time: ${options.settings?.durationMinutes ?? Math.max(30, Math.min(120, discipline.weeklyTimeBudgetHours * 12))} minutes.`,
       `Expected evidence style: ${discipline.evidenceTypes.join(", ")}.`,
     ],
-    expectedAnswerFormat: discipline.responseSections.join(" -> "),
+    expectedAnswerFormat: `${preferredFormat}. ${discipline.responseSections.join(" -> ")}`,
     submissionRequirements: discipline.evidenceTypes.slice(0, 5),
   };
 }
@@ -1261,6 +1355,7 @@ function snapshotFromProfile(profile: StudyProfile) {
     evidenceTypes: profile.evidenceTypes,
     targetDifficulty: profile.targetDifficulty,
     weeklyTimeBudgetHours: profile.weeklyTimeBudgetHours,
+    preferenceNotes: profile.preferenceNotes,
   });
 }
 
@@ -1433,6 +1528,148 @@ function currentChallengeDateKey(
     (item) => item.userId === user.id && item.dateKey === rolledKey,
   );
   return hasPreviousChallenge ? rolledKey : calendarToday;
+}
+
+async function findSupportTargetUser(input: { email?: string; userId?: string }) {
+  const user = await prisma.user.findFirst({
+    where: input.userId
+      ? { id: input.userId }
+      : { email: input.email?.toLowerCase() },
+  });
+  if (!user) throw new Response("User not found", { status: 404 });
+  return user;
+}
+
+async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: string) {
+  const existingChallenges = await prisma.challenge.findMany({
+    where: { userId: user.id },
+    select: { userId: true, dateKey: true, createdAt: true },
+  });
+  const today = currentChallengeDateKey(user, existingChallenges);
+  const challenge = await prisma.challenge.findFirst({
+    where: { userId: user.id, dateKey: today },
+    include: { submissions: true, grades: true },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!challenge) throw new Response("No challenge exists for today yet", { status: 404 });
+  if (challenge.submissions.length > 0 || challenge.grades.length > 0) {
+    throw new Response("Today challenge cannot be regenerated after submission or grading", { status: 409 });
+  }
+
+  const dedupeKey = `support:regen:${user.id}:${today}`;
+  const [records, recentGrades, settings, profileState] = await Promise.all([
+    prisma.weeklyDisciplineRecord.findMany({ where: { userId: user.id } }),
+    prisma.grade.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      take: 3,
+      select: { nextImprovementTarget: true },
+    }),
+    getChallengeSettings(user),
+    getStudyProfile(user),
+  ]);
+  const next = createDailyChallenge(user, {
+    dateKey: today,
+    recovery: settings.recoveryMode || needsRecovery(records.map(fromDbDisciplineRecord), user),
+    pressure: false,
+    recentWeaknesses: recentGrades.map((grade) => grade.nextImprovementTarget),
+    settings,
+    discipline: profileState.activeDiscipline,
+  });
+
+  try {
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.supportAction.create({
+        data: {
+          id: createId("sup"),
+          userId: user.id,
+          actor,
+          type: "RegenerateTodayChallenge",
+          dedupeKey,
+          reason,
+        },
+      });
+      return tx.challenge.update({
+        where: { id: challenge.id },
+        data: {
+          title: next.title,
+          difficulty: next.difficulty,
+          topic: next.topic,
+          scenario: next.scenario,
+          objective: next.objective,
+          constraints: next.constraints,
+          allowedTools: next.allowedTools,
+          expectedAnswerFormat: next.expectedAnswerFormat,
+          submissionRequirements: next.submissionRequirements,
+          deadlineAt: new Date(next.deadlineAt),
+          solution: next.solution,
+          antiGenericRequirement: next.antiGenericRequirement,
+          status: toDbStatus(next.status),
+          isRecovery: next.isRecovery,
+          isPressure: next.isPressure,
+          disciplineSnapshot: profileState.activeDiscipline,
+          createdAt: new Date(),
+        },
+      });
+    });
+
+    await enqueueAiJob("ChallengeGeneration", `challenge-regenerate:${user.id}:${today}`, {
+      userId: user.id,
+      challengeId: updated.id,
+      dateKey: today,
+      difficulty: difficultyForPis(user.pisScore),
+      track: settings.track,
+      topicFocus: settings.topicFocus,
+      durationMinutes: settings.durationMinutes,
+      disciplineSnapshot: profileState.activeDiscipline,
+    });
+
+    return {
+      action: "RegenerateTodayChallenge",
+      remainingToday: 0,
+      challenge: fromDbChallenge(updated),
+    };
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw new Response("Today challenge has already been regenerated once", { status: 409 });
+    }
+    throw error;
+  }
+}
+
+async function clearStudyConfiguration(actor: string, user: User, reason?: string) {
+  const timezone = getUserTimezone(user.timezone);
+  const today = dateKeyFor(new Date(), timezone);
+  const dedupeKey = `support:clear-config:${user.id}:${today}`;
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.supportAction.create({
+        data: {
+          id: createId("sup"),
+          userId: user.id,
+          actor,
+          type: "ClearStudyConfiguration",
+          dedupeKey,
+          reason,
+        },
+      });
+      await tx.userStudyProfile.deleteMany({ where: { userId: user.id } });
+      await tx.userChallengeSettings.deleteMany({ where: { userId: user.id } });
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw new Response("Configuration has already been cleared once today", { status: 409 });
+    }
+    throw error;
+  }
+  return {
+    action: "ClearStudyConfiguration",
+    onboardingRequired: true,
+  };
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
 async function getSocialData(userId: string) {
