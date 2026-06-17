@@ -257,6 +257,13 @@ model SupportAction {
   @@index([userId, createdAt])
 }
 
+model AdminCredential {
+  id           String   @id
+  passwordHash String
+  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @default(now())
+}
+
 model Submission {
   id                   String   @id
   challengeId          String

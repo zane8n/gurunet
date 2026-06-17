@@ -1673,7 +1673,7 @@ function isUniqueConstraintError(error: unknown) {
 }
 
 async function getSocialData(userId: string) {
-  const [users, grades, challenges, friendships, marketplaceChallenges, challengeEnrollments] =
+  const [users, grades, challenges, friendships, marketplaceChallenges, challengeEnrollments, studyProfiles] =
     await Promise.all([
       prisma.user.findMany(),
       prisma.grade.findMany(),
@@ -1683,6 +1683,7 @@ async function getSocialData(userId: string) {
       }),
       prisma.marketplaceChallenge.findMany({ orderBy: { createdAt: "asc" } }),
       prisma.challengeEnrollment.findMany(),
+      prisma.userStudyProfile.findMany(),
     ]);
 
   return {
@@ -1707,6 +1708,7 @@ async function getSocialData(userId: string) {
       marketplaceChallengeId: enrollment.marketplaceChallengeId,
       createdAt: enrollment.createdAt.toISOString(),
     })),
+    studyProfiles: studyProfiles.map(fromDbStudyProfile),
   };
 }
 
@@ -1719,6 +1721,7 @@ function buildSocialSnapshot(
     friendships: { id: string; userId: string; friendId: string; status: "Accepted"; createdAt: string }[];
     marketplaceChallenges: MarketplaceChallenge[];
     challengeEnrollments: { id: string; userId: string; marketplaceChallengeId: string; createdAt: string }[];
+    studyProfiles: StudyProfile[];
   },
 ) {
   const friendIds = new Set(
@@ -1733,6 +1736,9 @@ function buildSocialSnapshot(
   }
 
   const profiles = data.users.map((item) => ({
+    preferredProfession: preferredProfessionFor(
+      data.studyProfiles.find((profile) => profile.userId === item.id),
+    ),
     id: item.id,
     name: item.name,
     handle: `@${item.email.split("@")[0].replace(/[^a-z0-9_]+/gi, "").toLowerCase() || "engineer"}`,
@@ -1775,6 +1781,12 @@ function buildSocialSnapshot(
     })),
     enrollments: data.challengeEnrollments.filter((item) => item.userId === user.id),
   };
+}
+
+function preferredProfessionFor(profile?: StudyProfile) {
+  if (!profile) return "Not configured";
+  if (profile.customDiscipline && profile.customStatus === "Validated") return profile.customDiscipline;
+  return getDiscipline(profile.primaryDiscipline).label;
 }
 
 async function ensureMarketplaceCatalog() {

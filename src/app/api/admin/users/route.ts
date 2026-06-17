@@ -4,7 +4,7 @@ import { getSupportUserSnapshot, supportUserLookupSchema } from "@/lib/app-servi
 
 export async function GET(request: Request) {
   try {
-    requireAdminSecret(request);
+    await requireAdminSecret(request);
     const url = new URL(request.url);
     const input = supportUserLookupSchema.parse({
       email: url.searchParams.get("email") ?? undefined,

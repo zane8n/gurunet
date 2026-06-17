@@ -5,12 +5,9 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --font-app-sans: "Hurmit Light Nerd Font Mono", "Hurmit Nerd Font Mono",
-    "Hermit Nerd Font Mono", "Hurmit Nerd Font", "JetBrainsMono Nerd Font",
-    "CaskaydiaCove Nerd Font", "SFMono-Regular", Consolas, "Liberation Mono",
-    ui-monospace, monospace;
-  --font-app-mono: "Hurmit Light Nerd Font Mono", "Hurmit Nerd Font Mono",
-    "Hermit Nerd Font Mono", "JetBrainsMono Nerd Font", "SFMono-Regular",
+  --font-app-sans: Inter, Aptos, "Aptos Display", "Segoe UI", "Helvetica Neue",
+    Arial, ui-sans-serif, system-ui, sans-serif;
+  --font-app-mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code",
     Consolas, "Liberation Mono", ui-monospace, monospace;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);

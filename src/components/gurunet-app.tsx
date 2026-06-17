@@ -76,6 +76,7 @@ type PublicProfile = {
   id: string;
   name: string;
   handle: string;
+  preferredProfession: string;
   pisScore: number;
   ertBalance: number;
   currentStreak: number;
@@ -3151,10 +3152,10 @@ function SocialPanel({
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,0.72fr)]">
         <div className="grid gap-4">
           <div className="overflow-x-auto rounded-md border border-slate-200 bg-white/65">
-            <table className="w-full min-w-[560px] text-left text-sm">
+            <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="border-b border-slate-200 text-slate-500">
                 <tr>
-                  {["Rank", "Profile", "PIS", "Streak", "Latest"].map((head) => (
+                {["Rank", "Profile", "Preferred profession", "PIS", "Streak", "Latest"].map((head) => (
                     <th key={head} className="px-3 py-3 font-semibold">
                       {head}
                     </th>
@@ -3172,6 +3173,7 @@ function SocialPanel({
                       </p>
                       <p className="text-xs text-slate-500">{row.handle}</p>
                     </td>
+                    <td className="px-3 py-3 text-slate-600">{row.preferredProfession}</td>
                     <td className="px-3 py-3">{row.pisScore.toFixed(1)}</td>
                     <td className="px-3 py-3">{row.currentStreak}</td>
                     <td className="px-3 py-3">{row.latestScore ?? "-"}</td>
@@ -3615,7 +3617,12 @@ function Footer() {
   return (
     <footer className="mx-auto flex w-full max-w-5xl flex-col gap-2 px-4 pb-8 pt-2 text-xs text-slate-500 sm:px-6 md:flex-row md:items-center md:justify-between">
       <p>© {new Date().getFullYear()} Kikandi. Licensed under Apache-2.0.</p>
-      <p className="font-mono text-teal-800">GURUnet · Designed by Kikandi.</p>
+      <div className="flex items-center gap-3">
+        <a href="/admin" className="text-slate-400 transition-colors hover:text-teal-800">
+          Backend
+        </a>
+        <p className="font-mono text-teal-800">GURUnet · Designed by Kikandi.</p>
+      </div>
     </footer>
   );
 }
