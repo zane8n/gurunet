@@ -14,17 +14,17 @@ export default function manifest(): MetadataRoute.Manifest {
     categories: ["education", "productivity", "developer"],
     icons: [
       {
-        src: "/favicon-16x16.png?v=4",
+        src: "/favicon-16x16.png?v=5",
         sizes: "16x16",
         type: "image/png",
       },
       {
-        src: "/favicon-32x32.png?v=4",
+        src: "/favicon-32x32.png?v=5",
         sizes: "32x32",
         type: "image/png",
       },
       {
-        src: "/gurunet.png?v=4",
+        src: "/gurunet.png?v=5",
         sizes: "512x512",
         type: "image/png",
       },
