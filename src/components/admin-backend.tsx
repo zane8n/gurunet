@@ -166,7 +166,7 @@ export function AdminBackend() {
 
   return (
     <main className="app-background min-h-screen text-slate-950">
-      <section className="mx-auto grid w-full max-w-4xl gap-4 px-4 py-8 sm:px-6">
+      <section className="grid w-full gap-4 px-2 py-4 sm:px-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-800">
             GURUnet backend
@@ -179,7 +179,7 @@ export function AdminBackend() {
         </div>
 
         {!authenticated ? (
-          <form onSubmit={login} className="quiet-panel grid max-w-md gap-3 rounded-md p-4">
+          <form onSubmit={login} className="quiet-panel grid gap-3 rounded-md p-4">
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Backend password
               <input

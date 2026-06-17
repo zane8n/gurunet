@@ -901,7 +901,7 @@ export function GurunetApp() {
     return (
       <main className="app-background min-h-screen text-slate-950">
         <AppHeader />
-        <section className="soft-enter mx-auto grid w-full max-w-6xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[1.05fr_0.95fr]">
+        <section className="soft-enter grid w-full gap-6 px-2 py-6 sm:px-3 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="flex flex-col justify-center rounded-md px-1 py-4">
             <p className="w-fit rounded-md border border-teal-700/20 bg-teal-50 px-3 py-1 font-mono text-xs uppercase tracking-[0.16em] text-teal-800">
               Personal engineering discipline
@@ -991,7 +991,7 @@ export function GurunetApp() {
       <SectionNav />
 
       <section id="daily-challenge" className="scroll-mt-28 border-b border-teal-950/10">
-        <div className="mx-auto w-full max-w-5xl px-4 py-5 sm:px-6">
+        <div className="w-full px-2 py-4 sm:px-3">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <StatusPill status={today.status} />
             <span className="rounded-md border border-teal-700/15 bg-white/70 px-3 py-1 font-mono text-xs uppercase tracking-[0.14em] text-teal-800">
@@ -1021,7 +1021,7 @@ export function GurunetApp() {
                   <h1 className="mt-2 text-3xl font-semibold tracking-normal">
                     {today.title}
                   </h1>
-                  <p className="mt-3 max-w-5xl leading-7 text-slate-600">
+                  <p className="mt-3 leading-7 text-slate-600">
                     {today.scenario}
                   </p>
 
@@ -1083,7 +1083,7 @@ export function GurunetApp() {
       </section>
 
       <section id="metrics" className="scroll-mt-28 border-b border-teal-950/10 bg-white/25">
-        <div className="mx-auto grid w-full max-w-5xl gap-4 px-4 py-5 sm:px-6">
+        <div className="grid w-full gap-4 px-2 py-4 sm:px-3">
           <MetricsBand
             grade={todayGrade}
             nextUnlock={nextUnlock}
@@ -1094,7 +1094,7 @@ export function GurunetApp() {
       </section>
 
       <section id="social" className="scroll-mt-28">
-        <div className="mx-auto grid w-full max-w-5xl gap-4 px-4 py-5 sm:px-6">
+        <div className="grid w-full gap-4 px-2 py-4 sm:px-3">
           <SocialPanel
             social={dashboard.social}
             busy={busy}
@@ -1210,7 +1210,7 @@ function StudyProfileOnboarding({
   }
 
   return (
-    <section className="mx-auto grid w-full max-w-6xl gap-6 px-5 py-8 sm:px-8">
+    <section className="grid w-full gap-5 px-2 py-4 sm:px-3">
       <div>
         <p className="font-mono text-xs uppercase tracking-[0.16em] text-teal-800">
           Study profile
@@ -1704,7 +1704,7 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
 function AppHeader({ user, onLogout }: { user?: SafeUser; onLogout?: () => void }) {
   return (
     <header className="border-b border-teal-950/10 bg-white/55 backdrop-blur-xl">
-      <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-4 sm:px-6">
+      <div className="flex w-full items-center justify-between px-2 py-3 sm:px-3">
         <div className="flex items-center gap-3">
           <Image
             src="/gurunet.svg"
@@ -1796,7 +1796,7 @@ function SectionNav() {
   ];
   return (
     <nav className="sticky top-0 z-30 border-b border-teal-950/10 bg-white/72 backdrop-blur-xl">
-      <div className="mx-auto flex w-full max-w-5xl gap-6 overflow-x-auto px-4 py-3 sm:px-6">
+      <div className="flex w-full gap-6 overflow-x-auto px-2 py-2 sm:px-3">
         {items.map((item) => (
           <a
             key={item.href}
@@ -1814,7 +1814,7 @@ function SectionNav() {
 
 function DashboardSkeleton() {
   return (
-    <section className="mx-auto grid w-full max-w-5xl gap-4 px-4 py-5 sm:px-6">
+    <section className="grid w-full gap-4 px-2 py-4 sm:px-3">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
         <div className="glass-panel rounded-md p-5">
           <SkeletonLine className="h-5 w-32" />
@@ -3615,7 +3615,7 @@ function readAttachment(file: File): Promise<SubmissionAttachment> {
 
 function Footer() {
   return (
-    <footer className="mx-auto flex w-full max-w-5xl flex-col gap-2 px-4 pb-8 pt-2 text-xs text-slate-500 sm:px-6 md:flex-row md:items-center md:justify-between">
+    <footer className="flex w-full flex-col gap-2 px-2 pb-6 pt-2 text-xs text-slate-500 sm:px-3 md:flex-row md:items-center md:justify-between">
       <p>© {new Date().getFullYear()} Kikandi. Licensed under Apache-2.0.</p>
       <div className="flex items-center gap-3">
         <a href="/admin" className="text-slate-400 transition-colors hover:text-teal-800">
