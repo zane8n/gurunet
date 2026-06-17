@@ -1643,6 +1643,7 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
   const graded = rows
     .map((row) => row.finalScore)
     .filter((score): score is number => typeof score === "number");
+  const sortedScores = [...graded].sort((a, b) => a - b);
   const frequencies = bins.map(
     (bin) => graded.filter((score) => score >= bin.min && score <= bin.max).length,
   );
@@ -1657,6 +1658,15 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
     return { x, y, count };
   });
   const line = points.map((point) => `${point.x},${point.y}`).join(" ");
+  const area = `${padX},${height - padY} ${line} ${width - padX},${height - padY}`;
+  const median =
+    sortedScores.length === 0
+      ? 0
+      : sortedScores.length % 2
+        ? sortedScores[Math.floor(sortedScores.length / 2)]
+        : (sortedScores[sortedScores.length / 2 - 1] + sortedScores[sortedScores.length / 2]) / 2;
+  const mean =
+    graded.length === 0 ? 0 : graded.reduce((total, score) => total + score, 0) / graded.length;
 
   return (
     <div>
@@ -1671,6 +1681,12 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
           role="img"
           aria-label="Final score frequency polygon"
         >
+          <defs>
+            <linearGradient id="score-area" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="#0891b2" stopOpacity="0.2" />
+              <stop offset="100%" stopColor="#0891b2" stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
           <line
             x1={padX}
             x2={width - padX}
@@ -1685,6 +1701,7 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
             y2={height - padY}
             stroke="rgba(15,23,42,0.12)"
           />
+          <polygon points={area} fill="url(#score-area)" />
           <polyline
             points={line}
             fill="none"
@@ -1715,6 +1732,25 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
             </g>
           ))}
         </svg>
+      )}
+      {graded.length > 0 && (
+        <div className="mt-2 grid grid-cols-4 gap-1 text-[10px] text-slate-500">
+          <span>
+            min <strong className="font-mono font-medium text-slate-700">{sortedScores[0]}</strong>
+          </span>
+          <span>
+            med <strong className="font-mono font-medium text-slate-700">{median.toFixed(1)}</strong>
+          </span>
+          <span>
+            avg <strong className="font-mono font-medium text-slate-700">{mean.toFixed(1)}</strong>
+          </span>
+          <span>
+            max{" "}
+            <strong className="font-mono font-medium text-slate-700">
+              {sortedScores[sortedScores.length - 1]}
+            </strong>
+          </span>
+        </div>
       )}
     </div>
   );
