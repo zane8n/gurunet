@@ -158,9 +158,10 @@
     isolation: isolate;
     overflow-x: clip;
     background:
-      radial-gradient(circle at 16% 8%, rgba(34, 211, 238, 0.2), transparent 28rem),
-      radial-gradient(circle at 82% 18%, rgba(20, 184, 166, 0.14), transparent 26rem),
-      linear-gradient(135deg, rgba(236, 254, 255, 0.94), rgba(248, 250, 252, 0.82) 42%, rgba(240, 253, 250, 0.68)),
+      radial-gradient(circle at 14% 10%, rgba(34, 211, 238, 0.22), transparent 30rem),
+      radial-gradient(circle at 86% 14%, rgba(20, 184, 166, 0.15), transparent 28rem),
+      radial-gradient(circle at 70% 88%, rgba(14, 165, 233, 0.1), transparent 30rem),
+      linear-gradient(135deg, rgba(236, 254, 255, 0.96), rgba(248, 250, 252, 0.84) 42%, rgba(240, 253, 250, 0.7)),
       #f7f8f4;
   }
 
@@ -175,30 +176,37 @@
 
   .app-background::before {
     background:
-      url("data:image/svg+xml,%3Csvg width='320' height='320' viewBox='0 0 320 320' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%230e7490' stroke-opacity='.13' stroke-width='1'%3E%3Cpath d='M18 82c42-34 78 38 122 6 42-31 86-38 162 4'/%3E%3Cpath d='M-8 198c58-42 106 36 160-2 49-35 88-32 176 8'/%3E%3Cpath d='M54 18c-8 78 54 86 48 152-4 44-38 66-18 132'/%3E%3Cpath d='M212-12c-26 66 10 94-8 144-18 51-66 68-54 174'/%3E%3Cpath d='M34 244l54-22 50 20 64-54 74 18'/%3E%3Cpath d='M48 116l66 24 54-28 70 42'/%3E%3C/g%3E%3Cg fill='%230891b2' fill-opacity='.2'%3E%3Ccircle cx='48' cy='116' r='2.5'/%3E%3Ccircle cx='168' cy='112' r='2.5'/%3E%3Ccircle cx='238' cy='154' r='2.5'/%3E%3Ccircle cx='88' cy='222' r='2.5'/%3E%3Ccircle cx='202' cy='188' r='2.5'/%3E%3C/g%3E%3C/svg%3E"),
-      radial-gradient(circle at 14% 78%, rgba(8, 145, 178, 0.09), transparent 16rem),
-      radial-gradient(circle at 92% 64%, rgba(20, 184, 166, 0.08), transparent 18rem);
+      url("data:image/svg+xml,%3Csvg width='220' height='220' viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%230891b2' stroke-opacity='.13' stroke-width='1'%3E%3Cpath d='M18 44h42v24h44v38h72'/%3E%3Cpath d='M34 168h36v-42h42V82h56'/%3E%3Cpath d='M138 18v36h34v48h-26v52'/%3E%3Cpath d='M12 112h48l22-24 30 32 28-28h68'/%3E%3Cpath d='M92 14v28M92 178v28M178 54h28M14 154h28'/%3E%3C/g%3E%3Cg fill='%230891b2' fill-opacity='.17'%3E%3Ccircle cx='18' cy='44' r='2.4'/%3E%3Ccircle cx='104' cy='106' r='2.4'/%3E%3Ccircle cx='176' cy='106' r='2.4'/%3E%3Ccircle cx='168' cy='82' r='2.4'/%3E%3Ccircle cx='70' cy='126' r='2.4'/%3E%3Ccircle cx='138' cy='54' r='2.4'/%3E%3Ccircle cx='42' cy='154' r='2.4'/%3E%3C/g%3E%3C/svg%3E"),
+      radial-gradient(circle at 1px 1px, rgba(8, 145, 178, 0.14) 1px, transparent 1.35px),
+      linear-gradient(rgba(8, 145, 178, 0.048) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(8, 145, 178, 0.04) 1px, transparent 1px);
     background-size:
-      320px 320px,
-      auto,
-      auto;
-    opacity: 0.72;
+      220px 220px,
+      38px 38px,
+      76px 76px,
+      76px 76px;
+    opacity: 0.78;
+    animation: circuit-drift 34s ease-in-out infinite alternate;
   }
 
   .app-background::after {
     background:
-      linear-gradient(112deg, transparent 0%, transparent 36%, rgba(8, 145, 178, 0.09) 46%, rgba(103, 232, 249, 0.08) 50%, transparent 61%, transparent 100%),
-      radial-gradient(circle at 58% 42%, rgba(255, 255, 255, 0.72), transparent 18rem);
-    opacity: 0.42;
-    transform: translate3d(-1.4rem, 0.4rem, 0) scale(1);
+      conic-gradient(from 138deg at 24% 42%, transparent 0deg, rgba(34, 211, 238, 0.16) 42deg, transparent 92deg, rgba(20, 184, 166, 0.14) 146deg, transparent 218deg, rgba(125, 211, 252, 0.12) 286deg, transparent 360deg),
+      radial-gradient(ellipse at 34% 72%, rgba(103, 232, 249, 0.16), transparent 28rem),
+      radial-gradient(ellipse at 74% 36%, rgba(45, 212, 191, 0.14), transparent 30rem),
+      linear-gradient(112deg, transparent 0%, transparent 35%, rgba(8, 145, 178, 0.11) 46%, rgba(240, 253, 250, 0.32) 50%, rgba(8, 145, 178, 0.08) 55%, transparent 66%, transparent 100%);
+    opacity: 0.55;
+    filter: blur(10px) saturate(1.18);
+    transform: translate3d(-1.4rem, 0.4rem, 0) scale(1.04);
     transition:
       opacity 700ms ease,
       transform 900ms ease;
+    animation: aurora-flow 18s ease-in-out infinite alternate;
   }
 
   .app-background:hover::after {
-    opacity: 0.66;
-    transform: translate3d(1.2rem, -0.8rem, 0) scale(1.015);
+    opacity: 0.76;
+    transform: translate3d(1.3rem, -0.9rem, 0) scale(1.07) rotate(0.001deg);
   }
 
   .app-background > * {
@@ -311,6 +319,38 @@
   }
   50% {
     transform: translateY(-2px);
+  }
+}
+
+@keyframes circuit-drift {
+  0% {
+    background-position:
+      0 0,
+      0 0,
+      0 0,
+      0 0;
+  }
+  100% {
+    background-position:
+      34px -22px,
+      18px 12px,
+      38px 0,
+      0 38px;
+  }
+}
+
+@keyframes aurora-flow {
+  0% {
+    opacity: 0.46;
+    transform: translate3d(-2rem, 0.8rem, 0) scale(1.03) rotate(-1.5deg);
+  }
+  45% {
+    opacity: 0.64;
+    transform: translate3d(1rem, -1.4rem, 0) scale(1.08) rotate(1.2deg);
+  }
+  100% {
+    opacity: 0.52;
+    transform: translate3d(2.2rem, 0.2rem, 0) scale(1.05) rotate(-0.4deg);
   }
 }
 
