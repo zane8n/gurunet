@@ -988,7 +988,7 @@ export function GurunetApp() {
       <SectionNav />
 
       <section id="daily-challenge" className="scroll-mt-28 border-b border-teal-950/10">
-        <div className="mx-auto w-full max-w-7xl px-5 py-6 sm:px-8">
+        <div className="mx-auto w-full max-w-5xl px-4 py-5 sm:px-6">
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <StatusPill status={today.status} />
             <span className="rounded-md border border-teal-700/15 bg-white/70 px-3 py-1 font-mono text-xs uppercase tracking-[0.14em] text-teal-800">
@@ -999,8 +999,8 @@ export function GurunetApp() {
             </span>
           </div>
 
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
-            <article className="glass-panel rounded-md p-5">
+          <div className="grid gap-4">
+            <article className="glass-panel rounded-md p-4 sm:p-5">
               {todaySubmission ? (
                 <div className="rounded-md border border-teal-700/15 bg-gradient-to-br from-teal-50 to-white p-4">
                   <p className="text-sm font-semibold text-teal-800">Submitted response</p>
@@ -1066,13 +1066,21 @@ export function GurunetApp() {
               />
             </article>
 
-            <TeachingPanel challenge={today} grade={todayGrade} submission={todaySubmission ?? null} />
+            <details className="quiet-panel rounded-md p-4">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-900 marker:hidden">
+                Assessment teaching
+                <ChevronRight size={16} className="text-teal-700" />
+              </summary>
+              <div className="mt-4">
+                <TeachingPanel challenge={today} grade={todayGrade} submission={todaySubmission ?? null} plain />
+              </div>
+            </details>
           </div>
         </div>
       </section>
 
       <section id="metrics" className="scroll-mt-28 border-b border-teal-950/10 bg-white/25">
-        <div className="mx-auto grid w-full max-w-7xl gap-5 px-5 py-6 sm:px-8">
+        <div className="mx-auto grid w-full max-w-5xl gap-4 px-4 py-5 sm:px-6">
           <MetricsBand
             grade={todayGrade}
             nextUnlock={nextUnlock}
@@ -1083,31 +1091,35 @@ export function GurunetApp() {
       </section>
 
       <section id="social" className="scroll-mt-28">
-        <div className="mx-auto grid w-full max-w-7xl gap-5 px-5 py-6 sm:px-8">
-          <VersatilityPanel
-            busy={busy}
-            cohorts={dashboard.cohorts}
-            settings={dashboard.challengeSettings}
-            onCreateCohort={createCohort}
-            onJoinCohort={joinCohort}
-            onSaveSettings={saveChallengeSettings}
-          />
+        <div className="mx-auto grid w-full max-w-5xl gap-4 px-4 py-5 sm:px-6">
           <SocialPanel
             social={dashboard.social}
             busy={busy}
             onAddFriend={addFriend}
             onEnroll={enrollMarketplace}
           />
-          <div className="grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
-            <RewardPanel busy={busy} onRedeem={redeem} />
-            <NotebookPanel
-              key={dashboard.notebookEntries.map((entry) => entry.id).join(":")}
+          <CompactDetails title="Challenge settings and cohorts">
+            <VersatilityPanel
               busy={busy}
-              entries={dashboard.notebookEntries}
-              redemptions={dashboard.redemptions}
-              onAskExaminer={openExaminer}
+              cohorts={dashboard.cohorts}
+              settings={dashboard.challengeSettings}
+              onCreateCohort={createCohort}
+              onJoinCohort={joinCohort}
+              onSaveSettings={saveChallengeSettings}
             />
-          </div>
+          </CompactDetails>
+          <CompactDetails title="Notebook and rewards" defaultOpen>
+            <div className="grid gap-4 lg:grid-cols-[0.72fr_1.28fr]">
+              <RewardPanel busy={busy} onRedeem={redeem} />
+              <NotebookPanel
+                key={dashboard.notebookEntries.map((entry) => entry.id).join(":")}
+                busy={busy}
+                entries={dashboard.notebookEntries}
+                redemptions={dashboard.redemptions}
+                onAskExaminer={openExaminer}
+              />
+            </div>
+          </CompactDetails>
         </div>
       </section>
 
@@ -1676,7 +1688,7 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
 function AppHeader({ user, onLogout }: { user?: SafeUser; onLogout?: () => void }) {
   return (
     <header className="border-b border-teal-950/10 bg-white/55 backdrop-blur-xl">
-      <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
+      <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-4 sm:px-6">
         <div className="flex items-center gap-3">
           <Image
             src="/gurunet.svg"
@@ -1768,7 +1780,7 @@ function SectionNav() {
   ];
   return (
     <nav className="sticky top-0 z-30 border-b border-teal-950/10 bg-white/72 backdrop-blur-xl">
-      <div className="mx-auto flex w-full max-w-7xl gap-6 overflow-x-auto px-5 py-3 sm:px-8">
+      <div className="mx-auto flex w-full max-w-5xl gap-6 overflow-x-auto px-4 py-3 sm:px-6">
         {items.map((item) => (
           <a
             key={item.href}
@@ -1786,7 +1798,7 @@ function SectionNav() {
 
 function DashboardSkeleton() {
   return (
-    <section className="mx-auto grid w-full max-w-7xl gap-5 px-5 py-6 sm:px-8">
+    <section className="mx-auto grid w-full max-w-5xl gap-4 px-4 py-5 sm:px-6">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
         <div className="glass-panel rounded-md p-5">
           <SkeletonLine className="h-5 w-32" />
@@ -1834,27 +1846,27 @@ function MetricsBand({
 }) {
   return (
     <>
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.55fr)]">
+      <div className="grid gap-4">
         <Panel icon={<CircleGauge size={19} />} title="PIS trend">
           <PisTrendChart currentPis={user.pisScore} rows={rows} />
         </Panel>
-        <div className="grid gap-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <ScoreMeter value={user.pisScore} label="PIS" />
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-            <Metric icon={<Trophy size={18} />} label="ERT balance" value={String(user.ertBalance)} />
-            <Metric icon={<Flame size={18} />} label="Current streak" value={`${user.currentStreak} days`} />
-            <Metric icon={<CalendarClock size={18} />} label="Next challenge" value={nextUnlock} />
-          </div>
+          <Metric icon={<Trophy size={18} />} label="ERT balance" value={String(user.ertBalance)} />
+          <Metric icon={<Flame size={18} />} label="Current streak" value={`${user.currentStreak} days`} />
+          <Metric icon={<CalendarClock size={18} />} label="Next challenge" value={nextUnlock} />
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(13rem,0.62fr)_minmax(13rem,0.58fr)_minmax(0,1.8fr)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(13rem,0.7fr)_minmax(13rem,0.7fr)]">
         <Panel icon={<Medal size={19} />} title="Score distribution" compact>
           <FrequencyPolygon rows={rows} />
         </Panel>
         <Panel icon={<CalendarClock size={19} />} title="Streak map" compact>
           <ActivityGrid rows={rows} />
         </Panel>
+      </div>
+      <div>
         {grade ? (
           <GradeSummary grade={grade} />
         ) : (
@@ -1868,7 +1880,9 @@ function MetricsBand({
         )}
       </div>
 
-      <ProgressPanel rows={rows} />
+      <CompactDetails title="Recent history">
+        <ProgressPanel rows={rows} />
+      </CompactDetails>
     </>
   );
 }
@@ -2020,13 +2034,33 @@ function Panel({
   children: ReactNode;
 }) {
   return (
-    <section className={`quiet-panel interactive-lift rounded-md ${compact ? "p-4" : "p-5"}`}>
+    <section className={`quiet-panel rounded-md ${compact ? "p-4" : "p-5"}`}>
       <div className={`${compact ? "mb-3" : "mb-4"} flex items-center gap-2 text-teal-700`}>
         {icon}
         <h3 className="font-semibold text-slate-950">{title}</h3>
       </div>
       {children}
     </section>
+  );
+}
+
+function CompactDetails({
+  children,
+  defaultOpen = false,
+  title,
+}: {
+  children: ReactNode;
+  defaultOpen?: boolean;
+  title: string;
+}) {
+  return (
+    <details className="quiet-panel rounded-md p-4" open={defaultOpen}>
+      <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-900 marker:hidden">
+        {title}
+        <ChevronRight size={16} className="text-teal-700" />
+      </summary>
+      <div className="mt-4">{children}</div>
+    </details>
   );
 }
 
@@ -2144,15 +2178,19 @@ function SubmissionControl({
 function TeachingPanel({
   challenge,
   grade,
+  plain = false,
   submission,
 }: {
   challenge: Challenge;
   grade: Grade | null;
+  plain?: boolean;
   submission: Submission | null;
 }) {
+  const wrap = (children: ReactNode) =>
+    plain ? children : <Panel icon={<ShieldCheck size={19} />} title="Assessment teaching">{children}</Panel>;
+
   if (!submission) {
-    return (
-      <Panel icon={<ShieldCheck size={19} />} title="Assessment teaching">
+    return wrap(
         <div className="grid gap-3 text-sm leading-6 text-slate-600">
           <p>
             The full worked solution unlocks after you submit and grade the
@@ -2163,13 +2201,11 @@ function TeachingPanel({
             Gate status: locked
           </p>
         </div>
-      </Panel>
     );
   }
 
   if (!grade) {
-    return (
-      <Panel icon={<ShieldCheck size={19} />} title="Assessment teaching">
+    return wrap(
         <div className="grid gap-3 text-sm leading-6 text-slate-600">
           <p>
             Your response is recorded. Grade it to unlock the worked solution,
@@ -2179,7 +2215,6 @@ function TeachingPanel({
             Gate status: awaiting assessment
           </p>
         </div>
-      </Panel>
     );
   }
 
@@ -2188,8 +2223,7 @@ function TeachingPanel({
   const gaveRisk = /\b(risk|rollback|avoid|blast radius|do not|contain)\b/i.test(parsed.body);
   const gaveRecommendation = /\b(recommend|fix|correct|next|validate|verify)\b/i.test(parsed.body);
 
-  return (
-    <Panel icon={<ShieldCheck size={19} />} title="Assessment teaching">
+  return wrap(
       <div className="grid gap-4">
         <div className="rounded-md border border-teal-700/15 bg-teal-50 p-3">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-teal-800">
@@ -2225,7 +2259,6 @@ function TeachingPanel({
           Next assessment focus: {grade.nextImprovementTarget}
         </p>
       </div>
-    </Panel>
   );
 }
 
@@ -2885,11 +2918,10 @@ function RewardPanel({
 
 function ProgressPanel({ rows }: { rows: ProgressRow[] }) {
   return (
-    <div>
-      <div className="rounded-md border border-teal-950/10 bg-white p-5 shadow-sm">
-        <h2 className="text-xl font-semibold">Progress tracker</h2>
+    <div className="grid gap-3">
+        <h2 className="text-sm font-semibold text-slate-900">Progress tracker</h2>
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="border-b border-slate-200 text-slate-500">
               <tr>
                 {["Date", "Challenge", "Status", "Final", "PIS", "ERT", "Next focus"].map((head) => (
@@ -2912,7 +2944,6 @@ function ProgressPanel({ rows }: { rows: ProgressRow[] }) {
             </tbody>
           </table>
         </div>
-      </div>
     </div>
   );
 }
@@ -3135,28 +3166,26 @@ function SocialPanel({
             </table>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
-            {social.marketplace.slice(0, 3).map((item) => (
-              <div
-                key={item.id}
-                className="flex min-h-[12rem] flex-col rounded-md border border-slate-200 bg-white/65 p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
+          <details className="rounded-md border border-slate-200 bg-white/55 p-3">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-900 marker:hidden">
+              Marketplace
+              <span className="text-xs font-medium text-slate-500">
+                {social.marketplace.length} challenges
+              </span>
+            </summary>
+            <div className="mt-3 grid gap-2">
+              {social.marketplace.slice(0, 4).map((item) => (
+                <div
+                  key={item.id}
+                  className="grid gap-3 rounded-md border border-slate-200 bg-white/65 p-3 sm:grid-cols-[1fr_auto]"
+                >
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-teal-800">
-                      {item.topic}
+                      {item.topic} · {item.difficulty}
                     </p>
-                    <h3 className="mt-2 font-semibold text-slate-950">{item.title}</h3>
+                    <h3 className="mt-1 font-semibold text-slate-950">{item.title}</h3>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">{item.summary}</p>
                   </div>
-                  <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
-                    {item.difficulty}
-                  </span>
-                </div>
-                <p className="mt-3 flex-1 text-sm leading-6 text-slate-600">{item.summary}</p>
-                <div className="mt-4 flex items-center justify-between gap-3">
-                  <p className="text-xs text-slate-500">
-                    {item.estimatedMinutes} min · {item.enrollmentCount} enrolled
-                  </p>
                   <button
                     type="button"
                     onClick={() => onEnroll(item.id)}
@@ -3166,9 +3195,9 @@ function SocialPanel({
                     {item.isEnrolled ? "Enrolled" : "Enroll"}
                   </button>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </details>
         </div>
 
         <aside className="rounded-md border border-slate-200 bg-white/60 p-4">
@@ -3569,7 +3598,7 @@ function readAttachment(file: File): Promise<SubmissionAttachment> {
 
 function Footer() {
   return (
-    <footer className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-5 pb-8 pt-2 text-xs text-slate-500 sm:px-8 md:flex-row md:items-center md:justify-between">
+    <footer className="mx-auto flex w-full max-w-5xl flex-col gap-2 px-4 pb-8 pt-2 text-xs text-slate-500 sm:px-6 md:flex-row md:items-center md:justify-between">
       <p>© {new Date().getFullYear()} Kikandi. Licensed under Apache-2.0.</p>
       <p className="font-mono text-teal-800">GURUnet · Designed by Kikandi.</p>
     </footer>
