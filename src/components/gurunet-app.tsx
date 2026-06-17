@@ -939,7 +939,7 @@ export function GurunetApp() {
 
           <form
             onSubmit={handleAuth}
-            className="glass-panel interactive-lift rounded-md p-5"
+            className="glass-panel interactive-lift self-start rounded-md p-5"
           >
             <div className="flex rounded-md bg-slate-100 p-1">
               <button
@@ -1019,9 +1019,9 @@ export function GurunetApp() {
             </span>
           </div>
           <p className="mb-4 max-w-4xl text-sm leading-6 text-slate-600">
-            Today&apos;s work is the operating loop: understand the prompt, produce
-            defensible evidence, submit before the deadline, then use the correction
-            and notebook to tighten tomorrow&apos;s attempt.
+            Use this section for today&apos;s assessment: read the challenge,
+            prepare a defensible response with evidence, submit before the
+            deadline, then review the correction and notebook entry after grading.
           </p>
 
           <div className="grid gap-4">
