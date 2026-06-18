@@ -4,6 +4,7 @@ import type {
   ChatCompletion,
   ChatCompletionCreateParamsNonStreaming,
 } from "openai/resources/chat/completions";
+import type { Response as OpenAIResponse } from "openai/resources/responses/responses";
 import type { Challenge, Difficulty, DisciplineSnapshot, Grade, Submission, User } from "@/lib/domain";
 import { generateChallenge } from "@/lib/challenges";
 import { requireRuntimeEnv, getRuntimeEnv } from "@/lib/runtime-env";
@@ -21,9 +22,49 @@ const challengeSchema = z.object({
   allowedTools: z.array(z.string().min(2).max(100)).min(4).max(10),
   expectedAnswerFormat: z.string().min(30).max(500),
   submissionRequirements: z.array(z.string().min(4).max(180)).min(4).max(8),
-  solution: z.string().min(80).max(1600),
+  solution: z.string().min(120).max(3000),
   antiGenericRequirement: z.string().min(30).max(300),
 });
+
+const openAiChallengeResponseFormat = {
+  type: "json_schema" as const,
+  name: "gurunet_daily_challenge",
+  description: "A single rigorous daily GURUnet challenge.",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "title",
+      "difficulty",
+      "topic",
+      "scenario",
+      "objective",
+      "constraints",
+      "allowedTools",
+      "expectedAnswerFormat",
+      "submissionRequirements",
+      "solution",
+      "antiGenericRequirement",
+    ],
+    properties: {
+      title: { type: "string" },
+      difficulty: {
+        type: "string",
+        enum: ["Guided", "Normal", "Advanced", "Production", "Expert"],
+      },
+      topic: { type: "string" },
+      scenario: { type: "string" },
+      objective: { type: "string" },
+      constraints: { type: "array", items: { type: "string" } },
+      allowedTools: { type: "array", items: { type: "string" } },
+      expectedAnswerFormat: { type: "string" },
+      submissionRequirements: { type: "array", items: { type: "string" } },
+      solution: { type: "string" },
+      antiGenericRequirement: { type: "string" },
+    },
+  },
+};
 
 const critiqueSchema = z.object({
   correction: z.string().min(80).max(1400),
@@ -70,8 +111,10 @@ type ChallengeContext = {
   disciplineSnapshot?: DisciplineSnapshot;
 };
 
-let client: OpenAI | null = null;
-let aiTemporarilyDisabled = false;
+let deepSeekClient: OpenAI | null = null;
+let openAiClient: OpenAI | null = null;
+let deepSeekTemporarilyDisabled = false;
+let openAiTemporarilyDisabled = false;
 
 const lecturerPolicy = [
   "You are the adaptive GURUnet lecturer: a strict professor and senior network engineer.",
@@ -87,11 +130,19 @@ const lecturerPolicy = [
 ].join(" ");
 
 function aiClient() {
-  client ??= new OpenAI({
+  deepSeekClient ??= new OpenAI({
     apiKey: requireRuntimeEnv("DEEPSEEK_API_KEY"),
     baseURL: getRuntimeEnv("DEEPSEEK_BASE_URL") || "https://api.deepseek.com",
   });
-  return client;
+  return deepSeekClient;
+}
+
+function openAi() {
+  openAiClient ??= new OpenAI({
+    apiKey: requireRuntimeEnv("OPENAI_API_KEY"),
+    baseURL: getRuntimeEnv("OPENAI_BASE_URL") || undefined,
+  });
+  return openAiClient;
 }
 
 function fastModel() {
@@ -104,10 +155,31 @@ function reasoningModel() {
 
 function aiEnabled() {
   return (
-    !aiTemporarilyDisabled &&
+    !deepSeekTemporarilyDisabled &&
     !fallbackOnlyMode() &&
     getRuntimeEnv("DEEPSEEK_API_KEY") &&
     getRuntimeEnv("DEEPSEEK_ENABLED") !== "false"
+  );
+}
+
+function openAiChallengeModel() {
+  return getRuntimeEnv("OPENAI_CHALLENGE_MODEL") || "gpt-5.4-mini";
+}
+
+function openAiChallengeReasoningEffort() {
+  const value = getRuntimeEnv("OPENAI_CHALLENGE_REASONING_EFFORT");
+  if (["minimal", "low", "medium", "high", "xhigh"].includes(value ?? "")) {
+    return value as "minimal" | "low" | "medium" | "high" | "xhigh";
+  }
+  return "medium";
+}
+
+function openAiChallengeEnabled() {
+  return (
+    !openAiTemporarilyDisabled &&
+    !fallbackOnlyMode() &&
+    getRuntimeEnv("OPENAI_API_KEY") &&
+    getRuntimeEnv("OPENAI_CHALLENGE_ENABLED") !== "false"
   );
 }
 
@@ -159,61 +231,108 @@ async function createJsonCompletion({
   return response;
 }
 
+async function createOpenAiChallengeCompletion(context: ChallengeContext) {
+  await assertAiBudget("challenge_generation", context.user.id);
+  const model = openAiChallengeModel();
+  const response = await openAi().responses.create({
+    model,
+    instructions: [
+      lecturerPolicy,
+      "You create strict, adaptive, practical GURUnet challenges.",
+      "You are not writing trivia or generic textbook questions. Create a field-realistic assessment with ambiguity, constraints, evidence expectations, and a hidden teaching solution.",
+      "Return only the structured JSON object matching the schema. Do not include markdown.",
+    ].join(" "),
+    input: JSON.stringify(openAiChallengeInput(context)),
+    text: {
+      format: openAiChallengeResponseFormat,
+      verbosity: "medium",
+    },
+    reasoning: {
+      effort: openAiChallengeReasoningEffort(),
+      summary: null,
+    },
+    max_output_tokens: 3600,
+    store: false,
+    prompt_cache_key: "gurunet-challenge-v3",
+    prompt_cache_retention: "24h",
+    safety_identifier: context.user.id.slice(0, 64),
+  });
+  await recordAiUsage({ response, model, task: "challenge_generation", userId: context.user.id });
+  return response.output_text;
+}
+
+function openAiChallengeInput(context: ChallengeContext) {
+  const discipline = context.disciplineSnapshot;
+  return {
+    purpose:
+      "Generate exactly one daily challenge. It must build real technical capacity, not merely test recall. The task should be answerable without internet access unless external research is explicitly part of the expected format.",
+    costControl:
+      "Spend reasoning where it improves challenge quality, but keep output concise enough for a daily assessment.",
+    generationRules: [
+      "Respect the user's active discipline template, selected topics, preferred formats, evidence types, weak areas, avoid areas, and preference notes.",
+      "If lab, hands-on, practical, exercise, troubleshooting, analysis, or design review formats are selected, make the challenge concretely match that shape.",
+      "Use realistic partial information: symptoms, logs, config fragments, command output, constraints, ambiguity, and one plausible misleading clue where useful.",
+      "Require assumptions, verification, evidence, trade-offs, risk, rollback, and a defensible recommendation when relevant.",
+      "Do not reveal the solution in the prompt-facing fields.",
+      "The hidden solution must teach: correct approach, false paths, verification commands/checks, common vague answers, and what a strong submission should contain.",
+      "The antiGenericRequirement must force scenario-specific evidence and penalize hand-wavy answers.",
+      "Deadline is 15:00 local time and handled by the app; do not say noon.",
+    ],
+    userState: {
+      pisScore: context.user.pisScore,
+      streak: context.user.currentStreak,
+      difficulty: context.difficulty,
+      dateKey: context.dateKey,
+      recoveryRequired: context.recovery,
+      pressureChallenge: context.pressure,
+      recentWeaknesses: context.recentWeaknesses,
+      track: context.track ?? discipline?.id ?? "technical capacity",
+      topicFocus: context.topicFocus,
+      durationMinutes: context.durationMinutes,
+      discipline,
+      privateMemory: privateChallengeMemoryForUser(context.user),
+    },
+    outputContract: {
+      difficulty: context.difficulty,
+      constraints: "4-8 concrete constraints",
+      allowedTools: "4-10 allowed tools or evidence sources",
+      submissionRequirements: "4-8 proof requirements",
+      solution: "hidden, lecturer-grade answer key and correction guide",
+    },
+  };
+}
+
+function privateChallengeMemoryForUser(user: User) {
+  const allowedEmail = (
+    getRuntimeEnv("GURUNET_PERSONAL_MEMORY_EMAIL") || "safarikikandi@gmail.com"
+  ).toLowerCase();
+  if (user.email.toLowerCase() !== allowedEmail) return null;
+  return {
+    owner: "Kikandi Safari Isaac",
+    email: allowedEmail,
+    useScope:
+      "Use this private context only for this exact user account. Never apply it to testers or other accounts.",
+    longTermGoal:
+      "Build GURUnet as a rigorous capacity builder that trains discipline, operational judgment, technical communication, and practical engineering competence.",
+    challengeTaste: [
+      "Prefer deep, situation-aware questions over generic prompts.",
+      "Prefer lab-style, hands-on, evidence-driven challenges when the profile requests them.",
+      "Do not over-comfort. Be fair, rigorous, and teacher-like.",
+      "Make correction and solution gates teach the user what they did not know.",
+      "Maintain broad cross-disciplinary support without diluting standards.",
+    ],
+  };
+}
+
 export async function generateAiChallenge(context: ChallengeContext) {
-  if (!aiEnabled()) return null;
+  if (!openAiChallengeEnabled()) return null;
 
   try {
-    const response = await createJsonCompletion({
-      model: fastModel(),
-      task: "challenge_generation",
-      userId: context.user.id,
-      temperature: 0.7,
-      messages: [
-        {
-          role: "system",
-          content: `${lecturerPolicy} You create strict practical challenges for GURUnet. Return only valid JSON. Do not include markdown.`,
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            rubric:
-              "Create one adaptive daily challenge. Formats may include troubleshooting, lab task, CTF-style analysis, config/design review, Linux/network automation, security investigation, packet/log analysis, real-world engineering decision, pressure challenge, or recovery challenge. Include realistic constraints, partial information, misleading symptoms, logs/config/output where useful. Deadline at noon is handled by app. Do not reveal solution.",
-            user: {
-              pisScore: context.user.pisScore,
-              streak: context.user.currentStreak,
-              difficulty: context.difficulty,
-              dateKey: context.dateKey,
-              recoveryRequired: context.recovery,
-              pressureChallenge: context.pressure,
-              recentWeaknesses: context.recentWeaknesses,
-              track: context.track ?? "networking",
-              topicFocus: context.topicFocus,
-              durationMinutes: context.durationMinutes,
-              discipline: context.disciplineSnapshot,
-            },
-            outputShape: {
-              title: "string",
-              difficulty: context.difficulty,
-              topic: "string",
-              scenario: "string with realistic symptoms, partial info, misleading clue, logs/config/output when useful",
-              objective: "string",
-              constraints: ["string"],
-              allowedTools: ["string"],
-              expectedAnswerFormat: "string",
-              submissionRequirements: ["string"],
-              solution: "hidden technical solution string",
-              antiGenericRequirement: "string",
-            },
-          }),
-        },
-      ],
-    });
-
-    const content = response.choices[0]?.message.content;
+    const content = await createOpenAiChallengeCompletion(context);
     if (!content) return null;
     return challengeSchema.parse(JSON.parse(content));
   } catch (error) {
-    logAiFallback("DeepSeek challenge generation failed; using template fallback", error);
+    logAiFallback("OpenAI challenge generation failed; using template fallback", error, "openai");
     return null;
   }
 }
@@ -555,7 +674,7 @@ export function templateFallbackChallenge(
   return generateChallenge(user, { recovery, pressure, dateKey });
 }
 
-function logAiFallback(message: string, error: unknown) {
+function logAiFallback(message: string, error: unknown, provider: "deepseek" | "openai" = "deepseek") {
   if (error && typeof error === "object") {
     const item = error as {
       status?: number;
@@ -572,17 +691,28 @@ function logAiFallback(message: string, error: unknown) {
       requestID: item.requestID,
       message: item.message ?? item.error?.message,
     });
-    if (
-      item.status === 429 ||
-      item.code === "insufficient_quota" ||
-      item.error?.code === "insufficient_quota"
-    ) {
-      aiTemporarilyDisabled = true;
-    }
+    maybeDisableAiProvider(error, provider);
     return;
   }
 
   console.warn(message, error);
+}
+
+function maybeDisableAiProvider(error: unknown, provider: "deepseek" | "openai") {
+  if (!error || typeof error !== "object") return;
+  const item = error as {
+    status?: number;
+    code?: string;
+    error?: { code?: string };
+  };
+  if (
+    item.status === 429 ||
+    item.code === "insufficient_quota" ||
+    item.error?.code === "insufficient_quota"
+  ) {
+    if (provider === "openai") openAiTemporarilyDisabled = true;
+    else deepSeekTemporarilyDisabled = true;
+  }
 }
 
 async function assertAiBudget(task: AiTask, userId?: string) {
@@ -622,15 +752,25 @@ async function recordAiUsage({
   userId,
   jobId,
 }: {
-  response: ChatCompletion;
+  response: ChatCompletion | OpenAIResponse;
   model: string;
   task: AiTask;
   userId?: string;
   jobId?: string;
 }) {
   const usage = response.usage;
-  const promptTokens = usage?.prompt_tokens ?? 0;
-  const completionTokens = usage?.completion_tokens ?? 0;
+  const promptTokens =
+    usage && "prompt_tokens" in usage
+      ? usage.prompt_tokens ?? 0
+      : usage && "input_tokens" in usage
+        ? usage.input_tokens ?? 0
+        : 0;
+  const completionTokens =
+    usage && "completion_tokens" in usage
+      ? usage.completion_tokens ?? 0
+      : usage && "output_tokens" in usage
+        ? usage.output_tokens ?? 0
+        : 0;
   const totalTokens = usage?.total_tokens ?? promptTokens + completionTokens;
   await prisma.aiUsage.create({
     data: {
@@ -648,6 +788,10 @@ async function recordAiUsage({
 }
 
 function estimateCostUsd(model: string, promptTokens: number, completionTokens: number) {
+  if (model.startsWith("gpt-")) {
+    const openAiRates = openAiModelRates(model);
+    return Number(((promptTokens / 1_000_000) * openAiRates.input + (completionTokens / 1_000_000) * openAiRates.output).toFixed(6));
+  }
   const isReasoning = model === reasoningModel() || model.includes("pro");
   const inputPerMillion = isReasoning
     ? numberEnv("DEEPSEEK_REASONING_INPUT_USD_PER_MTOK") ?? 0.435
@@ -656,6 +800,19 @@ function estimateCostUsd(model: string, promptTokens: number, completionTokens: 
     ? numberEnv("DEEPSEEK_REASONING_OUTPUT_USD_PER_MTOK") ?? 0.87
     : numberEnv("DEEPSEEK_FAST_OUTPUT_USD_PER_MTOK") ?? 0.28;
   return Number(((promptTokens / 1_000_000) * inputPerMillion + (completionTokens / 1_000_000) * outputPerMillion).toFixed(6));
+}
+
+function openAiModelRates(model: string) {
+  const inputOverride = numberEnv("OPENAI_CHALLENGE_INPUT_USD_PER_MTOK");
+  const outputOverride = numberEnv("OPENAI_CHALLENGE_OUTPUT_USD_PER_MTOK");
+  if (inputOverride !== null && outputOverride !== null) {
+    return { input: inputOverride, output: outputOverride };
+  }
+  if (model.includes("5.5")) return { input: 5, output: 30 };
+  if (model.includes("5.4-mini")) return { input: 0.75, output: 4.5 };
+  if (model.includes("5.4-nano")) return { input: 0.15, output: 0.6 };
+  if (model.includes("5.4")) return { input: 2.5, output: 15 };
+  return { input: 1, output: 5 };
 }
 
 function numberEnv(name: string) {
