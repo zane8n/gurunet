@@ -1675,7 +1675,10 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
     };
   } catch (error) {
     if (isUniqueConstraintError(error)) {
-      throw new Response("Today challenge has already been regenerated once", { status: 409 });
+      throw new Response(
+        "Today challenge has already been regenerated once by a support action. Recovery status does not count as regeneration.",
+        { status: 409 },
+      );
     }
     throw error;
   }

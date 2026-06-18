@@ -1152,6 +1152,7 @@ export function GurunetApp() {
         attachments={draftAttachments}
         body={draftBody}
         busy={busy}
+        challenge={today}
         open={responseOpen}
         savedAt={draftSavedAt}
         onAddFiles={addDraftFiles}
@@ -2467,6 +2468,7 @@ function ResponseEditorModal({
   attachments,
   body,
   busy,
+  challenge,
   open,
   savedAt,
   onAddFiles,
@@ -2478,6 +2480,7 @@ function ResponseEditorModal({
   attachments: SubmissionAttachment[];
   body: string;
   busy: boolean;
+  challenge: Challenge;
   open: boolean;
   savedAt: string;
   onAddFiles: (files: FileList | File[]) => void;
@@ -2489,8 +2492,8 @@ function ResponseEditorModal({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const readiness = useMemo(
-    () => responseReadiness(body, attachments),
-    [attachments, body],
+    () => responseReadiness(body, attachments, challenge),
+    [attachments, body, challenge],
   );
   const canSubmit = body.trim().length > 0 || attachments.length > 0;
 
@@ -2665,32 +2668,85 @@ function ResponseEditorModal({
   );
 }
 
-function responseReadiness(body: string, attachments: SubmissionAttachment[]) {
+function responseReadiness(
+  body: string,
+  attachments: SubmissionAttachment[],
+  challenge: Challenge,
+) {
   const text = body.trim();
+  const lower = text.toLowerCase();
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines = text.split(/\r?\n/);
+  const headings = lines.filter((line) => /^#{1,3}\s+\S/.test(line)).length;
+  const listItems = lines.filter((line) => /^\s*(-|\*|\d+\.)\s+\S/.test(line)).length;
+  const codeBlocks = (text.match(/```[\s\S]*?```/g) ?? []).length;
+  const inlineCode = (text.match(/`[^`\n]+`/g) ?? []).length;
+  const commandLikeLines = lines.filter((line) =>
+    /^\s*(\$|>|#)\s+\S/.test(line) ||
+    /\b(show|journalctl|tcpdump|dig|curl|kubectl|grep|awk|systemctl|ip\s|ss\s|ping|traceroute|nslookup|docker|terraform|ansible|python|node|npm|pnpm|git)\b/i.test(line),
+  ).length;
+  const artifactSignals =
+    codeBlocks +
+    inlineCode +
+    commandLikeLines +
+    attachments.length +
+    lines.filter((line) => /\b(error|log|trace|output|config|screenshot|packet|metric|status|diff|json|csv|pcap)\b/i.test(line)).length;
+  const reasoningConnectors = (lower.match(/\b(because|therefore|so that|which means|this implies|however|given that|assumption|trade[- ]off)\b/g) ?? []).length;
+  const validationSignals = (lower.match(/\b(verify|validate|confirm|test|check|measure|compare|disprove|reproduce|baseline|control)\b/g) ?? []).length;
+  const riskSignals = (lower.match(/\b(risk|rollback|blast radius|contain|avoid|do not|impact|fallback|backout|safe|change window)\b/g) ?? []).length;
+  const actionSignals = (lower.match(/\b(recommend|fix|change|next step|plan|correct|mitigate|resolve|document|monitor)\b/g) ?? []).length;
+  const expectedTouchCount = challenge.submissionRequirements.filter((requirement) =>
+    requirement
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 4)
+      .some((word) => lower.includes(word)),
+  ).length;
   const checks = [
     {
-      label: "Clear hypothesis",
-      complete: /\b(hypothesis|likely|root cause|suspect)\b/i.test(text),
+      label: "Enough substance",
+      complete: words.length >= 90 || attachments.length > 0,
+      guidance: "Add enough explanation for the examiner to follow your reasoning, not just the final answer.",
     },
     {
-      label: "Evidence trail",
-      complete: /^\s*(-|\*|\d+\.)\s+\S/m.test(text) || attachments.length > 0,
+      label: "Organized response",
+      complete: headings >= 2 || listItems >= 4 || text.includes("##"),
+      guidance: `Use the expected format as scaffolding: ${challenge.expectedAnswerFormat}`,
     },
     {
-      label: "Commands or artifacts",
-      complete: /```[\s\S]+```/.test(text) || /\b(show|journalctl|tcpdump|dig|curl|kubectl|grep|awk|systemctl|ip\s)\b/i.test(text),
+      label: "Observable evidence",
+      complete: artifactSignals >= 2,
+      guidance: "Include command output, logs, screenshots, config snippets, metrics, code, or attached artifacts.",
     },
     {
-      label: "Risk / rollback",
-      complete: /\b(risk|rollback|contain|do not|avoid|blast radius)\b/i.test(text),
+      label: "Reasoning chain",
+      complete: reasoningConnectors >= 2 || /\b(root cause|hypothesis|likely|unlikely|suspect)\b/i.test(text),
+      guidance: "Show why the evidence supports your conclusion and state any assumptions.",
     },
     {
-      label: "Recommendation",
-      complete: /\b(recommend|fix|correct|next|validate|verify)\b/i.test(text),
+      label: "Validation plan",
+      complete: validationSignals >= 2,
+      guidance: "State how you would prove the fix or disprove your main hypothesis.",
+    },
+    {
+      label: "Risk and rollback",
+      complete: riskSignals >= 1,
+      guidance: "Mention what could go wrong, blast radius, and how you would back out safely.",
+    },
+    {
+      label: "Actionable conclusion",
+      complete: actionSignals >= 1,
+      guidance: "Finish with a specific recommendation, next step, or decision.",
+    },
+    {
+      label: "Challenge requirements",
+      complete: expectedTouchCount >= Math.min(2, challenge.submissionRequirements.length),
+      guidance: `Touch the required evidence: ${challenge.submissionRequirements.slice(0, 3).join("; ")}`,
     },
   ];
   const score = Math.round((checks.filter((check) => check.complete).length / checks.length) * 100);
-  return { checks, score };
+  const next = checks.find((check) => !check.complete)?.guidance ?? "Looks ready for submission. The grader will still judge correctness and depth.";
+  return { checks, score, next };
 }
 
 function ResponseReadinessPanel({
@@ -2718,6 +2774,9 @@ function ResponseReadinessPanel({
           {readiness.checks.filter((check) => check.complete).length}/{readiness.checks.length}
         </span>
       </div>
+      <p className="mb-3 text-xs leading-5 text-slate-500">
+        This is a pre-flight guide, not a score prediction. {readiness.next}
+      </p>
       <div className="h-2 rounded-full bg-slate-200">
         <div
           className="h-full rounded-full bg-cyan-700"
@@ -2726,10 +2785,10 @@ function ResponseReadinessPanel({
       </div>
       <div className="mt-3 grid gap-2">
         {readiness.checks.map((check) => (
-          <div key={check.label} className="flex items-center gap-2 text-sm text-slate-600">
+          <div key={check.label} className="flex items-start gap-2 text-sm text-slate-600">
             <CheckCircle2
               size={15}
-              className={check.complete ? "text-cyan-700" : "text-slate-300"}
+              className={`mt-0.5 shrink-0 ${check.complete ? "text-cyan-700" : "text-slate-300"}`}
             />
             <span>{check.label}</span>
           </div>

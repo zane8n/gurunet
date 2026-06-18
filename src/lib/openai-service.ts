@@ -67,10 +67,27 @@ const openAiChallengeResponseFormat = {
 };
 
 const critiqueSchema = z.object({
-  correction: z.string().min(80).max(1400),
-  contentionNotes: z.array(z.string().min(8).max(180)).max(5),
-  nextImprovementTarget: z.string().min(20).max(240),
+  correction: z.string().min(180).max(5000),
+  contentionNotes: z.array(z.string().min(8).max(260)).max(8),
+  nextImprovementTarget: z.string().min(20).max(320),
 });
+
+const openAiCritiqueResponseFormat = {
+  type: "json_schema" as const,
+  name: "gurunet_strict_critique",
+  description: "A rigorous post-submission correction that teaches from the challenge, expected solution, and user response.",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["correction", "contentionNotes", "nextImprovementTarget"],
+    properties: {
+      correction: { type: "string" },
+      contentionNotes: { type: "array", items: { type: "string" } },
+      nextImprovementTarget: { type: "string" },
+    },
+  },
+};
 
 const notebookSummarySchema = z.object({
   notebookSummary: z.string().min(40).max(500),
@@ -166,6 +183,10 @@ function openAiChallengeModel() {
   return getRuntimeEnv("OPENAI_CHALLENGE_MODEL") || "gpt-5.4-mini";
 }
 
+function openAiCritiqueModel() {
+  return getRuntimeEnv("OPENAI_CRITIQUE_MODEL") || openAiChallengeModel();
+}
+
 function openAiChallengeReasoningEffort() {
   const value = getRuntimeEnv("OPENAI_CHALLENGE_REASONING_EFFORT");
   if (["minimal", "low", "medium", "high", "xhigh"].includes(value ?? "")) {
@@ -180,6 +201,15 @@ function openAiChallengeEnabled() {
     !fallbackOnlyMode() &&
     getRuntimeEnv("OPENAI_API_KEY") &&
     getRuntimeEnv("OPENAI_CHALLENGE_ENABLED") !== "false"
+  );
+}
+
+function openAiCritiqueEnabled() {
+  return (
+    !openAiTemporarilyDisabled &&
+    !fallbackOnlyMode() &&
+    getRuntimeEnv("OPENAI_API_KEY") &&
+    getRuntimeEnv("OPENAI_CRITIQUE_ENABLED") !== "false"
   );
 }
 
@@ -232,10 +262,10 @@ async function createJsonCompletion({
 }
 
 async function createOpenAiChallengeCompletion(context: ChallengeContext) {
-  await assertAiBudget("challenge_generation", context.user.id);
-  const model = openAiChallengeModel();
-  const response = await openAi().responses.create({
-    model,
+  return createOpenAiStructuredCompletion({
+    model: openAiChallengeModel(),
+    task: "challenge_generation",
+    userId: context.user.id,
     instructions: [
       lecturerPolicy,
       "You create strict, adaptive, practical GURUnet challenges.",
@@ -243,21 +273,54 @@ async function createOpenAiChallengeCompletion(context: ChallengeContext) {
       "Return only the structured JSON object matching the schema. Do not include markdown.",
     ].join(" "),
     input: JSON.stringify(openAiChallengeInput(context)),
+    format: openAiChallengeResponseFormat,
+    effort: openAiChallengeReasoningEffort(),
+    max_output_tokens: 3600,
+    prompt_cache_key: "gurunet-challenge-v3",
+  });
+}
+
+async function createOpenAiStructuredCompletion({
+  effort,
+  format,
+  input,
+  instructions,
+  max_output_tokens,
+  model,
+  prompt_cache_key,
+  task,
+  userId,
+}: {
+  effort: "minimal" | "low" | "medium" | "high" | "xhigh";
+  format: typeof openAiChallengeResponseFormat | typeof openAiCritiqueResponseFormat;
+  input: string;
+  instructions: string;
+  max_output_tokens: number;
+  model: string;
+  prompt_cache_key: string;
+  task: AiTask;
+  userId?: string;
+}) {
+  await assertAiBudget(task, userId);
+  const response = await openAi().responses.create({
+    model,
+    instructions,
+    input,
     text: {
-      format: openAiChallengeResponseFormat,
+      format,
       verbosity: "medium",
     },
     reasoning: {
-      effort: openAiChallengeReasoningEffort(),
+      effort,
       summary: null,
     },
-    max_output_tokens: 3600,
+    max_output_tokens,
     store: false,
-    prompt_cache_key: "gurunet-challenge-v3",
+    prompt_cache_key,
     prompt_cache_retention: "24h",
-    safety_identifier: context.user.id.slice(0, 64),
+    safety_identifier: userId?.slice(0, 64),
   });
-  await recordAiUsage({ response, model, task: "challenge_generation", userId: context.user.id });
+  await recordAiUsage({ response, model, task, userId });
   return response.output_text;
 }
 
@@ -378,56 +441,66 @@ export async function generateVerificationQuestion(challenge: Challenge, submiss
 }
 
 export async function generateAiCritique(challenge: Challenge, submission: Submission, grade: Grade) {
-  if (!aiEnabled()) return null;
+  if (!openAiCritiqueEnabled()) return null;
 
   try {
-    const response = await createJsonCompletion({
-      model: reasoningModel(),
+    const content = await createOpenAiStructuredCompletion({
+      model: openAiCritiqueModel(),
       task: "strict_critique",
       userId: grade.userId,
-      thinking: true,
-      messages: [
-        {
-          role: "system",
-          content: `${lecturerPolicy} Return only JSON. Do not change numeric scores, final score, PIS, ERT, caps, or penalties. Provide direct correction, contention notes, and one improvement target.`,
+      effort: "high",
+      max_output_tokens: 5200,
+      prompt_cache_key: "gurunet-strict-critique-v2",
+      format: openAiCritiqueResponseFormat,
+      instructions: [
+        lecturerPolicy,
+        "You are grading as the GURUnet examiner after the deterministic score has already been set.",
+        "Return only JSON. Do not change numeric scores, final score, PIS, ERT, caps, penalties, or verdict.",
+        "Your job is the learning answer: compare the challenge, hidden solution, expected answer format, and user's response.",
+        "Be exhaustive but structured. Identify what was correct, what was false, what was missing, what was vague, what was unsafe, and what evidence would have made the answer defensible.",
+        "Teach the concept plainly enough that a user who did not know the answer can learn it, but keep the correction tied to this exact scenario.",
+        "Do not praise generic content. Do not invent facts not present in the challenge, solution, or submission.",
+      ].join(" "),
+      input: JSON.stringify({
+        challenge: {
+          title: challenge.title,
+          topic: challenge.topic,
+          scenario: challenge.scenario,
+          objective: challenge.objective,
+          constraints: challenge.constraints,
+          allowedTools: challenge.allowedTools,
+          expectedAnswerFormat: challenge.expectedAnswerFormat,
+          submissionRequirements: challenge.submissionRequirements,
+          solution: challenge.solution,
+          antiGenericRequirement: challenge.antiGenericRequirement,
+          disciplineSnapshot: challenge.disciplineSnapshot,
         },
-        {
-          role: "user",
-          content: JSON.stringify({
-            challenge: {
-              title: challenge.title,
-              topic: challenge.topic,
-              scenario: challenge.scenario,
-              objective: challenge.objective,
-              constraints: challenge.constraints,
-              allowedTools: challenge.allowedTools,
-              expectedAnswerFormat: challenge.expectedAnswerFormat,
-              solution: challenge.solution,
-            },
-            submission: summarizeSubmissionForAi(submission.content),
-            deterministicGrade: {
-              creativity: grade.creativity,
-              ingenuity: grade.ingenuity,
-              reporting: grade.reporting,
-              alienness: grade.alienness,
-              neatness: grade.neatness,
-              rawScore: grade.rawScore,
-              balancePenalty: grade.balancePenalty,
-              latePenalty: grade.latePenalty,
-              technicalCap: grade.technicalCap,
-              finalScore: grade.finalScore,
-              verdict: grade.verdict,
-            },
-            outputShape: {
-              correction: "string",
-              contentionNotes: ["string"],
-              nextImprovementTarget: "string",
-            },
-          }),
+        submission: summarizeSubmissionForAi(submission.content),
+        deterministicGrade: {
+          creativity: grade.creativity,
+          ingenuity: grade.ingenuity,
+          reporting: grade.reporting,
+          alienness: grade.alienness,
+          neatness: grade.neatness,
+          rawScore: grade.rawScore,
+          balancePenalty: grade.balancePenalty,
+          latePenalty: grade.latePenalty,
+          technicalCap: grade.technicalCap,
+          finalScore: grade.finalScore,
+          verdict: grade.verdict,
+          existingCorrection: grade.correction,
+          existingContentionNotes: grade.contentionNotes,
         },
-      ],
+        outputGuidance: {
+          correction:
+            "Use short titled sections inside one string: What you got right; What was wrong or unsupported; What you missed; What a stronger answer should have done; Concrete next correction. Mention exact claims or omissions from the user's submission where possible.",
+          contentionNotes:
+            "List the highest-impact disputes: false claims, unsupported jumps, unsafe advice, missing validation, or vague recommendations.",
+          nextImprovementTarget:
+            "One focused behavioral/technical target for the next assessment.",
+        },
+      }),
     });
-    const content = response.choices[0]?.message.content;
     if (!content) return null;
     const critique = critiqueSchema.parse(JSON.parse(content));
     const notebook = await generateNotebookSummary(challenge, submission, grade, critique);
@@ -439,7 +512,7 @@ export async function generateAiCritique(challenge: Challenge, submission: Submi
       notebookLessons: notebook?.notebookLessons ?? [critique.nextImprovementTarget],
     };
   } catch (error) {
-    logAiFallback("DeepSeek critique failed; using deterministic critique", error);
+    logAiFallback("OpenAI critique failed; using deterministic critique", error, "openai");
     return null;
   }
 }
