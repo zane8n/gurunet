@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, ClipboardEvent, FormEvent, ReactNode } from "react";
+import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, ReactNode } from "react";
 import {
   BookOpenText,
   Bold,
@@ -13,8 +13,9 @@ import {
   Code2,
   Command,
   Download,
+  EyeOff,
   FileText,
-  Flame,
+  GripVertical,
   Heading2,
   ImagePlus,
   Italic,
@@ -25,14 +26,18 @@ import {
   Loader2,
   LockKeyhole,
   LogOut,
+  Maximize2,
   Medal,
+  Minimize2,
+  Moon,
   NotebookTabs,
   Pencil,
+  RotateCcw,
   Search,
   Settings,
   ShieldCheck,
+  Sun,
   Trash2,
-  Trophy,
   UserPlus,
   Users,
   WalletCards,
@@ -234,6 +239,89 @@ type Dashboard = {
 };
 
 type AuthMode = "login" | "signup";
+type ThemeMode = "light" | "dark";
+type WidgetSize = "sm" | "md" | "lg" | "xl";
+type WidgetId =
+  | "challenge"
+  | "teaching"
+  | "pisTrend"
+  | "scoreDistribution"
+  | "streakMap"
+  | "scoresheet"
+  | "history"
+  | "social"
+  | "settings"
+  | "notebook"
+  | "rewards";
+
+type DashboardWidget = {
+  id: WidgetId;
+  title: string;
+  size: WidgetSize;
+  collapsed: boolean;
+  visible: boolean;
+};
+
+const dashboardLayoutKey = "gurunet.dashboard.layout.v2";
+const themeStorageKey = "gurunet.theme.v1";
+
+function defaultDashboardWidgets(): DashboardWidget[] {
+  return [
+    { id: "challenge", title: "Today", size: "xl", collapsed: false, visible: true },
+    { id: "pisTrend", title: "PIS trend", size: "lg", collapsed: false, visible: true },
+    { id: "scoresheet", title: "Scoresheet", size: "md", collapsed: false, visible: true },
+    { id: "streakMap", title: "Streak map", size: "sm", collapsed: false, visible: true },
+    { id: "scoreDistribution", title: "Score distribution", size: "sm", collapsed: false, visible: true },
+    { id: "history", title: "Recent history", size: "lg", collapsed: true, visible: true },
+    { id: "teaching", title: "Teaching", size: "lg", collapsed: true, visible: true },
+    { id: "social", title: "Social hub", size: "xl", collapsed: false, visible: true },
+    { id: "notebook", title: "Notebook", size: "lg", collapsed: false, visible: true },
+    { id: "settings", title: "Settings and cohorts", size: "lg", collapsed: true, visible: true },
+    { id: "rewards", title: "Rewards", size: "sm", collapsed: true, visible: true },
+  ];
+}
+
+function mergeDashboardWidgets(saved: unknown): DashboardWidget[] {
+  const defaults = defaultDashboardWidgets();
+  if (!Array.isArray(saved)) return defaults;
+  const byId = new Map(defaults.map((widget) => [widget.id, widget]));
+  const merged = saved
+    .filter((item): item is Partial<DashboardWidget> & { id: WidgetId } =>
+      Boolean(item && typeof item === "object" && "id" in item && byId.has((item as { id: WidgetId }).id)),
+    )
+    .map((item) => {
+      const base = byId.get(item.id)!;
+      return {
+        ...base,
+        size: ["sm", "md", "lg", "xl"].includes(String(item.size)) ? (item.size as WidgetSize) : base.size,
+        collapsed: typeof item.collapsed === "boolean" ? item.collapsed : base.collapsed,
+        visible: typeof item.visible === "boolean" ? item.visible : base.visible,
+      };
+    });
+  const seen = new Set(merged.map((widget) => widget.id));
+  return [...merged, ...defaults.filter((widget) => !seen.has(widget.id))];
+}
+
+function initialTheme(): ThemeMode {
+  if (typeof window === "undefined") return "light";
+  try {
+    const saved = localStorage.getItem(themeStorageKey);
+    if (saved === "dark" || saved === "light") return saved;
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+function initialDashboardWidgets(): DashboardWidget[] {
+  if (typeof window === "undefined") return defaultDashboardWidgets();
+  try {
+    const saved = localStorage.getItem(dashboardLayoutKey);
+    return saved ? mergeDashboardWidgets(JSON.parse(saved)) : defaultDashboardWidgets();
+  } catch {
+    return defaultDashboardWidgets();
+  }
+}
 
 async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -386,6 +474,10 @@ export function GurunetApp() {
   const [busy, setBusy] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [focusOpen, setFocusOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemeMode>(() => initialTheme());
+  const [dashboardWidgets, setDashboardWidgets] = useState<DashboardWidget[]>(() =>
+    initialDashboardWidgets(),
+  );
   const [responseOpen, setResponseOpen] = useState(false);
   const [examinerOpen, setExaminerOpen] = useState(false);
   const [examinerMessages, setExaminerMessages] = useState<ExaminerMessage[]>([]);
@@ -401,6 +493,15 @@ export function GurunetApp() {
   const nextChallengeUnlockAt = dashboard?.nextChallengeUnlockAt;
   const draftKey = today ? `gurunet-response:${today.id}` : "";
   const hasDraft = draftBody.trim().length > 0 || draftAttachments.length > 0;
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    localStorage.setItem(themeStorageKey, theme);
+  }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(dashboardLayoutKey, JSON.stringify(dashboardWidgets));
+  }, [dashboardWidgets]);
 
   useEffect(() => {
     async function bootstrap() {
@@ -1133,152 +1234,39 @@ export function GurunetApp() {
         user={user}
         onCommand={() => setCommandOpen(true)}
         onExport={() => void exportLearningRecord()}
+        onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
         onLogout={logout}
+        theme={theme}
       />
-      <SectionNav />
-      <CommandBrief dashboard={dashboard} deadline={deadline} nextUnlock={nextUnlock} />
-
-      <section id="daily-challenge" className="scroll-mt-28 border-b border-cyan-950/10">
-        <div className="w-full px-2 py-4 sm:px-3">
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <StatusPill status={today.status} />
-            <span className="rounded-md border border-cyan-700/15 bg-white/70 px-3 py-1 font-mono text-xs uppercase tracking-[0.14em] text-cyan-800">
-              {today.dateKey} · {today.difficulty}
-            </span>
-            <span className="rounded-md border border-amber-700/15 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
-              Due {deadline}
-            </span>
-          </div>
-          <p className="mb-4 max-w-4xl text-sm leading-6 text-slate-600">
-            Use this section for today&apos;s assessment: read the challenge,
-            prepare a defensible response with evidence, submit before the
-            deadline, then review the correction and notebook entry after grading.
-          </p>
-
-          <div className="grid gap-4">
-            <article className="glass-panel rounded-md p-4 sm:p-5">
-              {todaySubmission ? (
-                <div className="rounded-md border border-cyan-700/15 bg-gradient-to-br from-cyan-50 to-white p-4">
-                  <p className="text-sm font-semibold text-cyan-800">Submitted response</p>
-                  <h1 className="mt-2 text-2xl font-semibold tracking-normal">
-                    {today.title}
-                  </h1>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">
-                    Your assessment stays focused on the submitted work until the next
-                    challenge unlocks at {nextUnlock}.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <p className="text-sm font-semibold text-cyan-800">{today.topic}</p>
-                  <h1 className="mt-2 text-3xl font-semibold tracking-normal">
-                    {today.title}
-                  </h1>
-                  <p className="mt-3 leading-7 text-slate-600">
-                    {today.scenario}
-                  </p>
-
-                  <div className="mt-5 border-t border-slate-200 pt-4">
-                    <h2 className="text-xl font-semibold">Objective</h2>
-                    <p className="mt-2 leading-7 text-slate-600">{today.objective}</p>
-                  </div>
-                </>
-              )}
-
-              {todaySubmission ? (
-                <details className="my-5 rounded-md border border-slate-200 bg-white/55">
-                  <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-semibold text-slate-900 marker:hidden">
-                    Challenge prompt
-                    <ChevronRight size={16} className="text-cyan-700" />
-                  </summary>
-                  <div className="border-t border-slate-200 px-4 py-4">
-                    <p className="text-sm font-semibold text-cyan-800">{today.topic}</p>
-                    <p className="mt-2 text-lg font-semibold text-slate-950">{today.title}</p>
-                    <p className="mt-2 leading-7 text-slate-600">{today.scenario}</p>
-                    <p className="mt-4 font-semibold text-slate-900">Objective</p>
-                    <p className="mt-1 leading-7 text-slate-600">{today.objective}</p>
-                    <ChallengeAccordions challenge={today} />
-                  </div>
-                </details>
-              ) : (
-                <ChallengeAccordions challenge={today} />
-              )}
-
-              <SubmissionControl
-                busy={busy}
-                draftSavedAt={draftSavedAt}
-                hasDraft={hasDraft}
-                onFocus={() => setFocusOpen(true)}
-                onOpen={() => setResponseOpen(true)}
-                onSample={loadSampleAnswer}
-                status={status}
-                submission={todaySubmission ?? null}
-                grade={todayGrade}
-                verification={verification}
-                setVerification={setVerification}
-                onVerify={answerVerification}
-                onGrade={gradeSubmission}
-                notice={dashboard.todayNotice}
-                onExaminer={openExaminer}
-              />
-            </article>
-
-            <details className="quiet-panel rounded-md p-4">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-900 marker:hidden">
-                Assessment teaching
-                <ChevronRight size={16} className="text-cyan-700" />
-              </summary>
-              <div className="mt-4">
-                <TeachingPanel challenge={today} grade={todayGrade} submission={todaySubmission ?? null} plain />
-              </div>
-            </details>
-          </div>
-        </div>
-      </section>
-
-      <section id="metrics" className="scroll-mt-28 border-b border-cyan-950/10 bg-white/25">
-        <div className="grid w-full gap-4 px-2 py-4 sm:px-3">
-          <MetricsBand
-            grade={todayGrade}
-            nextUnlock={nextUnlock}
-            rows={dashboard.progress}
-            user={user}
-          />
-        </div>
-      </section>
-
-      <section id="social" className="scroll-mt-28">
-        <div className="grid w-full gap-4 px-2 py-4 sm:px-3">
-          <SocialPanel
-            social={dashboard.social}
-            busy={busy}
-            onAddFriend={addFriend}
-            onEnroll={enrollMarketplace}
-          />
-          <CompactDetails title="Challenge settings and cohorts">
-            <VersatilityPanel
-              busy={busy}
-              cohorts={dashboard.cohorts}
-              settings={dashboard.challengeSettings}
-              onCreateCohort={createCohort}
-              onJoinCohort={joinCohort}
-              onSaveSettings={saveChallengeSettings}
-            />
-          </CompactDetails>
-          <CompactDetails title="Notebook and rewards" defaultOpen>
-            <div className="grid gap-4 lg:grid-cols-[0.72fr_1.28fr]">
-              <RewardPanel busy={busy} onRedeem={redeem} />
-              <NotebookPanel
-                key={dashboard.notebookEntries.map((entry) => entry.id).join(":")}
-                busy={busy}
-                entries={dashboard.notebookEntries}
-                redemptions={dashboard.redemptions}
-                onAskExaminer={openExaminer}
-              />
-            </div>
-          </CompactDetails>
-        </div>
-      </section>
+      <DashboardWorkspace
+        busy={busy}
+        dashboard={dashboard}
+        deadline={deadline}
+        draftSavedAt={draftSavedAt}
+        grade={todayGrade}
+        hasDraft={hasDraft}
+        nextUnlock={nextUnlock}
+        onAddFriend={addFriend}
+        onCreateCohort={createCohort}
+        onEnrollMarketplace={enrollMarketplace}
+        onExaminer={openExaminer}
+        onFocus={() => setFocusOpen(true)}
+        onGrade={gradeSubmission}
+        onJoinCohort={joinCohort}
+        onOpenResponse={() => setResponseOpen(true)}
+        onRedeem={redeem}
+        onResetWidgets={() => setDashboardWidgets(defaultDashboardWidgets())}
+        onSample={loadSampleAnswer}
+        onSaveSettings={saveChallengeSettings}
+        onVerify={answerVerification}
+        setVerification={setVerification}
+        status={status}
+        submission={todaySubmission ?? null}
+        user={user}
+        verification={verification}
+        widgets={dashboardWidgets}
+        onWidgetsChange={setDashboardWidgets}
+      />
 
       <ResponseEditorModal
         attachments={draftAttachments}
@@ -1371,79 +1359,507 @@ function LandingDepthStrip() {
   );
 }
 
-function CommandBrief({
+function DashboardWorkspace({
+  busy,
   dashboard,
   deadline,
+  draftSavedAt,
+  grade,
+  hasDraft,
   nextUnlock,
+  onAddFriend,
+  onCreateCohort,
+  onEnrollMarketplace,
+  onExaminer,
+  onFocus,
+  onGrade,
+  onJoinCohort,
+  onOpenResponse,
+  onRedeem,
+  onResetWidgets,
+  onSample,
+  onSaveSettings,
+  onVerify,
+  onWidgetsChange,
+  setVerification,
+  status,
+  submission,
+  user,
+  verification,
+  widgets,
 }: {
+  busy: boolean;
   dashboard: Dashboard;
   deadline: string;
+  draftSavedAt: string;
+  grade: Grade | null;
+  hasDraft: boolean;
   nextUnlock: string;
+  onAddFriend: (event: FormEvent<HTMLFormElement>) => void;
+  onCreateCohort: (event: FormEvent<HTMLFormElement>) => void;
+  onEnrollMarketplace: (challengeId: string) => void;
+  onExaminer: () => void;
+  onFocus: () => void;
+  onGrade: () => void;
+  onJoinCohort: (event: FormEvent<HTMLFormElement>) => void;
+  onOpenResponse: () => void;
+  onRedeem: (event: FormEvent<HTMLFormElement>) => void;
+  onResetWidgets: () => void;
+  onSample: () => void;
+  onSaveSettings: (settings: ChallengeSettings) => void;
+  onVerify: () => void;
+  onWidgetsChange: (widgets: DashboardWidget[]) => void;
+  setVerification: (value: string) => void;
+  status: string;
+  submission: Submission | null;
+  user: SafeUser;
+  verification: string;
+  widgets: DashboardWidget[];
 }) {
-  const { activeDiscipline, progress, studyProfile, today, todayGrade, todaySubmission, user } = dashboard;
-  const state = todayGrade
-    ? {
-        label: "Teaching unlocked",
-        detail: "Review the worked solution, correction, and notebook lessons before the next challenge.",
-      }
-    : todaySubmission
-      ? {
-          label: "Submitted",
-          detail: "Grade the response to unlock the teaching layer and update your notebook.",
-        }
-      : {
-          label: "Open assessment",
-          detail: "Write a defensible response with evidence before the deadline.",
-        };
-  const profileFocus = studyProfile?.rankedTopics.slice(0, 3).join(", ") || activeDiscipline.topics.slice(0, 3).join(", ");
-  const evidence = activeDiscipline.evidenceTypes.slice(0, 3).join(", ");
-  const history = progress.length === 0 ? "Baseline day" : `${progress.length} recent records`;
+  const [dragging, setDragging] = useState<WidgetId | null>(null);
+  const visible = widgets.filter((widget) => widget.visible);
+  const hidden = widgets.filter((widget) => !widget.visible);
+
+  function updateWidget(id: WidgetId, patch: Partial<DashboardWidget>) {
+    onWidgetsChange(widgets.map((widget) => (widget.id === id ? { ...widget, ...patch } : widget)));
+  }
+
+  function moveWidget(targetId: WidgetId) {
+    if (!dragging || dragging === targetId) return;
+    const from = widgets.findIndex((widget) => widget.id === dragging);
+    const to = widgets.findIndex((widget) => widget.id === targetId);
+    if (from < 0 || to < 0) return;
+    const next = widgets.slice();
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    onWidgetsChange(next);
+    setDragging(null);
+  }
+
+  function renderWidget(id: WidgetId) {
+    switch (id) {
+      case "challenge":
+        return (
+          <ChallengeWidget
+            busy={busy}
+            challenge={dashboard.today}
+            draftSavedAt={draftSavedAt}
+            grade={grade}
+            hasDraft={hasDraft}
+            nextUnlock={nextUnlock}
+            notice={dashboard.todayNotice}
+            onExaminer={onExaminer}
+            onFocus={onFocus}
+            onGrade={onGrade}
+            onOpen={onOpenResponse}
+            onSample={onSample}
+            onVerify={onVerify}
+            setVerification={setVerification}
+            status={status}
+            submission={submission}
+            verification={verification}
+          />
+        );
+      case "teaching":
+        return <TeachingPanel challenge={dashboard.today} grade={grade} submission={submission} plain />;
+      case "pisTrend":
+        return <PisTrendChart currentPis={user.pisScore} rows={dashboard.progress} />;
+      case "scoreDistribution":
+        return <FrequencyPolygon rows={dashboard.progress} />;
+      case "streakMap":
+        return <ActivityGrid rows={dashboard.progress} />;
+      case "scoresheet":
+        return grade ? (
+          <GradeSummary grade={grade} plain />
+        ) : (
+          <EmptyState
+            title="No grade yet"
+            text="Submit and grade today&apos;s response to see the verdict, score movement, ERT earned, and correction."
+          />
+        );
+      case "history":
+        return <ProgressPanel rows={dashboard.progress} />;
+      case "social":
+        return (
+          <SocialPanel
+            social={dashboard.social}
+            busy={busy}
+            onAddFriend={onAddFriend}
+            onEnroll={onEnrollMarketplace}
+            plain
+          />
+        );
+      case "settings":
+        return (
+          <VersatilityPanel
+            busy={busy}
+            cohorts={dashboard.cohorts}
+            settings={dashboard.challengeSettings}
+            onCreateCohort={onCreateCohort}
+            onJoinCohort={onJoinCohort}
+            onSaveSettings={onSaveSettings}
+            plain
+          />
+        );
+      case "notebook":
+        return (
+          <NotebookPanel
+            key={dashboard.notebookEntries.map((entry) => entry.id).join(":")}
+            busy={busy}
+            entries={dashboard.notebookEntries}
+            redemptions={dashboard.redemptions}
+            onAskExaminer={onExaminer}
+            showRedemptions={false}
+            plain
+          />
+        );
+      case "rewards":
+        return <RewardPanel busy={busy} onRedeem={onRedeem} plain />;
+    }
+  }
 
   return (
-    <section className="border-b border-slate-200/70 bg-white/32">
-      <div className="grid w-full gap-3 px-2 py-3 sm:px-3 lg:grid-cols-[1.15fr_0.85fr]">
-        <div className="quiet-panel rounded-md p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-md bg-slate-950 px-2 py-1 text-xs font-semibold text-white">
-              {state.label}
-            </span>
-            <span className="rounded-md border border-slate-200 bg-white/70 px-2 py-1 text-xs font-semibold text-slate-600">
-              Due {deadline}
-            </span>
-            <span className="rounded-md border border-slate-200 bg-white/70 px-2 py-1 text-xs font-semibold text-slate-600">
-              Next {nextUnlock}
-            </span>
-          </div>
-          <h1 className="mt-3 text-xl font-semibold tracking-normal text-slate-950">
-            {today.title}
-          </h1>
-          <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
-            {state.detail}
+    <section className="grid w-full gap-3 px-2 py-3 sm:px-3">
+      <DailyOperatingStrip
+        dashboard={dashboard}
+        deadline={deadline}
+        hasDraft={hasDraft}
+        nextUnlock={nextUnlock}
+        onExaminer={onExaminer}
+        onOpenResponse={onOpenResponse}
+        onGrade={onGrade}
+        submission={submission}
+        grade={grade}
+        user={user}
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white/42 px-3 py-2">
+        <div>
+          <p className="text-sm font-semibold text-slate-950">Workspace</p>
+          <p className="text-xs leading-5 text-slate-500">
+            Drag panels, collapse noise, and cycle width with the expand control.
           </p>
         </div>
-
-        <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
-          <BriefStat label="Discipline" value={activeDiscipline.label} />
-          <BriefStat label="Focus" value={profileFocus || today.topic} />
-          <BriefStat label="Evidence" value={evidence || history} />
+        <div className="flex flex-wrap gap-2">
+          {hidden.map((widget) => (
+            <button
+              key={widget.id}
+              type="button"
+              onClick={() => updateWidget(widget.id, { visible: true })}
+              className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700"
+            >
+              Show {widget.title}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={onResetWidgets}
+            className="flex h-8 items-center gap-2 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700"
+          >
+            <RotateCcw size={13} />
+            Reset
+          </button>
         </div>
+      </div>
 
-        <div className="lg:col-span-2 grid gap-2 sm:grid-cols-4">
-          <BriefStat label="PIS" value={user.pisScore.toFixed(1)} />
-          <BriefStat label="ERT" value={String(user.ertBalance)} />
-          <BriefStat label="Streak" value={`${user.currentStreak} days`} />
-          <BriefStat label="History" value={history} />
-        </div>
+      <div className="dashboard-grid">
+        {visible.map((widget) => (
+          <WidgetShell
+            key={widget.id}
+            dragging={dragging === widget.id}
+            widget={widget}
+            onCollapse={() => updateWidget(widget.id, { collapsed: !widget.collapsed })}
+            onDragEnd={() => setDragging(null)}
+            onDragOver={(event) => event.preventDefault()}
+            onDragStart={() => setDragging(widget.id)}
+            onDrop={() => moveWidget(widget.id)}
+            onHide={() => updateWidget(widget.id, { visible: false })}
+            onResize={() => updateWidget(widget.id, { size: nextWidgetSize(widget.size) })}
+          >
+            {renderWidget(widget.id)}
+          </WidgetShell>
+        ))}
       </div>
     </section>
   );
 }
 
-function BriefStat({ label, value }: { label: string; value: string }) {
+function DailyOperatingStrip({
+  dashboard,
+  deadline,
+  grade,
+  hasDraft,
+  nextUnlock,
+  onExaminer,
+  onGrade,
+  onOpenResponse,
+  submission,
+  user,
+}: {
+  dashboard: Dashboard;
+  deadline: string;
+  grade: Grade | null;
+  hasDraft: boolean;
+  nextUnlock: string;
+  onExaminer: () => void;
+  onGrade: () => void;
+  onOpenResponse: () => void;
+  submission: Submission | null;
+  user: SafeUser;
+}) {
+  const primaryAction = grade
+    ? { label: "Review score", action: () => scrollToWidget("scoresheet") }
+    : submission
+      ? { label: "Grade response", action: onGrade }
+      : { label: hasDraft ? "Continue response" : "Respond", action: onOpenResponse };
   return (
-    <div className="rounded-md border border-slate-200 bg-white/58 p-3">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</p>
-      <p className="mt-1 line-clamp-2 text-sm font-semibold leading-5 text-slate-900">{value}</p>
+    <div className="glass-panel rounded-md p-3">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill status={dashboard.today.status} />
+            <span className="rounded-md border border-slate-200 bg-white/70 px-2 py-1 font-mono text-xs font-semibold text-slate-600">
+              {dashboard.today.dateKey} · {dashboard.today.difficulty}
+            </span>
+            <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
+              Due {deadline}
+            </span>
+          </div>
+          <h1 className="mt-2 truncate text-xl font-semibold text-slate-950">
+            {dashboard.today.title}
+          </h1>
+          <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600">
+            {dashboard.activeDiscipline.label} · {dashboard.today.topic} · Next unlock {nextUnlock}
+          </p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[repeat(3,minmax(5rem,auto))_auto_auto] sm:items-center">
+          <MiniStat label="PIS" value={user.pisScore.toFixed(1)} />
+          <MiniStat label="ERT" value={String(user.ertBalance)} />
+          <MiniStat label="Streak" value={`${user.currentStreak}d`} />
+          <button
+            type="button"
+            onClick={primaryAction.action}
+            disabled={submission && !grade ? false : false}
+            className="interactive-lift h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white"
+          >
+            {primaryAction.label}
+          </button>
+          <button
+            type="button"
+            onClick={onExaminer}
+            className="interactive-lift h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700"
+          >
+            Examiner
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white/58 px-3 py-2">
+      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</p>
+      <p className="text-sm font-semibold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function scrollToWidget(id: WidgetId) {
+  document.getElementById(`widget-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function WidgetShell({
+  children,
+  dragging,
+  onCollapse,
+  onDragEnd,
+  onDragOver,
+  onDragStart,
+  onDrop,
+  onHide,
+  onResize,
+  widget,
+}: {
+  children: ReactNode;
+  dragging: boolean;
+  onCollapse: () => void;
+  onDragEnd: () => void;
+  onDragOver: (event: DragEvent<HTMLElement>) => void;
+  onDragStart: () => void;
+  onDrop: () => void;
+  onHide: () => void;
+  onResize: () => void;
+  widget: DashboardWidget;
+}) {
+  return (
+    <section
+      id={`widget-${widget.id}`}
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      className={`dashboard-widget quiet-panel rounded-md ${widgetSizeClass(widget.size)} ${dragging ? "opacity-60 ring-2 ring-cyan-500" : ""}`}
+    >
+      <div className="dashboard-widget-header">
+        <div className="flex min-w-0 items-center gap-2">
+          <GripVertical size={16} className="dashboard-drag-handle shrink-0 text-slate-400" />
+          <h2 className="truncate text-sm font-semibold text-slate-950">{widget.title}</h2>
+          <span className="rounded-sm bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">
+            {widget.size.toUpperCase()}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <IconControl label="Resize widget" onClick={onResize}>
+            <Maximize2 size={14} />
+          </IconControl>
+          <IconControl label={widget.collapsed ? "Expand widget" : "Collapse widget"} onClick={onCollapse}>
+            <Minimize2 size={14} />
+          </IconControl>
+          <IconControl label="Hide widget" onClick={onHide}>
+            <EyeOff size={14} />
+          </IconControl>
+        </div>
+      </div>
+      {!widget.collapsed && <div className="dashboard-widget-body">{children}</div>}
+    </section>
+  );
+}
+
+function IconControl({
+  children,
+  label,
+  onClick,
+}: {
+  children: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="grid size-8 place-items-center rounded-md border border-slate-200 bg-white/70 text-slate-600 transition-colors hover:border-cyan-700/30 hover:text-cyan-800"
+    >
+      {children}
+    </button>
+  );
+}
+
+function widgetSizeClass(size: WidgetSize) {
+  if (size === "sm") return "lg:col-span-1";
+  if (size === "md") return "lg:col-span-2";
+  if (size === "lg") return "lg:col-span-3";
+  return "lg:col-span-4";
+}
+
+function nextWidgetSize(size: WidgetSize): WidgetSize {
+  const sizes: WidgetSize[] = ["sm", "md", "lg", "xl"];
+  return sizes[(sizes.indexOf(size) + 1) % sizes.length];
+}
+
+function ChallengeWidget({
+  busy,
+  challenge,
+  draftSavedAt,
+  grade,
+  hasDraft,
+  nextUnlock,
+  notice,
+  onExaminer,
+  onFocus,
+  onGrade,
+  onOpen,
+  onSample,
+  onVerify,
+  setVerification,
+  status,
+  submission,
+  verification,
+}: {
+  busy: boolean;
+  challenge: Challenge;
+  draftSavedAt: string;
+  grade: Grade | null;
+  hasDraft: boolean;
+  nextUnlock: string;
+  notice: ChallengeNotice | null;
+  onExaminer: () => void;
+  onFocus: () => void;
+  onGrade: () => void;
+  onOpen: () => void;
+  onSample: () => void;
+  onVerify: () => void;
+  setVerification: (value: string) => void;
+  status: string;
+  submission: Submission | null;
+  verification: string;
+}) {
+  return (
+    <div className="grid gap-4">
+      {submission ? (
+        <div className="rounded-md border border-cyan-700/15 bg-cyan-50 p-4">
+          <p className="text-sm font-semibold text-cyan-800">Submitted response</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            This assessment stays focused on the submitted work until the next challenge unlocks at {nextUnlock}.
+          </p>
+        </div>
+      ) : (
+        <div>
+          <p className="text-sm font-semibold text-cyan-800">{challenge.topic}</p>
+          <h2 className="mt-1 text-2xl font-semibold tracking-normal text-slate-950">
+            {challenge.title}
+          </h2>
+          <p className="mt-3 leading-7 text-slate-600">{challenge.scenario}</p>
+          <div className="mt-4 rounded-md border border-slate-200 bg-white/55 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Objective
+            </p>
+            <p className="mt-1 leading-7 text-slate-700">{challenge.objective}</p>
+          </div>
+        </div>
+      )}
+
+      {submission ? (
+        <details className="rounded-md border border-slate-200 bg-white/55">
+          <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-semibold text-slate-900 marker:hidden">
+            Challenge prompt
+            <ChevronRight size={16} className="text-cyan-700" />
+          </summary>
+          <div className="border-t border-slate-200 px-4 py-4">
+            <p className="text-sm font-semibold text-cyan-800">{challenge.topic}</p>
+            <p className="mt-2 text-lg font-semibold text-slate-950">{challenge.title}</p>
+            <p className="mt-2 leading-7 text-slate-600">{challenge.scenario}</p>
+            <p className="mt-4 font-semibold text-slate-900">Objective</p>
+            <p className="mt-1 leading-7 text-slate-600">{challenge.objective}</p>
+            <ChallengeAccordions challenge={challenge} />
+          </div>
+        </details>
+      ) : (
+        <ChallengeAccordions challenge={challenge} />
+      )}
+
+      <SubmissionControl
+        busy={busy}
+        draftSavedAt={draftSavedAt}
+        hasDraft={hasDraft}
+        onFocus={onFocus}
+        onOpen={onOpen}
+        onSample={onSample}
+        status={status}
+        submission={submission}
+        grade={grade}
+        verification={verification}
+        setVerification={setVerification}
+        onVerify={onVerify}
+        onGrade={onGrade}
+        notice={notice}
+        onExaminer={onExaminer}
+      />
     </div>
   );
 }
@@ -1833,42 +2249,6 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-function ScoreMeter({ value, label }: { value: number; label: string }) {
-  const clamped = Math.max(0, Math.min(100, value));
-  const tone =
-    clamped >= 70
-      ? "text-cyan-800"
-      : clamped >= 45
-        ? "text-slate-800"
-        : "text-amber-800";
-  return (
-    <div className="rounded-md border border-cyan-950/10 bg-white/60 p-4">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-            {label}
-          </p>
-          <p className={`mt-1 text-4xl font-semibold ${tone}`}>{clamped.toFixed(1)}</p>
-        </div>
-        <span className="mb-1 rounded-md border border-cyan-700/15 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-800">
-          {clamped >= 70 ? "Strong" : clamped >= 45 ? "Stable" : "Recovery"}
-        </span>
-      </div>
-      <div className="mt-4 h-2 rounded-full bg-slate-200">
-        <div
-          className="h-full rounded-full bg-cyan-700"
-          style={{ width: `${clamped}%` }}
-        />
-      </div>
-      <div className="mt-2 flex justify-between text-[10px] font-medium text-slate-500">
-        <span>0</span>
-        <span>50</span>
-        <span>100</span>
-      </div>
-    </div>
-  );
-}
-
 function ActivityGrid({ rows }: { rows: ProgressRow[] }) {
   const cells = Array.from({ length: 28 }, (_, index) => rows[index]);
   return (
@@ -2068,12 +2448,16 @@ function AppHeader({
   user,
   onCommand,
   onExport,
+  onThemeToggle,
   onLogout,
+  theme,
 }: {
   user?: SafeUser;
   onCommand?: () => void;
   onExport?: () => void;
+  onThemeToggle?: () => void;
   onLogout?: () => void;
+  theme?: ThemeMode;
 }) {
   return (
     <header className="border-b border-slate-200/80 bg-white/62 backdrop-blur-xl">
@@ -2119,6 +2503,14 @@ function AppHeader({
             >
               <Download size={15} />
               <span className="hidden lg:inline">Export</span>
+            </button>
+            <button
+              onClick={onThemeToggle}
+              className="interactive-lift grid size-10 place-items-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm"
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              type="button"
+            >
+              {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
             </button>
             <button
               onClick={onLogout}
@@ -2182,30 +2574,6 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
   );
 }
 
-function SectionNav() {
-  const items = [
-    { href: "#daily-challenge", label: "Challenge", icon: <ShieldCheck size={15} /> },
-    { href: "#metrics", label: "Metrics", icon: <CircleGauge size={15} /> },
-    { href: "#social", label: "Social", icon: <Users size={15} /> },
-  ];
-  return (
-    <nav className="sticky top-0 z-30 border-b border-slate-200/85 bg-white/76 backdrop-blur-xl">
-      <div className="flex w-full gap-6 overflow-x-auto px-2 py-2 sm:px-3">
-        {items.map((item) => (
-          <a
-            key={item.href}
-            href={item.href}
-            className="nav-link group flex h-8 shrink-0 items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 transition-colors hover:text-slate-950"
-          >
-            <span className="text-slate-500 group-hover:text-slate-900">{item.icon}</span>
-            {item.label}
-          </a>
-        ))}
-      </div>
-    </nav>
-  );
-}
-
 function DashboardSkeleton() {
   return (
     <section className="grid w-full gap-4 px-2 py-4 sm:px-3">
@@ -2241,59 +2609,6 @@ function DashboardSkeleton() {
 
 function SkeletonLine({ className = "" }: { className?: string }) {
   return <div className={`animate-pulse rounded-md bg-slate-200/80 ${className}`} />;
-}
-
-function MetricsBand({
-  grade,
-  nextUnlock,
-  rows,
-  user,
-}: {
-  grade: Grade | null;
-  nextUnlock: string;
-  rows: ProgressRow[];
-  user: SafeUser;
-}) {
-  return (
-    <>
-      <div className="grid gap-4">
-        <Panel icon={<CircleGauge size={19} />} title="PIS trend">
-          <PisTrendChart currentPis={user.pisScore} rows={rows} />
-        </Panel>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <ScoreMeter value={user.pisScore} label="PIS" />
-          <Metric icon={<Trophy size={18} />} label="ERT balance" value={String(user.ertBalance)} />
-          <Metric icon={<Flame size={18} />} label="Current streak" value={`${user.currentStreak} days`} />
-          <Metric icon={<CalendarClock size={18} />} label="Next challenge" value={nextUnlock} />
-        </div>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(13rem,0.7fr)_minmax(13rem,0.7fr)]">
-        <Panel icon={<Medal size={19} />} title="Score distribution" compact>
-          <FrequencyPolygon rows={rows} />
-        </Panel>
-        <Panel icon={<CalendarClock size={19} />} title="Streak map" compact>
-          <ActivityGrid rows={rows} />
-        </Panel>
-      </div>
-      <div>
-        {grade ? (
-          <GradeSummary grade={grade} />
-        ) : (
-          <Panel icon={<FileText size={19} />} title="Daily scoresheet">
-            <EmptyState
-              title="No grade yet"
-              text="Submit and grade today&apos;s response to see the verdict, raw score, final score, ERT earned, and examiner correction."
-            />
-          </Panel>
-        )}
-      </div>
-
-      <CompactDetails title="Recent history">
-        <ProgressPanel rows={rows} />
-      </CompactDetails>
-    </>
-  );
 }
 
 function PisTrendChart({ currentPis, rows }: { currentPis: number; rows: ProgressRow[] }) {
@@ -2543,23 +2858,23 @@ function Panel({
   );
 }
 
-function CompactDetails({
+function PlainSection({
   children,
-  defaultOpen = false,
+  icon,
   title,
 }: {
   children: ReactNode;
-  defaultOpen?: boolean;
+  icon: ReactNode;
   title: string;
 }) {
   return (
-    <details className="quiet-panel rounded-md p-4" open={defaultOpen}>
-      <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-900 marker:hidden">
-        {title}
-        <ChevronRight size={16} className="text-cyan-700" />
-      </summary>
-      <div className="mt-4">{children}</div>
-    </details>
+    <section className="grid gap-3">
+      <div className="flex items-center gap-2 text-cyan-700">
+        {icon}
+        <h3 className="font-semibold text-slate-950">{title}</h3>
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -3658,9 +3973,8 @@ function RichSubmissionBody({ body }: { body: string }) {
   return <div className="grid gap-2">{nodes}</div>;
 }
 
-function GradeSummary({ grade }: { grade: Grade }) {
-  return (
-    <Panel icon={<Medal size={19} />} title="Daily scoresheet">
+function GradeSummary({ grade, plain = false }: { grade: Grade; plain?: boolean }) {
+  const content = (
       <div className="grid gap-3">
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <Result label="Verdict" value={grade.verdict} />
@@ -3688,8 +4002,8 @@ function GradeSummary({ grade }: { grade: Grade }) {
           Next target: {grade.nextImprovementTarget}
         </p>
       </div>
-    </Panel>
   );
+  return plain ? content : <Panel icon={<Medal size={19} />} title="Daily scoresheet">{content}</Panel>;
 }
 
 function Result({ label, value }: { label: string; value: string | number }) {
@@ -3704,12 +4018,13 @@ function Result({ label, value }: { label: string; value: string | number }) {
 function RewardPanel({
   busy,
   onRedeem,
+  plain = false,
 }: {
   busy: boolean;
   onRedeem: (event: FormEvent<HTMLFormElement>) => void;
+  plain?: boolean;
 }) {
-  return (
-    <Panel icon={<WalletCards size={19} />} title="Redeem ERT">
+  const content = (
       <form onSubmit={onRedeem} className="grid gap-3">
         <input name="rewardName" className="h-10 rounded-md border border-slate-300 px-3 text-sm" placeholder="Reward name" />
         <div className="grid grid-cols-2 gap-2">
@@ -3721,8 +4036,8 @@ function RewardPanel({
           Redeem
         </button>
       </form>
-    </Panel>
   );
+  return plain ? content : <Panel icon={<WalletCards size={19} />} title="Redeem ERT">{content}</Panel>;
 }
 
 function ProgressPanel({ rows }: { rows: ProgressRow[] }) {
@@ -3777,6 +4092,7 @@ function EmptyState({ title, text }: { title: string; text: string }) {
 function VersatilityPanel({
   busy,
   cohorts,
+  plain = false,
   settings,
   onCreateCohort,
   onJoinCohort,
@@ -3784,14 +4100,16 @@ function VersatilityPanel({
 }: {
   busy: boolean;
   cohorts: CohortSummary[];
+  plain?: boolean;
   settings: ChallengeSettings;
   onCreateCohort: (event: FormEvent<HTMLFormElement>) => void;
   onJoinCohort: (event: FormEvent<HTMLFormElement>) => void;
   onSaveSettings: (settings: ChallengeSettings) => void;
 }) {
+  const TrackShell = plain ? PlainSection : Panel;
   return (
     <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-      <Panel icon={<CircleGauge size={20} />} title="Challenge tracks">
+      <TrackShell icon={<CircleGauge size={20} />} title="Challenge tracks">
         <form
           className="grid gap-3"
           onSubmit={(event) => {
@@ -3880,9 +4198,9 @@ function VersatilityPanel({
             Save settings
           </button>
         </form>
-      </Panel>
+      </TrackShell>
 
-      <Panel icon={<Users size={20} />} title="Cohort challenges">
+      <TrackShell icon={<Users size={20} />} title="Cohort challenges">
         <div className="grid gap-4">
           <form onSubmit={onCreateCohort} className="grid gap-2 lg:grid-cols-[1fr_0.7fr_0.7fr_0.45fr_auto]">
             <input name="name" required className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Cohort name" />
@@ -3937,7 +4255,7 @@ function VersatilityPanel({
             ))}
           </div>
         </div>
-      </Panel>
+      </TrackShell>
     </div>
   );
 }
@@ -3951,14 +4269,15 @@ function SocialPanel({
   busy,
   onAddFriend,
   onEnroll,
+  plain = false,
 }: {
   social: SocialSnapshot;
   busy: boolean;
   onAddFriend: (event: FormEvent<HTMLFormElement>) => void;
   onEnroll: (challengeId: string) => void;
+  plain?: boolean;
 }) {
-  return (
-    <Panel icon={<Users size={20} />} title="Social hub">
+  const content = (
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,0.72fr)]">
         <div className="grid gap-4">
           <div className="overflow-x-auto rounded-md border border-slate-200 bg-white/65">
@@ -4086,27 +4405,32 @@ function SocialPanel({
           </div>
         </aside>
       </div>
-    </Panel>
   );
+  return plain ? content : <Panel icon={<Users size={20} />} title="Social hub">{content}</Panel>;
 }
 
 function NotebookPanel({
   busy,
   entries,
+  plain = false,
   redemptions,
+  showRedemptions = true,
   onAskExaminer,
 }: {
   busy: boolean;
   entries: NotebookEntry[];
+  plain?: boolean;
   redemptions: Redemption[];
+  showRedemptions?: boolean;
   onAskExaminer: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [localEntries, setLocalEntries] = useState(() => entries);
+  const NotebookShell = plain ? PlainSection : Panel;
 
   return (
     <div className="grid gap-5">
-      <Panel icon={<NotebookTabs size={20} />} title="Engineering notebook">
+      <NotebookShell icon={<NotebookTabs size={20} />} title="Engineering notebook">
         <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
           <div>
             <p className="text-sm leading-6 text-slate-600">
@@ -4134,25 +4458,27 @@ function NotebookPanel({
             </div>
           ))}
         </div>
-      </Panel>
+      </NotebookShell>
 
-      <Panel icon={<BookOpenText size={20} />} title="Redemption ledger">
-        <div className="grid gap-3">
-          {redemptions.length === 0 && <p className="text-sm text-slate-600">No redemptions yet.</p>}
-          {redemptions.map((item) => (
-            <div key={item.id} className="grid grid-cols-[1fr_auto] gap-3 rounded-md border border-slate-200 p-3">
-              <div>
-                <p className="font-medium text-slate-800">{item.rewardName}</p>
-                <p className="text-sm text-slate-500">{item.date}</p>
+      {showRedemptions && (
+        <NotebookShell icon={<BookOpenText size={20} />} title="Redemption ledger">
+          <div className="grid gap-3">
+            {redemptions.length === 0 && <p className="text-sm text-slate-600">No redemptions yet.</p>}
+            {redemptions.map((item) => (
+              <div key={item.id} className="grid grid-cols-[1fr_auto] gap-3 rounded-md border border-slate-200 p-3">
+                <div>
+                  <p className="font-medium text-slate-800">{item.rewardName}</p>
+                  <p className="text-sm text-slate-500">{item.date}</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-semibold text-cyan-800">-{item.cost}</p>
+                  <p className="text-xs text-slate-500">Bal {item.balanceAfter}</p>
+                </div>
               </div>
-              <div className="text-right">
-                <p className="font-semibold text-cyan-800">-{item.cost}</p>
-                <p className="text-xs text-slate-500">Bal {item.balanceAfter}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Panel>
+            ))}
+          </div>
+        </NotebookShell>
+      )}
 
       <NotebookAppModal
         busy={busy}
