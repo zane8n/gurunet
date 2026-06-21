@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/store";
@@ -62,6 +62,11 @@ export async function saveUploadFiles(user: User, files: File[]) {
   }
 
   return saved;
+}
+
+export async function clearUploadStorage() {
+  await rm(uploadRoot, { recursive: true, force: true });
+  return { uploadRoot };
 }
 
 function safeExtension(name: string) {

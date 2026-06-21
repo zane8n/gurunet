@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, FormEvent, ReactNode } from "react";
 import {
   BookOpenText,
@@ -11,6 +11,8 @@ import {
   ChevronRight,
   CircleGauge,
   Code2,
+  Command,
+  Download,
   FileText,
   Flame,
   Heading2,
@@ -382,6 +384,8 @@ export function GurunetApp() {
   const [profileErrors, setProfileErrors] = useState<string[]>([]);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [focusOpen, setFocusOpen] = useState(false);
   const [responseOpen, setResponseOpen] = useState(false);
   const [examinerOpen, setExaminerOpen] = useState(false);
   const [examinerMessages, setExaminerMessages] = useState<ExaminerMessage[]>([]);
@@ -442,6 +446,44 @@ export function GurunetApp() {
       activeDiscipline: data.activeDiscipline,
     });
     setVerification("");
+  }
+
+  async function exportLearningRecord() {
+    setBusy(true);
+    setStatus("");
+    try {
+      const response = await fetch("/api/me/export", { cache: "no-store" });
+      if (!response.ok) {
+        const text = await response.text();
+        let message = text || response.statusText;
+        try {
+          const parsed = JSON.parse(text) as { error?: string };
+          message = parsed.error || message;
+        } catch {
+          // Keep the raw response when it is not JSON.
+        }
+        throw new Error(message);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const filename =
+        /filename="([^"]+)"/.exec(disposition)?.[1] ??
+        `gurunet-learning-export-${new Date().toISOString().slice(0, 10)}.json`;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setStatus("Learning export downloaded.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Learning export failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveStudyProfile(input: unknown) {
@@ -514,6 +556,17 @@ export function GurunetApp() {
       }),
     );
   }, [draftAttachments, draftBody, draftKey, draftSavedAt, todaySubmission]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        if (dashboard && user && today) setCommandOpen((open) => !open);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [dashboard, today, user]);
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -871,6 +924,77 @@ export function GurunetApp() {
         : "",
     [nextChallengeUnlockAt],
   );
+  const commandActions = useMemo(
+    () =>
+      dashboard && user && today
+        ? [
+            {
+              id: "focus",
+              title: "Open focus mode",
+              description: "Work from a clean challenge workspace with only the assessment and actions.",
+              shortcut: "O",
+              action: () => setFocusOpen(true),
+            },
+            {
+              id: "respond",
+              title: todaySubmission ? "View submitted response" : hasDraft ? "Continue response" : "Respond to challenge",
+              description: "Open the response editor and evidence workspace.",
+              shortcut: "R",
+              action: () => setResponseOpen(true),
+            },
+            {
+              id: "examiner",
+              title: "Talk to examiner",
+              description: "Ask about grading, rules, delays, excuses, or future challenge settings.",
+              shortcut: "E",
+              action: () => void openExaminer(),
+            },
+            {
+              id: "challenge",
+              title: "Go to challenge",
+              description: "Jump to today's assessment brief.",
+              shortcut: "1",
+              action: () => scrollToSection("daily-challenge"),
+            },
+            {
+              id: "metrics",
+              title: "Go to metrics",
+              description: "Review PIS, ERT, streaks, distribution, and recent history.",
+              shortcut: "2",
+              action: () => scrollToSection("metrics"),
+            },
+            {
+              id: "social",
+              title: "Go to social and cohorts",
+              description: "Open leaderboards, marketplace, cohorts, notebook, and rewards.",
+              shortcut: "3",
+              action: () => scrollToSection("social"),
+            },
+            {
+              id: "sample",
+              title: "Load sample response",
+              description: "Insert a model response outline into the editor.",
+              shortcut: "S",
+              action: loadSampleAnswer,
+            },
+            {
+              id: "refresh",
+              title: "Refresh dashboard",
+              description: "Reload challenge, metrics, notebook, and social state.",
+              shortcut: "F",
+              action: () => void loadDashboard(),
+            },
+            {
+              id: "export",
+              title: "Export learning record",
+              description: "Download your profile, challenges, grades, notebook, and social learning state.",
+              shortcut: "X",
+              action: () => void exportLearningRecord(),
+            },
+          ]
+        : [],
+    [dashboard, hasDraft, today, todaySubmission, user],
+  );
 
   if (!bootstrapped) {
     return (
@@ -935,6 +1059,7 @@ export function GurunetApp() {
               <Metric icon={<CalendarClock size={18} />} label="Deadline" value="15:00" />
               <Metric icon={<LockKeyhole size={18} />} label="Solutions" value="Locked" />
             </div>
+            <LandingDepthStrip />
           </div>
 
           <form
@@ -1004,8 +1129,14 @@ export function GurunetApp() {
 
   return (
     <main className="app-background min-h-screen text-slate-950">
-      <AppHeader user={user} onLogout={logout} />
+      <AppHeader
+        user={user}
+        onCommand={() => setCommandOpen(true)}
+        onExport={() => void exportLearningRecord()}
+        onLogout={logout}
+      />
       <SectionNav />
+      <CommandBrief dashboard={dashboard} deadline={deadline} nextUnlock={nextUnlock} />
 
       <section id="daily-challenge" className="scroll-mt-28 border-b border-cyan-950/10">
         <div className="w-full px-2 py-4 sm:px-3">
@@ -1077,6 +1208,7 @@ export function GurunetApp() {
                 busy={busy}
                 draftSavedAt={draftSavedAt}
                 hasDraft={hasDraft}
+                onFocus={() => setFocusOpen(true)}
                 onOpen={() => setResponseOpen(true)}
                 onSample={loadSampleAnswer}
                 status={status}
@@ -1161,6 +1293,18 @@ export function GurunetApp() {
         onRemoveAttachment={removeDraftAttachment}
         onSubmit={submitAnswer}
       />
+      <ChallengeFocusModal
+        challenge={today}
+        deadline={deadline}
+        hasDraft={hasDraft}
+        nextUnlock={nextUnlock}
+        open={focusOpen}
+        submission={todaySubmission ?? null}
+        grade={todayGrade}
+        onExaminer={openExaminer}
+        onOpenChange={setFocusOpen}
+        onRespond={() => setResponseOpen(true)}
+      />
       <ExaminerChatModal
         busy={busy}
         messages={examinerMessages}
@@ -1168,6 +1312,11 @@ export function GurunetApp() {
         open={examinerOpen}
         onOpenChange={setExaminerOpen}
         onSend={sendExaminerMessage}
+      />
+      <CommandPalette
+        actions={commandActions}
+        open={commandOpen}
+        onOpenChange={setCommandOpen}
       />
       <Footer />
     </main>
@@ -1183,6 +1332,119 @@ function GoogleMark() {
       height={20}
       aria-hidden="true"
     />
+  );
+}
+
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function LandingDepthStrip() {
+  const items = [
+    {
+      title: "Profile-driven",
+      text: "Challenges adapt to discipline, level, evidence style, weak areas, and preferred formats.",
+    },
+    {
+      title: "Strict correction",
+      text: "The solution gate teaches what was right, false, vague, missing, and unsafe after grading.",
+    },
+    {
+      title: "Cohort-ready",
+      text: "Use friends, leaderboards, shared windows, and invite codes when training with other testers.",
+    },
+  ];
+  return (
+    <div className="mt-6 rounded-md border border-slate-200 bg-white/55 p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+        Inside the platform
+      </p>
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
+        {items.map((item) => (
+          <div key={item.title} className="rounded-md bg-white/60 p-3">
+            <p className="font-semibold text-slate-950">{item.title}</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">{item.text}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CommandBrief({
+  dashboard,
+  deadline,
+  nextUnlock,
+}: {
+  dashboard: Dashboard;
+  deadline: string;
+  nextUnlock: string;
+}) {
+  const { activeDiscipline, progress, studyProfile, today, todayGrade, todaySubmission, user } = dashboard;
+  const state = todayGrade
+    ? {
+        label: "Teaching unlocked",
+        detail: "Review the worked solution, correction, and notebook lessons before the next challenge.",
+      }
+    : todaySubmission
+      ? {
+          label: "Submitted",
+          detail: "Grade the response to unlock the teaching layer and update your notebook.",
+        }
+      : {
+          label: "Open assessment",
+          detail: "Write a defensible response with evidence before the deadline.",
+        };
+  const profileFocus = studyProfile?.rankedTopics.slice(0, 3).join(", ") || activeDiscipline.topics.slice(0, 3).join(", ");
+  const evidence = activeDiscipline.evidenceTypes.slice(0, 3).join(", ");
+  const history = progress.length === 0 ? "Baseline day" : `${progress.length} recent records`;
+
+  return (
+    <section className="border-b border-slate-200/70 bg-white/32">
+      <div className="grid w-full gap-3 px-2 py-3 sm:px-3 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="quiet-panel rounded-md p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-md bg-slate-950 px-2 py-1 text-xs font-semibold text-white">
+              {state.label}
+            </span>
+            <span className="rounded-md border border-slate-200 bg-white/70 px-2 py-1 text-xs font-semibold text-slate-600">
+              Due {deadline}
+            </span>
+            <span className="rounded-md border border-slate-200 bg-white/70 px-2 py-1 text-xs font-semibold text-slate-600">
+              Next {nextUnlock}
+            </span>
+          </div>
+          <h1 className="mt-3 text-xl font-semibold tracking-normal text-slate-950">
+            {today.title}
+          </h1>
+          <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
+            {state.detail}
+          </p>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
+          <BriefStat label="Discipline" value={activeDiscipline.label} />
+          <BriefStat label="Focus" value={profileFocus || today.topic} />
+          <BriefStat label="Evidence" value={evidence || history} />
+        </div>
+
+        <div className="lg:col-span-2 grid gap-2 sm:grid-cols-4">
+          <BriefStat label="PIS" value={user.pisScore.toFixed(1)} />
+          <BriefStat label="ERT" value={String(user.ertBalance)} />
+          <BriefStat label="Streak" value={`${user.currentStreak} days`} />
+          <BriefStat label="History" value={history} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BriefStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white/58 p-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</p>
+      <p className="mt-1 line-clamp-2 text-sm font-semibold leading-5 text-slate-900">{value}</p>
+    </div>
   );
 }
 
@@ -1261,6 +1523,7 @@ function StudyProfileOnboarding({
             <p className="mt-1">Pick 3+ topics, 2+ formats, 2+ evidence types, 1 weak area, 1 goal, and 1-40 weekly hours.</p>
           </div>
         </div>
+        <CalibrationPath />
       </div>
 
       <form onSubmit={submit} className="grid gap-5">
@@ -1444,6 +1707,28 @@ function validateStudyProfileInput(input: {
     errors.push("Weekly hours: enter a whole number from 1 to 40.");
   }
   return errors;
+}
+
+function CalibrationPath() {
+  const steps = [
+    ["1", "Choose a governed discipline", "This anchors the rubric and prevents vague AI-made standards."],
+    ["2", "Select evidence and formats", "This tells GURUnet whether to create labs, triage, reviews, documentation, or design work."],
+    ["3", "Declare weak areas", "The system uses these as pressure points and recovery targets."],
+    ["4", "Add written preferences", "Use this for bespoke guidance without loosening grading quality."],
+  ];
+  return (
+    <div className="mt-4 grid gap-2 md:grid-cols-4">
+      {steps.map(([number, title, text]) => (
+        <div key={number} className="rounded-md border border-slate-200 bg-white/55 p-3">
+          <span className="grid size-6 place-items-center rounded-md bg-slate-950 font-mono text-xs font-semibold text-white">
+            {number}
+          </span>
+          <p className="mt-3 text-sm font-semibold text-slate-950">{title}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-600">{text}</p>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function SurveyGroup({ title, children }: { title: string; children: ReactNode }) {
@@ -1779,7 +2064,17 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
   );
 }
 
-function AppHeader({ user, onLogout }: { user?: SafeUser; onLogout?: () => void }) {
+function AppHeader({
+  user,
+  onCommand,
+  onExport,
+  onLogout,
+}: {
+  user?: SafeUser;
+  onCommand?: () => void;
+  onExport?: () => void;
+  onLogout?: () => void;
+}) {
   return (
     <header className="border-b border-slate-200/80 bg-white/62 backdrop-blur-xl">
       <div className="flex w-full items-center justify-between px-2 py-3 sm:px-3">
@@ -1804,6 +2099,27 @@ function AppHeader({ user, onLogout }: { user?: SafeUser; onLogout?: () => void 
             <span className="hidden text-sm font-medium text-slate-600 sm:inline">
               {user.name}
             </span>
+            <button
+              onClick={onCommand}
+              className="interactive-lift grid size-10 place-items-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm sm:flex sm:w-auto sm:px-3"
+              aria-label="Open command palette"
+              type="button"
+            >
+              <Command size={15} />
+              <span className="hidden lg:inline">Command</span>
+              <kbd className="rounded-sm bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
+                Ctrl K
+              </kbd>
+            </button>
+            <button
+              onClick={onExport}
+              className="interactive-lift grid size-10 place-items-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm sm:flex sm:w-auto sm:px-3"
+              aria-label="Export learning record"
+              type="button"
+            >
+              <Download size={15} />
+              <span className="hidden lg:inline">Export</span>
+            </button>
             <button
               onClick={onLogout}
               className="interactive-lift grid size-10 place-items-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm"
@@ -1965,11 +2281,10 @@ function MetricsBand({
           <GradeSummary grade={grade} />
         ) : (
           <Panel icon={<FileText size={19} />} title="Daily scoresheet">
-            <div className="grid gap-2">
-              <SkeletonLine className="h-4 w-28" />
-              <SkeletonLine className="h-4 w-full" />
-              <SkeletonLine className="h-4 w-2/3" />
-            </div>
+            <EmptyState
+              title="No grade yet"
+              text="Submit and grade today&apos;s response to see the verdict, raw score, final score, ERT earned, and examiner correction."
+            />
           </Panel>
         )}
       </div>
@@ -2065,6 +2380,9 @@ function ChallengeAccordions({ challenge }: { challenge: Challenge }) {
           {challenge.expectedAnswerFormat}
         </p>
       </AccordionPanel>
+      <AccordionPanel title="Rubric lens">
+        <ChallengeRubricLens challenge={challenge} />
+      </AccordionPanel>
       <AccordionPanel title="Anti-generic check">
         <p className="text-sm leading-6 text-slate-600">
           {challenge.antiGenericRequirement}
@@ -2073,6 +2391,93 @@ function ChallengeAccordions({ challenge }: { challenge: Challenge }) {
       <AccordionPanel title="Submission requirements">
         <List items={challenge.submissionRequirements} />
       </AccordionPanel>
+    </div>
+  );
+}
+
+const fallbackRubric: Record<string, { label: string; description: string }> = {
+  creativity: {
+    label: "Creativity",
+    description: "Originality, tradeoff awareness, and non-template thinking.",
+  },
+  ingenuity: {
+    label: "Ingenuity",
+    description: "Practical problem solving, tool choice, and operational judgment.",
+  },
+  reporting: {
+    label: "Reporting",
+    description: "Clear explanation, evidence chain, assumptions, and reproducible steps.",
+  },
+  alienness: {
+    label: "Lateral thinking",
+    description: "Ability to test unusual paths, disprove assumptions, and avoid tunnel vision.",
+  },
+  neatness: {
+    label: "Neatness",
+    description: "Structured response, precision, safety, rollback, and concise execution.",
+  },
+};
+
+function ChallengeRubricLens({
+  challenge,
+  compact = false,
+}: {
+  challenge: Challenge;
+  compact?: boolean;
+}) {
+  const snapshot = challenge.disciplineSnapshot;
+  const evidence =
+    snapshot?.evidenceTypes?.length ? snapshot.evidenceTypes : challenge.submissionRequirements;
+  const sections = snapshot?.responseSections ?? [];
+
+  return (
+    <div className="grid gap-3">
+      <RubricGrid rubric={snapshot?.rubric ?? fallbackRubric} compact={compact} />
+      {!compact && (
+        <div className="rounded-md border border-slate-200 bg-white/65 p-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Evidence standard
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {evidence.map((item) => (
+              <span
+                key={item}
+                className="rounded-md border border-cyan-700/15 bg-cyan-50 px-2.5 py-1 text-xs font-semibold text-cyan-900"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+          {sections.length > 0 && (
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              Suggested response spine: {sections.join(", ")}.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RubricGrid({
+  compact = false,
+  rubric,
+}: {
+  compact?: boolean;
+  rubric: Record<string, { label: string; description: string }>;
+}) {
+  const entries = Object.entries(rubric).slice(0, compact ? 3 : 5);
+  return (
+    <div className={`grid gap-2 ${compact ? "" : "sm:grid-cols-2"}`}>
+      {entries.map(([key, axis], index) => (
+        <div key={key} className="rounded-md border border-slate-200 bg-white/65 p-3">
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-800">
+            Axis {index + 1}
+          </p>
+          <h3 className="mt-1 text-sm font-semibold text-slate-950">{axis.label}</h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600">{axis.description}</p>
+        </div>
+      ))}
     </div>
   );
 }
@@ -2162,6 +2567,7 @@ function SubmissionControl({
   busy,
   draftSavedAt,
   hasDraft,
+  onFocus,
   onOpen,
   onSample,
   status,
@@ -2177,6 +2583,7 @@ function SubmissionControl({
   busy: boolean;
   draftSavedAt: string;
   hasDraft: boolean;
+  onFocus: () => void;
   onOpen: () => void;
   onSample: () => void;
   status: string;
@@ -2215,6 +2622,14 @@ function SubmissionControl({
         />
       ) : (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <button
+            type="button"
+            onClick={onFocus}
+            className="interactive-lift flex h-11 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700"
+          >
+            <ShieldCheck size={16} />
+            Focus mode
+          </button>
           <button
             type="button"
             onClick={onOpen}
@@ -2356,6 +2771,130 @@ function TeachingPanel({
   );
 }
 
+function ChallengeFocusModal({
+  challenge,
+  deadline,
+  grade,
+  hasDraft,
+  nextUnlock,
+  onExaminer,
+  onOpenChange,
+  onRespond,
+  open,
+  submission,
+}: {
+  challenge: Challenge;
+  deadline: string;
+  grade: Grade | null;
+  hasDraft: boolean;
+  nextUnlock: string;
+  onExaminer: () => void;
+  onOpenChange: (open: boolean) => void;
+  onRespond: () => void;
+  open: boolean;
+  submission: Submission | null;
+}) {
+  function respond() {
+    onOpenChange(false);
+    onRespond();
+  }
+
+  function examiner() {
+    onOpenChange(false);
+    void onExaminer();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-6xl">
+        <DialogHeader>
+          <DialogTitle>Challenge focus mode</DialogTitle>
+        </DialogHeader>
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(19rem,0.85fr)]">
+          <article className="rounded-md border border-slate-200 bg-white/75 p-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusPill status={challenge.status} />
+              <span className="rounded-md border border-slate-200 bg-white px-2 py-1 font-mono text-xs font-semibold text-slate-600">
+                {challenge.dateKey} · {challenge.difficulty}
+              </span>
+              <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
+                Due {deadline}
+              </span>
+            </div>
+            <p className="mt-4 text-sm font-semibold text-cyan-800">{challenge.topic}</p>
+            <h2 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
+              {challenge.title}
+            </h2>
+            <p className="mt-4 text-base leading-8 text-slate-600">
+              {challenge.scenario}
+            </p>
+            <div className="mt-5 rounded-md border border-slate-200 bg-slate-50/80 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Objective
+              </p>
+              <p className="mt-2 leading-7 text-slate-700">{challenge.objective}</p>
+            </div>
+          </article>
+
+          <aside className="grid content-start gap-3">
+            <div className="rounded-md border border-slate-200 bg-white/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Work state
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                {grade
+                  ? `Teaching is unlocked. Next challenge opens ${nextUnlock}.`
+                  : submission
+                    ? "Response submitted. Grade it from the dashboard to unlock teaching."
+                    : hasDraft
+                      ? "Draft exists. Continue it or ask the examiner before submitting."
+                      : "No draft yet. Start with evidence, assumptions, checks, risk, and recommendation."}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {!submission && (
+                  <button
+                    type="button"
+                    onClick={respond}
+                    className="h-10 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white"
+                  >
+                    {hasDraft ? "Continue response" : "Respond"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={examiner}
+                  className="h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700"
+                >
+                  Ask examiner
+                </button>
+              </div>
+            </div>
+
+            <AccordionPanel title="Submission requirements" defaultOpen>
+              <List items={challenge.submissionRequirements} />
+            </AccordionPanel>
+            <AccordionPanel title="Constraints">
+              <List items={challenge.constraints} />
+            </AccordionPanel>
+            <AccordionPanel title="Allowed tools">
+              <List items={challenge.allowedTools} />
+            </AccordionPanel>
+            <AccordionPanel title="Expected answer">
+              <p className="text-sm leading-6 text-slate-600">
+                {challenge.expectedAnswerFormat}
+              </p>
+            </AccordionPanel>
+            <AccordionPanel title="Rubric lens">
+              <ChallengeRubricLens challenge={challenge} compact />
+            </AccordionPanel>
+          </aside>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function AssessmentLine({
   complete,
   label,
@@ -2458,6 +2997,114 @@ function ExaminerChatModal({
               </button>
             </div>
           </form>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type CommandAction = {
+  id: string;
+  title: string;
+  description: string;
+  shortcut: string;
+  action: () => void;
+};
+
+function CommandPalette({
+  actions,
+  open,
+  onOpenChange,
+}: {
+  actions: CommandAction[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const filtered = actions.filter((item) => {
+    const haystack = `${item.title} ${item.description}`.toLowerCase();
+    return haystack.includes(query.toLowerCase());
+  });
+
+  const setPaletteOpen = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) setQuery("");
+    onOpenChange(nextOpen);
+  }, [onOpenChange]);
+
+  function run(action: CommandAction) {
+    setPaletteOpen(false);
+    action.action();
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setPaletteOpen(false);
+        return;
+      }
+      if (query.trim()) return;
+      const action = actions.find(
+        (item) => item.shortcut.toLowerCase() === event.key.toLowerCase(),
+      );
+      if (!action) return;
+      event.preventDefault();
+      setPaletteOpen(false);
+      action.action();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [actions, open, query, setPaletteOpen]);
+
+  return (
+    <Dialog open={open} onOpenChange={setPaletteOpen}>
+      <DialogContent className="max-h-[82vh] overflow-hidden sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Command palette</DialogTitle>
+        </DialogHeader>
+
+        <div className="grid min-h-0 gap-3">
+          <label className="flex h-11 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-600">
+            <Search size={16} className="text-slate-500" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="h-full min-w-0 flex-1 bg-transparent outline-none"
+              autoFocus
+              placeholder="Search actions, sections, examiner, response..."
+            />
+          </label>
+
+          <div className="max-h-[24rem] overflow-auto rounded-md border border-slate-200 bg-white/70 p-2">
+            {filtered.length === 0 ? (
+              <p className="grid h-24 place-items-center text-sm text-slate-500">
+                No matching command.
+              </p>
+            ) : (
+              <div className="grid gap-1">
+                {filtered.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => run(item)}
+                    className="grid gap-1 rounded-md px-3 py-2 text-left transition-colors hover:bg-slate-100"
+                  >
+                    <span className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-semibold text-slate-950">{item.title}</span>
+                      <kbd className="rounded-sm bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500 shadow-sm">
+                        {item.shortcut}
+                      </kbd>
+                    </span>
+                    <span className="text-xs leading-5 text-slate-500">{item.description}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <p className="text-xs leading-5 text-slate-500">
+            Open with Ctrl K or Cmd K. Use this as the fast lane through the platform.
+          </p>
         </div>
       </DialogContent>
     </Dialog>
@@ -3027,6 +3674,16 @@ function GradeSummary({ grade }: { grade: Grade }) {
           </p>
           <p className="mt-2 text-sm leading-6 text-slate-600">{grade.correction}</p>
         </div>
+        {grade.rubricSnapshot && (
+          <div className="rounded-md border border-slate-200 bg-white/65 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Rubric used
+            </p>
+            <div className="mt-2">
+              <RubricGrid rubric={grade.rubricSnapshot} compact />
+            </div>
+          </div>
+        )}
         <p className="rounded-md bg-cyan-50 px-3 py-2 text-sm font-semibold leading-6 text-cyan-900">
           Next target: {grade.nextImprovementTarget}
         </p>
@@ -3069,6 +3726,14 @@ function RewardPanel({
 }
 
 function ProgressPanel({ rows }: { rows: ProgressRow[] }) {
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        title="No history yet"
+        text="Your recent challenge history appears here after the first submission is graded."
+      />
+    );
+  }
   return (
     <div className="grid gap-3">
         <h2 className="text-sm font-semibold text-slate-900">Progress tracker</h2>
@@ -3096,6 +3761,15 @@ function ProgressPanel({ rows }: { rows: ProgressRow[] }) {
             </tbody>
           </table>
         </div>
+    </div>
+  );
+}
+
+function EmptyState({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-md border border-dashed border-slate-300 bg-white/45 p-4 text-sm leading-6 text-slate-600">
+      <p className="font-semibold text-slate-900">{title}</p>
+      <p className="mt-1">{text}</p>
     </div>
   );
 }
@@ -3299,7 +3973,16 @@ function SocialPanel({
                 </tr>
               </thead>
               <tbody>
-                {social.leaderboard.map((row) => (
+                {social.leaderboard.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-8">
+                      <EmptyState
+                        title="No leaderboard yet"
+                        text="Leaderboard rows appear after users complete graded challenges."
+                      />
+                    </td>
+                  </tr>
+                ) : social.leaderboard.map((row) => (
                   <tr key={row.id} className="border-b border-slate-100 last:border-0">
                     <td className="px-3 py-3 font-semibold text-cyan-800">#{row.rank}</td>
                     <td className="px-3 py-3">
