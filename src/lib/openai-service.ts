@@ -16,13 +16,13 @@ const challengeSchema = z.object({
   title: z.string().min(8).max(120),
   difficulty: z.enum(["Guided", "Normal", "Advanced", "Production", "Expert"]),
   topic: z.string().min(3).max(80),
-  scenario: z.string().min(120).max(1800),
-  objective: z.string().min(40).max(500),
+  scenario: z.string().min(420).max(4200),
+  objective: z.string().min(40).max(700),
   constraints: z.array(z.string().min(8).max(220)).min(4).max(8),
   allowedTools: z.array(z.string().min(2).max(100)).min(4).max(10),
-  expectedAnswerFormat: z.string().min(30).max(500),
-  submissionRequirements: z.array(z.string().min(4).max(180)).min(4).max(8),
-  solution: z.string().min(120).max(3000),
+  expectedAnswerFormat: z.string().min(120).max(1800),
+  submissionRequirements: z.array(z.string().min(4).max(280)).min(5).max(10),
+  solution: z.string().min(400).max(5200),
   antiGenericRequirement: z.string().min(30).max(300),
 });
 
@@ -268,15 +268,17 @@ async function createOpenAiChallengeCompletion(context: ChallengeContext) {
     userId: context.user.id,
     instructions: [
       lecturerPolicy,
-      "You create strict, adaptive, practical GURUnet challenges.",
-      "You are not writing trivia or generic textbook questions. Create a field-realistic assessment with ambiguity, constraints, evidence expectations, and a hidden teaching solution.",
+      "You create strict, adaptive, practical GURUnet challenges as a lecturer preparing an operational assessment packet.",
+      "The prompt-facing challenge must feel like a real incident brief: concrete symptoms, scoped objective, hard constraints, realistic evidence, allowed commands/tools, expected answer sections, and proof requirements.",
+      "Do not write trivia, generic textbook questions, or vague reflection prompts. Evidence must be specific enough that a strong learner can infer the most likely answer without inventing packet captures, logs, users, devices, or facts.",
+      "The hidden solution must be a teaching-grade answer key: root cause, evidence interpretation, safe immediate response, exact checks or commands, verification, rollback, long-term prevention, rejected alternatives, and common wrong/vague answers.",
       "Return only the structured JSON object matching the schema. Do not include markdown.",
     ].join(" "),
     input: JSON.stringify(openAiChallengeInput(context)),
     format: openAiChallengeResponseFormat,
     effort: openAiChallengeReasoningEffort(),
-    max_output_tokens: 3600,
-    prompt_cache_key: "gurunet-challenge-v3",
+    max_output_tokens: 6200,
+    prompt_cache_key: "gurunet-challenge-v4",
   });
 }
 
@@ -326,6 +328,28 @@ async function createOpenAiStructuredCompletion({
 
 function openAiChallengeInput(context: ChallengeContext) {
   const discipline = context.disciplineSnapshot;
+  const expectedSections = context.recovery
+    ? [
+        "1. Most Likely Root Cause / Core Answer",
+        "2. Evidence - list the specific observations that support it",
+        "3. Immediate Containment or First Response",
+        "4. Exact Commands / Calculations / Checks / Work Product",
+        "5. Verification Steps",
+        "6. Long-Term Prevention or Follow-up",
+        "7. Why I Reject Other Causes",
+        "8. Risk / Rollback / Limits",
+        "9. Recovery Component",
+      ]
+    : [
+        "1. Most Likely Root Cause / Core Answer",
+        "2. Evidence - list the specific observations that support it",
+        "3. Immediate Containment or First Response",
+        "4. Exact Commands / Calculations / Checks / Work Product",
+        "5. Verification Steps",
+        "6. Long-Term Prevention or Follow-up",
+        "7. Why I Reject Other Causes",
+        "8. Risk / Rollback / Limits",
+      ];
   return {
     purpose:
       "Generate exactly one daily challenge. It must build real technical capacity, not merely test recall. The task should be answerable without internet access unless external research is explicitly part of the expected format.",
@@ -335,7 +359,14 @@ function openAiChallengeInput(context: ChallengeContext) {
       "Respect the user's active discipline template, selected topics, preferred formats, evidence types, weak areas, avoid areas, and preference notes.",
       "If lab, hands-on, practical, exercise, troubleshooting, analysis, or design review formats are selected, make the challenge concretely match that shape.",
       "Use realistic partial information: symptoms, logs, config fragments, command output, constraints, ambiguity, and one plausible misleading clue where useful.",
+      "The scenario field must be a multi-section packet with plain-text headings. Use this order where applicable: Scenario / Background, Topology / Context, Evidence Provided, Recovery Component, Optional Lab, Submission Deadline.",
+      "Evidence Provided must contain at least three concrete evidence artifacts. For networking, use IOS-like command outputs or logs. For Linux, cloud, software, documentation, or data work, use the equivalent logs, snippets, failing tests, metrics, tickets, excerpts, traces, or artifacts.",
+      "Allowed tools must be a narrow allowlist, not a generic permission list. If a command is not allowed, the learner should not need it.",
+      "Constraints must force operational judgment: production impact, safety, scope limits, no invented evidence, rollback, user impact, or access limitations.",
       "Require assumptions, verification, evidence, trade-offs, risk, rollback, and a defensible recommendation when relevant.",
+      "Expected answer format must be a numbered outline with section names, not a sentence.",
+      "Submission requirements must state exactly what will be graded.",
+      "When recoveryRequired is true, include a short recovery component based on recentWeaknesses or a nearby foundational concept. Keep it separate from the main incident.",
       "Do not reveal the solution in the prompt-facing fields.",
       "The hidden solution must teach: correct approach, false paths, verification commands/checks, common vague answers, and what a strong submission should contain.",
       "The antiGenericRequirement must force scenario-specific evidence and penalize hand-wavy answers.",
@@ -355,12 +386,27 @@ function openAiChallengeInput(context: ChallengeContext) {
       discipline,
       privateMemory: privateChallengeMemoryForUser(context.user),
     },
+    packetStyleReference: {
+      challengeTitle: "A concrete incident title, not 'Daily Challenge'.",
+      difficulty: "Use the requested difficulty and mention recovery/pressure context through normal fields, not score math.",
+      objective:
+        "Ask for the safest immediate response and the long-term solution, or the discipline-equivalent practical deliverable.",
+      expectedAnswerSections: expectedSections,
+      noSolutionBeforeSubmission:
+        "Prompt-facing fields may say not to reveal the solution until after submission, but must not contain the answer.",
+      exampleTone:
+        "High CPU on Core Switch During Broadcast Storm: symptoms, recent unmanaged switch, CPU/STP evidence, MAC flap evidence, interface facts, allowed commands, containment decision, verification, prevention, rejected causes.",
+    },
     outputContract: {
       difficulty: context.difficulty,
+      scenario:
+        "420-4200 characters; multi-section packet with evidence artifacts and 15:00 local deadline statement",
       constraints: "4-8 concrete constraints",
-      allowedTools: "4-10 allowed tools or evidence sources",
-      submissionRequirements: "4-8 proof requirements",
-      solution: "hidden, lecturer-grade answer key and correction guide",
+      allowedTools: "4-10 allowed commands, tools, or evidence sources",
+      expectedAnswerFormat: `numbered outline with these sections: ${expectedSections.join("; ")}`,
+      submissionRequirements: "5-10 proof requirements matching the expected answer outline",
+      solution:
+        "hidden, lecturer-grade answer key and correction guide with exact answer, evidence mapping, false paths, verification, rollback, and prevention",
     },
   };
 }

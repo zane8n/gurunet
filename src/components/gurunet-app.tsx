@@ -307,7 +307,7 @@ function initialTheme(): ThemeMode {
   try {
     const saved = localStorage.getItem(themeStorageKey);
     if (saved === "dark" || saved === "light") return saved;
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    return "light";
   } catch {
     return "light";
   }
@@ -1519,7 +1519,7 @@ function DashboardWorkspace({
   }
 
   return (
-    <section className="grid w-full gap-3 px-2 py-3 sm:px-3">
+    <section className="mx-auto grid w-full max-w-[1320px] gap-4 px-3 py-4 sm:px-5">
       <DailyOperatingStrip
         dashboard={dashboard}
         deadline={deadline}
@@ -1533,7 +1533,7 @@ function DashboardWorkspace({
         user={user}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white/42 px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-stone-200 bg-[#fffdf8]/70 px-3 py-2">
         <div>
           <p className="text-sm font-semibold text-slate-950">Workspace</p>
           <p className="text-xs leading-5 text-slate-500">
@@ -1546,7 +1546,7 @@ function DashboardWorkspace({
               key={widget.id}
               type="button"
               onClick={() => updateWidget(widget.id, { visible: true })}
-              className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700"
+              className="h-8 rounded-md border border-stone-300 bg-[#fffdf8] px-2 text-xs font-semibold text-stone-700"
             >
               Show {widget.title}
             </button>
@@ -1554,7 +1554,7 @@ function DashboardWorkspace({
           <button
             type="button"
             onClick={onResetWidgets}
-            className="flex h-8 items-center gap-2 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700"
+            className="flex h-8 items-center gap-2 rounded-md border border-stone-300 bg-[#fffdf8] px-2 text-xs font-semibold text-stone-700"
           >
             <RotateCcw size={13} />
             Reset
@@ -1647,7 +1647,7 @@ function DailyOperatingStrip({
           <button
             type="button"
             onClick={onExaminer}
-            className="interactive-lift h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700"
+            className="interactive-lift h-10 rounded-md border border-stone-300 bg-[#fffdf8] px-4 text-sm font-semibold text-stone-700"
           >
             Examiner
           </button>
@@ -1762,6 +1762,63 @@ function nextWidgetSize(size: WidgetSize): WidgetSize {
   return sizes[(sizes.indexOf(size) + 1) % sizes.length];
 }
 
+const packetHeadings = new Set([
+  "Scenario / Background",
+  "Topology / Context",
+  "Evidence Provided",
+  "Recovery Component",
+  "Optional Lab",
+  "Submission Deadline",
+  "CPU",
+  "MAC Table",
+  "Logs",
+  "STP",
+  "CDP",
+  "ACL excerpt",
+  "Interface excerpt",
+  "auth.log excerpt",
+  "last excerpt",
+  "authorized_keys timestamp",
+]);
+
+function PacketText({ compact = false, text }: { compact?: boolean; text: string }) {
+  const lines = text.split("\n");
+  return (
+    <div className={`challenge-packet ${compact ? "challenge-packet-compact" : ""}`}>
+      {lines.map((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={`gap-${index}`} className="h-2" />;
+        if (packetHeadings.has(trimmed)) {
+          return (
+            <p key={`${trimmed}-${index}`} className="challenge-packet-heading">
+              {trimmed}
+            </p>
+          );
+        }
+        if (/^(\d+\.|- )/.test(trimmed)) {
+          return (
+            <p key={`${trimmed}-${index}`} className="challenge-packet-list">
+              {line}
+            </p>
+          );
+        }
+        if (/^(SW-|ip access-list|interface | ip | \d+ |PID |CPU |Vlan |%|Jun |\/|svc_|show |[A-Z0-9-]+#)/.test(line)) {
+          return (
+            <pre key={`${trimmed}-${index}`} className="challenge-packet-code">
+              {line}
+            </pre>
+          );
+        }
+        return (
+          <p key={`${trimmed}-${index}`} className="challenge-packet-line">
+            {line}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 function ChallengeWidget({
   busy,
   challenge,
@@ -1814,7 +1871,9 @@ function ChallengeWidget({
           <h2 className="mt-1 text-2xl font-semibold tracking-normal text-slate-950">
             {challenge.title}
           </h2>
-          <p className="mt-3 leading-7 text-slate-600">{challenge.scenario}</p>
+          <div className="mt-4">
+            <PacketText text={challenge.scenario} />
+          </div>
           <div className="mt-4 rounded-md border border-slate-200 bg-white/55 p-3">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
               Objective
@@ -1833,7 +1892,9 @@ function ChallengeWidget({
           <div className="border-t border-slate-200 px-4 py-4">
             <p className="text-sm font-semibold text-cyan-800">{challenge.topic}</p>
             <p className="mt-2 text-lg font-semibold text-slate-950">{challenge.title}</p>
-            <p className="mt-2 leading-7 text-slate-600">{challenge.scenario}</p>
+            <div className="mt-3">
+              <PacketText compact text={challenge.scenario} />
+            </div>
             <p className="mt-4 font-semibold text-slate-900">Objective</p>
             <p className="mt-1 leading-7 text-slate-600">{challenge.objective}</p>
             <ChallengeAccordions challenge={challenge} />
@@ -2460,8 +2521,8 @@ function AppHeader({
   theme?: ThemeMode;
 }) {
   return (
-    <header className="border-b border-slate-200/80 bg-white/62 backdrop-blur-xl">
-      <div className="flex w-full items-center justify-between px-2 py-3 sm:px-3">
+    <header className="border-b border-stone-200/80 bg-[#fffdf8]/78 backdrop-blur-xl">
+      <div className="mx-auto flex w-full max-w-[1320px] items-center justify-between px-3 py-3 sm:px-5">
         <div className="flex items-center gap-3">
           <Image
             src="/gurunet.svg"
@@ -2472,15 +2533,15 @@ function AppHeader({
             priority
           />
           <div>
-            <p className="font-mono text-xs uppercase tracking-[0.18em] text-slate-500">
+            <p className="font-mono text-xs uppercase tracking-[0.18em] text-stone-500">
               GURUnet
             </p>
-            <h2 className="text-lg font-semibold">Structured capacity builder</h2>
+            <h2 className="text-lg font-semibold text-stone-950">Structured capacity builder</h2>
           </div>
         </div>
         {user && (
           <div className="flex items-center gap-3">
-            <span className="hidden text-sm font-medium text-slate-600 sm:inline">
+            <span className="hidden text-sm font-medium text-stone-600 sm:inline">
               {user.name}
             </span>
             <button
@@ -2691,9 +2752,7 @@ function ChallengeAccordions({ challenge }: { challenge: Challenge }) {
         <List items={challenge.allowedTools} />
       </AccordionPanel>
       <AccordionPanel title="Expected answer">
-        <p className="text-sm leading-6 text-slate-600">
-          {challenge.expectedAnswerFormat}
-        </p>
+        <PacketText compact text={challenge.expectedAnswerFormat} />
       </AccordionPanel>
       <AccordionPanel title="Rubric lens">
         <ChallengeRubricLens challenge={challenge} />
@@ -3141,9 +3200,9 @@ function ChallengeFocusModal({
             <h2 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
               {challenge.title}
             </h2>
-            <p className="mt-4 text-base leading-8 text-slate-600">
-              {challenge.scenario}
-            </p>
+            <div className="mt-5">
+              <PacketText text={challenge.scenario} />
+            </div>
             <div className="mt-5 rounded-md border border-slate-200 bg-slate-50/80 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                 Objective
@@ -3196,9 +3255,7 @@ function ChallengeFocusModal({
               <List items={challenge.allowedTools} />
             </AccordionPanel>
             <AccordionPanel title="Expected answer">
-              <p className="text-sm leading-6 text-slate-600">
-                {challenge.expectedAnswerFormat}
-              </p>
+              <PacketText compact text={challenge.expectedAnswerFormat} />
             </AccordionPanel>
             <AccordionPanel title="Rubric lens">
               <ChallengeRubricLens challenge={challenge} compact />

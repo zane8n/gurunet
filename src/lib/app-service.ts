@@ -1282,8 +1282,17 @@ function createDailyChallenge(
       `Target completion time: ${options.settings?.durationMinutes ?? Math.max(30, Math.min(120, discipline.weeklyTimeBudgetHours * 12))} minutes.`,
       `Expected evidence style: ${discipline.evidenceTypes.join(", ")}.`,
     ],
-    expectedAnswerFormat: `${preferredFormat}. ${discipline.responseSections.join(" -> ")}`,
-    submissionRequirements: discipline.evidenceTypes.slice(0, 5),
+    expectedAnswerFormat: [
+      challenge.expectedAnswerFormat,
+      "",
+      `Profile response lens: ${preferredFormat}. Include ${discipline.responseSections.join(" -> ")} where relevant.`,
+    ].join("\n"),
+    submissionRequirements: [
+      ...challenge.submissionRequirements,
+      ...discipline.evidenceTypes
+        .slice(0, 5)
+        .map((evidence) => `Profile evidence expectation: ${evidence}.`),
+    ].slice(0, 10),
   };
 }
 
