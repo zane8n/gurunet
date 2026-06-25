@@ -67,7 +67,7 @@ const openAiChallengeResponseFormat = {
 };
 
 const critiqueSchema = z.object({
-  correction: z.string().min(180).max(5000),
+  correction: z.string().min(180).max(9000),
   contentionNotes: z.array(z.string().min(8).max(260)).max(8),
   nextImprovementTarget: z.string().min(20).max(320),
 });
@@ -495,16 +495,19 @@ export async function generateAiCritique(challenge: Challenge, submission: Submi
       task: "strict_critique",
       userId: grade.userId,
       effort: "high",
-      max_output_tokens: 5200,
-      prompt_cache_key: "gurunet-strict-critique-v2",
+      max_output_tokens: 9000,
+      prompt_cache_key: "gurunet-strict-critique-v3",
       format: openAiCritiqueResponseFormat,
       instructions: [
         lecturerPolicy,
         "You are grading as the GURUnet examiner after the deterministic score has already been set.",
         "Return only JSON. Do not change numeric scores, final score, PIS, ERT, caps, penalties, or verdict.",
         "Your job is the learning answer: compare the challenge, hidden solution, expected answer format, and user's response.",
-        "Be exhaustive but structured. Identify what was correct, what was false, what was missing, what was vague, what was unsafe, and what evidence would have made the answer defensible.",
+        "Grade like a teacher marking a sheet of paper. Use direct references to the user's own response, quoting only short snippets when useful.",
+        "Be exhaustive but structured. Identify what was correct, what was false, what was missing, what was vague, what was misleading, what was unsafe, and what evidence would have made the answer defensible.",
         "Teach the concept plainly enough that a user who did not know the answer can learn it, but keep the correction tied to this exact scenario.",
+        "Explain the correct answer path in enough detail for the learner to understand the underlying concept, the operational sequence, and why rejected alternatives are weaker.",
+        "When the user made a valid point, say exactly why it was valid. When the user made an unsupported or false point, say exactly what evidence contradicts or fails to support it.",
         "Do not praise generic content. Do not invent facts not present in the challenge, solution, or submission.",
       ].join(" "),
       input: JSON.stringify({
@@ -539,7 +542,7 @@ export async function generateAiCritique(challenge: Challenge, submission: Submi
         },
         outputGuidance: {
           correction:
-            "Use short titled sections inside one string: What you got right; What was wrong or unsupported; What you missed; What a stronger answer should have done; Concrete next correction. Mention exact claims or omissions from the user's submission where possible.",
+            "Use these titled sections inside one string: 1. Verdict in plain English; 2. Marked response notes with short snippets from the user labeled Correct, False, Unsupported/Vague, Missing, or Unsafe; 3. Worked solution and concept lesson; 4. Score explanation using the deterministic axes and penalties without changing numbers; 5. What to rewrite next time. Be specific and teacher-like, not generic.",
           contentionNotes:
             "List the highest-impact disputes: false claims, unsupported jumps, unsafe advice, missing validation, or vague recommendations.",
           nextImprovementTarget:

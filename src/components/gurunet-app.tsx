@@ -1405,7 +1405,12 @@ function DashboardWorkspace({
           />
           <div className="grid content-start gap-4">
             {grade ? (
-              <GradeSummary grade={grade} plain />
+              <GradeSummary
+                challenge={dashboard.today}
+                grade={grade}
+                plain
+                submission={submission}
+              />
             ) : (
               <AstroCard title="Score unlock">
                 <EmptyState
@@ -4005,21 +4010,45 @@ function RichSubmissionBody({ body }: { body: string }) {
   return <div className="grid gap-2">{nodes}</div>;
 }
 
-function GradeSummary({ grade, plain = false }: { grade: Grade; plain?: boolean }) {
+function GradeSummary({
+  challenge,
+  grade,
+  plain = false,
+  submission,
+}: {
+  challenge: Challenge;
+  grade: Grade;
+  plain?: boolean;
+  submission: Submission | null;
+}) {
   const content = (
-      <div className="grid gap-3">
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <Result label="Verdict" value={grade.verdict} />
-          <Result label="Raw /20" value={grade.rawScore} />
-          <Result label="Final /20" value={grade.finalScore} />
-          <Result label="ERT earned" value={grade.ertEarned} />
+      <div className="grid gap-4">
+        <GradeScoreStrip grade={grade} />
+
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.78fr)]">
+          <AxisPerformancePrism grade={grade} />
+          <ScoreMathPanel grade={grade} />
         </div>
+
         <div className="rounded-md border border-slate-200 bg-white/65 p-3">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
             Examiner correction
           </p>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{grade.correction}</p>
+          <CorrectionText text={grade.correction} />
+          {grade.contentionNotes.length > 0 && (
+            <div className="mt-3 grid gap-2">
+              {grade.contentionNotes.map((note) => (
+                <p
+                  key={note}
+                  className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-900"
+                >
+                  {note}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
+        {submission && <TeacherMarkedResponse challenge={challenge} grade={grade} submission={submission} />}
         {grade.rubricSnapshot && (
           <div className="rounded-md border border-slate-200 bg-white/65 p-3">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -4038,13 +4067,408 @@ function GradeSummary({ grade, plain = false }: { grade: Grade; plain?: boolean 
   return plain ? content : <Panel icon={<Medal size={19} />} title="Daily scoresheet">{content}</Panel>;
 }
 
-function Result({ label, value }: { label: string; value: string | number }) {
+function GradeScoreStrip({ grade }: { grade: Grade }) {
   return (
-    <div className="min-w-0 rounded-md border border-slate-200 bg-white/60 p-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</p>
-      <p className="mt-1 break-words text-lg font-semibold leading-6 text-slate-950">{value}</p>
+    <div className="rounded-md border border-slate-200 bg-white/72 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={`inline-flex max-w-full items-center rounded-full px-3 py-1 text-xs font-semibold ${
+            grade.verdict === "Passed"
+              ? "bg-cyan-50 text-cyan-900"
+              : grade.verdict === "Partially passed"
+                ? "bg-amber-50 text-amber-900"
+                : "bg-red-50 text-red-900"
+          }`}
+        >
+          {grade.verdict}
+        </span>
+        <ScorePill label="Raw" value={`${grade.rawScore}/20`} />
+        <ScorePill label="Final" value={`${grade.finalScore}/20`} emphasis />
+        <ScorePill label="ERT" value={`+${grade.ertEarned}`} />
+        <ScorePill label="PIS" value={`${formatSigned(grade.pisChange)}`} />
+      </div>
     </div>
   );
+}
+
+function ScorePill({
+  emphasis = false,
+  label,
+  value,
+}: {
+  emphasis?: boolean;
+  label: string;
+  value: string;
+}) {
+  return (
+    <span
+      className={`inline-flex items-baseline gap-1 rounded-full border px-3 py-1 text-xs ${
+        emphasis
+          ? "border-slate-950 bg-slate-950 text-white"
+          : "border-slate-200 bg-white text-slate-700"
+      }`}
+    >
+      <span className={emphasis ? "text-white/70" : "text-slate-500"}>{label}</span>
+      <strong className="font-semibold">{value}</strong>
+    </span>
+  );
+}
+
+function AxisPerformancePrism({ grade }: { grade: Grade }) {
+  const axes = gradeAxisRows(grade);
+  const total = axes.reduce((sum, axis) => sum + axis.score, 0);
+  const polygon = axes.map((axis, index) => prismPoint(index, axes.length, axis.score / 7)).join(" ");
+  const shadow = axes
+    .map((axis, index) => prismPoint(index, axes.length, Math.max(0.03, axis.score / 7), 8, 10))
+    .join(" ");
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white/72 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Performance prism
+          </p>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Five-axis grading surface. Each spoke is scored out of 7.
+          </p>
+        </div>
+        <span className="rounded-full bg-slate-950 px-3 py-1 font-mono text-xs font-semibold text-white">
+          {total}/35
+        </span>
+      </div>
+
+      <div className="mt-3 grid gap-4 md:grid-cols-[minmax(13rem,0.8fr)_minmax(0,1fr)]">
+        <svg
+          viewBox="0 0 260 260"
+          role="img"
+          aria-label="Multi-axis score radar chart"
+          className="mx-auto aspect-square w-full max-w-[18rem]"
+        >
+          {[0.25, 0.5, 0.75, 1].map((scale) => (
+            <polygon
+              key={scale}
+              points={axes.map((_, index) => prismPoint(index, axes.length, scale)).join(" ")}
+              fill="none"
+              stroke={scale === 1 ? "#94a3b8" : "#cbd5e1"}
+              strokeWidth={scale === 1 ? 1.2 : 0.8}
+            />
+          ))}
+          {axes.map((_, index) => {
+            const [x, y] = prismPoint(index, axes.length, 1).split(",").map(Number);
+            return (
+              <line
+                key={index}
+                x1="130"
+                y1="130"
+                x2={x}
+                y2={y}
+                stroke="#cbd5e1"
+                strokeWidth="0.8"
+              />
+            );
+          })}
+          <polygon points={shadow} fill="#0f172a" opacity="0.08" />
+          <polygon points={polygon} fill="#0e7490" opacity="0.22" stroke="#0e7490" strokeWidth="2.5" />
+          {axes.map((axis, index) => {
+            const [x, y] = prismPoint(index, axes.length, axis.score / 7).split(",").map(Number);
+            return (
+              <g key={axis.key}>
+                <circle cx={x} cy={y} r="4.5" fill="#0f172a" />
+                <circle cx={x} cy={y} r="2" fill="#f8fafc" />
+              </g>
+            );
+          })}
+        </svg>
+
+        <div className="grid content-center gap-2">
+          {axes.map((axis) => (
+            <div key={axis.key} className="grid gap-1 rounded-md border border-slate-200 bg-white/70 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm font-semibold text-slate-950">{axis.label}</p>
+                <span className="font-mono text-xs font-semibold text-cyan-800">{axis.score}/7</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-cyan-700"
+                  style={{ width: `${(axis.score / 7) * 100}%` }}
+                />
+              </div>
+              <p className="line-clamp-2 text-xs leading-5 text-slate-500">{axis.description}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScoreMathPanel({ grade }: { grade: Grade }) {
+  const axes = gradeAxisRows(grade);
+  const total = axes.reduce((sum, axis) => sum + axis.score, 0);
+  const afterDeductions = Number((grade.rawScore - grade.balancePenalty - grade.latePenalty).toFixed(2));
+  const cap = technicalCapLimit(grade.technicalCap);
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white/72 p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        Score calculation
+      </p>
+      <div className="mt-3 grid gap-2 text-sm leading-6">
+        <MathRow label="Axis total" value={`${total}/35`} />
+        <MathRow label="Raw score" value={`(${total} / 35) × 20 = ${grade.rawScore}/20`} />
+        <MathRow label="Balance penalty" value={`-${grade.balancePenalty}`} />
+        <MathRow label="Late penalty" value={`-${grade.latePenalty}`} />
+        <MathRow label="After penalties" value={`${afterDeductions}/20`} />
+        <MathRow label="Competence cap" value={`${technicalCapLabel(grade.technicalCap)} (${cap}/20 max)`} />
+        <MathRow strong label="Final score" value={`${grade.finalScore}/20`} />
+      </div>
+      <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+        ERT is awarded only when final score, timing, cap status, and balance checks pass. This attempt earned{" "}
+        <strong>{grade.ertEarned}</strong>.
+      </p>
+    </div>
+  );
+}
+
+function MathRow({
+  label,
+  strong = false,
+  value,
+}: {
+  label: string;
+  strong?: boolean;
+  value: string;
+}) {
+  return (
+    <div className={`grid grid-cols-[8rem_1fr] gap-3 rounded-md px-2 py-1 ${strong ? "bg-slate-950 text-white" : "bg-white/60 text-slate-700"}`}>
+      <span className={strong ? "text-white/70" : "text-slate-500"}>{label}</span>
+      <span className="min-w-0 break-words font-mono text-xs font-semibold">{value}</span>
+    </div>
+  );
+}
+
+function CorrectionText({ text }: { text: string }) {
+  const sections = text
+    .split(/\n{2,}/)
+    .map((section) => section.trim())
+    .filter(Boolean);
+
+  if (sections.length <= 1) {
+    return <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{text}</p>;
+  }
+
+  return (
+    <div className="mt-2 grid gap-2">
+      {sections.map((section) => {
+        const [first, ...rest] = section.split(/\n/);
+        const looksLikeHeading = rest.length > 0 && first.length <= 80 && !/[.!?]$/.test(first);
+        return (
+          <div key={section} className="rounded-md bg-white/65 p-3">
+            {looksLikeHeading ? (
+              <>
+                <p className="text-sm font-semibold text-slate-950">{first.replace(/^#+\s*/, "")}</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-600">{rest.join("\n")}</p>
+              </>
+            ) : (
+              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">{section}</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TeacherMarkedResponse({
+  challenge,
+  grade,
+  submission,
+}: {
+  challenge: Challenge;
+  grade: Grade;
+  submission: Submission;
+}) {
+  const parsed = parseSubmissionContent(submission.content);
+  const marks = markResponseSegments(parsed.body, grade);
+  const missing = missingSubmissionRequirements(parsed.body, challenge);
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white/65 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Teacher-marked response
+          </p>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Your answer is shown with examiner-style margin notes. Future AI critiques can add more exact false/correct callouts.
+          </p>
+        </div>
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+          {marks.length} marked blocks
+        </span>
+      </div>
+
+      <div className="mt-3 grid max-h-[30rem] gap-2 overflow-auto pr-1">
+        {marks.map((mark, index) => (
+          <article
+            key={`${mark.text}-${index}`}
+            className={`rounded-md border-l-4 bg-white p-3 ${markStyle(mark.kind).border}`}
+          >
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${markStyle(mark.kind).pill}`}>
+                {mark.label}
+              </span>
+              <span className="text-xs text-slate-500">{mark.note}</span>
+            </div>
+            <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{mark.text}</p>
+          </article>
+        ))}
+      </div>
+
+      {missing.length > 0 && (
+        <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3">
+          <p className="text-sm font-semibold text-red-950">Missing or weakly addressed requirements</p>
+          <div className="mt-2 grid gap-1">
+            {missing.slice(0, 5).map((item) => (
+              <p key={item} className="text-sm leading-6 text-red-800">
+                - {item}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type MarkKind = "correct" | "evidence" | "vague" | "risk" | "neutral";
+
+function markResponseSegments(body: string, grade: Grade) {
+  const segments = body
+    .split(/\n{2,}/)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .flatMap((segment) => (segment.length > 520 ? segment.split(/\n(?=#+\s|\d+\.\s|- )/) : [segment]))
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .slice(0, 18);
+
+  if (segments.length === 0) {
+    return [
+      {
+        kind: "vague" as MarkKind,
+        label: "No readable response",
+        note: "The grader needs written reasoning or attached evidence explained in text.",
+        text: "No response text was available to mark.",
+      },
+    ];
+  }
+
+  return segments.map((text) => {
+    const lower = text.toLowerCase();
+    const hasEvidence = /\b(show|log|output|trace|because|therefore|screenshot|attached|config|metric|evidence)\b/.test(lower);
+    const hasRisk = /\b(risk|rollback|blast radius|impact|safe|backout|change window)\b/.test(lower);
+    const hasAction = /\b(recommend|fix|correct|shut|change|verify|validate|monitor|rollback)\b/.test(lower);
+    const hedged = /\b(maybe|probably|could be|seems|i think)\b/.test(lower);
+
+    if (hasEvidence) {
+      return {
+        kind: "evidence" as MarkKind,
+        label: "Evidence used",
+        note: "This is the kind of material the examiner can grade.",
+        text,
+      };
+    }
+    if (hasRisk) {
+      return {
+        kind: "risk" as MarkKind,
+        label: "Operational control",
+        note: "Risk and rollback reasoning protects the final score.",
+        text,
+      };
+    }
+    if (hasAction && !hasEvidence) {
+      return {
+        kind: "vague" as MarkKind,
+        label: "Needs proof",
+        note: "Actionable, but it should cite evidence or verification before the recommendation.",
+        text,
+      };
+    }
+    if (hedged || grade.technicalCap !== "NONE") {
+      return {
+        kind: "vague" as MarkKind,
+        label: "Vague or unsupported",
+        note: "Rewrite this as a testable claim with a command, artifact, or explicit assumption.",
+        text,
+      };
+    }
+    return {
+      kind: "neutral" as MarkKind,
+      label: "Context",
+      note: "Readable, but make sure it directly advances root cause, proof, action, or verification.",
+      text,
+    };
+  });
+}
+
+function missingSubmissionRequirements(body: string, challenge: Challenge) {
+  const lower = body.toLowerCase();
+  return challenge.submissionRequirements.filter((requirement) => {
+    const keywords = requirement
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 5);
+    return keywords.length > 0 && !keywords.some((word) => lower.includes(word));
+  });
+}
+
+function markStyle(kind: MarkKind) {
+  if (kind === "evidence") return { border: "border-l-cyan-700", pill: "bg-cyan-50 text-cyan-900" };
+  if (kind === "risk") return { border: "border-l-slate-950", pill: "bg-slate-950 text-white" };
+  if (kind === "vague") return { border: "border-l-amber-600", pill: "bg-amber-50 text-amber-900" };
+  if (kind === "correct") return { border: "border-l-emerald-700", pill: "bg-emerald-50 text-emerald-900" };
+  return { border: "border-l-slate-300", pill: "bg-slate-100 text-slate-700" };
+}
+
+const gradeAxisKeys = ["creativity", "ingenuity", "reporting", "alienness", "neatness"] as const;
+
+function gradeAxisRows(grade: Grade) {
+  const rubric = grade.rubricSnapshot ?? fallbackRubric;
+  return gradeAxisKeys.map((key) => ({
+    key,
+    label: rubric[key]?.label ?? fallbackRubric[key].label,
+    description: rubric[key]?.description ?? fallbackRubric[key].description,
+    score: grade[key],
+  }));
+}
+
+function prismPoint(index: number, total: number, scale: number, offsetX = 0, offsetY = 0) {
+  const center = 130;
+  const radius = 92;
+  const angle = (-90 + (360 / total) * index) * (Math.PI / 180);
+  const x = center + offsetX + Math.cos(angle) * radius * scale;
+  const y = center + offsetY + Math.sin(angle) * radius * scale;
+  return `${Number(x.toFixed(2))},${Number(y.toFixed(2))}`;
+}
+
+function technicalCapLimit(cap: Grade["technicalCap"]) {
+  if (cap === "UNSAFE") return 8;
+  if (cap === "MOSTLY_WRONG") return 10;
+  if (cap === "INCOMPLETE") return 14;
+  return 20;
+}
+
+function technicalCapLabel(cap: Grade["technicalCap"]) {
+  if (cap === "NONE") return "No cap";
+  if (cap === "UNSAFE") return "Unsafe recommendation";
+  if (cap === "MOSTLY_WRONG") return "Mostly unsupported";
+  return "Incomplete answer";
+}
+
+function formatSigned(value: number) {
+  return value > 0 ? `+${value}` : `${value}`;
 }
 
 function RewardPanel({
