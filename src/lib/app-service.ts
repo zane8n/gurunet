@@ -124,7 +124,16 @@ export const examinerChatSchema = z.object({
   challengeId: z.string().trim().min(2).max(120).optional(),
 });
 
-export const studyProfileSchema = z.object({
+const governedGoals = [
+  "Stronger troubleshooting discipline",
+  "Better technical communication",
+  "Production-ready judgment",
+  "Broader STEM fluency",
+  "Interview/certification readiness",
+  "Build a reusable notebook",
+] as const;
+
+const baseStudyProfileSchema = z.object({
   primaryDiscipline: disciplineIdSchema,
   secondaryInterests: z.array(disciplineIdSchema).max(4).default([]),
   rankedTopics: z.array(z.string().trim().min(2).max(80)).min(3).max(8),
@@ -139,6 +148,87 @@ export const studyProfileSchema = z.object({
   customDiscipline: z.string().trim().min(3).max(80).optional(),
   preferenceNotes: z.string().trim().max(1000).optional(),
 });
+
+export const studyProfileSchema = baseStudyProfileSchema.superRefine((input, ctx) => {
+  const template = getDiscipline(input.primaryDiscipline);
+  const topicSet = new Set(template.topics);
+  const formatSet = new Set(template.formats);
+  const evidenceSet = new Set(template.evidenceTypes);
+  const goalSet = new Set<string>(governedGoals);
+
+  addUniqueArrayIssue(ctx, input.secondaryInterests, "secondaryInterests", "Secondary interests must not contain duplicates.");
+  addUniqueArrayIssue(ctx, input.rankedTopics, "rankedTopics", "Ranked topic interests must not contain duplicates.");
+  addUniqueArrayIssue(ctx, input.preferredFormats, "preferredFormats", "Preferred challenge formats must not contain duplicates.");
+  addUniqueArrayIssue(ctx, input.evidenceTypes, "evidenceTypes", "Expected evidence/output choices must not contain duplicates.");
+  addUniqueArrayIssue(ctx, input.weakAreas, "weakAreas", "Weak areas must not contain duplicates.");
+  addUniqueArrayIssue(ctx, input.avoidAreas, "avoidAreas", "Avoid areas must not contain duplicates.");
+  addUniqueArrayIssue(ctx, input.goals, "goals", "Professional goals must not contain duplicates.");
+
+  if (input.secondaryInterests.includes(input.primaryDiscipline)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["secondaryInterests"],
+      message: "Secondary interests must be adjacent areas, not the same as the primary discipline.",
+    });
+  }
+
+  addCatalogIssue(ctx, input.rankedTopics, topicSet, "rankedTopics", `${template.label} topic interests must come from the governed catalog.`);
+  addCatalogIssue(ctx, input.preferredFormats, formatSet, "preferredFormats", `${template.label} challenge formats must come from the governed catalog.`);
+  addCatalogIssue(ctx, input.evidenceTypes, evidenceSet, "evidenceTypes", `${template.label} evidence/output choices must come from the governed catalog.`);
+  addCatalogIssue(ctx, input.weakAreas, topicSet, "weakAreas", `${template.label} weak areas must come from the governed topic catalog.`);
+  addCatalogIssue(ctx, input.avoidAreas, topicSet, "avoidAreas", `${template.label} avoid areas must come from the governed topic catalog.`);
+  addCatalogIssue(ctx, input.goals, goalSet, "goals", "Professional goals must come from the governed goal list.");
+
+  const overlap = input.weakAreas.filter((item) => input.avoidAreas.includes(item));
+  if (overlap.length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["avoidAreas"],
+      message: `Avoid areas cannot also be weak-area targets: ${overlap.join(", ")}.`,
+    });
+  }
+
+  const custom = input.customDiscipline?.trim();
+  if (custom) {
+    if (/\b(anything|everything|tech|technology|stem|computer|computers|general|misc|stuff|whatever|make me better)\b/i.test(custom)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["customDiscipline"],
+        message: "Custom discipline requests must be specific. Use the governed primary discipline as the fallback and describe the specialty precisely.",
+      });
+    }
+    if ((input.preferenceNotes?.trim().length ?? 0) < 60) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["preferenceNotes"],
+        message: "Custom discipline requests need at least 60 characters of preference notes so the system can keep rigor without inventing standards.",
+      });
+    }
+  }
+});
+
+function addUniqueArrayIssue(
+  ctx: z.RefinementCtx,
+  values: string[],
+  path: string,
+  message: string,
+) {
+  if (new Set(values).size !== values.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+  }
+}
+
+function addCatalogIssue(
+  ctx: z.RefinementCtx,
+  values: string[],
+  allowed: Set<string>,
+  path: string,
+  message: string,
+) {
+  if (values.some((value) => !allowed.has(value))) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+  }
+}
 
 export const supportUserLookupSchema = z.object({
   email: z.string().trim().email().max(160).optional(),
@@ -819,11 +909,42 @@ async function applyExaminerActions(
     actions.push({ type: "settings.track", summary: `Future challenge track set to ${trackLabel(track)}.` });
     const profile = await safeFindStudyProfile(user.id);
     if (profile) {
+      const template = getDiscipline(track);
       await prisma.userStudyProfile.update({
         where: { userId: user.id },
-        data: { primaryDiscipline: track },
+        data: {
+          primaryDiscipline: track,
+          rankedTopics: template.topics.slice(0, 4),
+          preferredFormats: template.formats.slice(0, 3),
+          evidenceTypes: template.evidenceTypes,
+          weakAreas: template.topics.slice(0, 1),
+          avoidAreas: [],
+        },
       });
-      actions.push({ type: "profile.discipline", summary: `Study profile discipline updated to ${trackLabel(track)}.` });
+      actions.push({
+        type: "profile.discipline",
+        summary: `Study profile discipline updated to ${trackLabel(track)} with governed topics, formats, and evidence standards reset for that domain.`,
+      });
+    }
+  }
+
+  if (/\b(lab|hands-on|practical exercise|practical lab)\b/i.test(message)) {
+    const profile = await safeFindStudyProfile(user.id);
+    if (profile) {
+      const template = getDiscipline(profile.primaryDiscipline);
+      const labFormat = template.formats.find((format) => /\blab|hands-on\b/i.test(format));
+      if (labFormat && !profile.preferredFormats.includes(labFormat)) {
+        await prisma.userStudyProfile.update({
+          where: { userId: user.id },
+          data: {
+            preferredFormats: [labFormat, ...profile.preferredFormats].slice(0, 6),
+          },
+        });
+        actions.push({
+          type: "profile.format",
+          summary: `${labFormat} added to the study profile. Future challenges will prefer practical setup, task, evidence capture, and validation when suitable.`,
+        });
+      }
     }
   }
 
@@ -880,6 +1001,7 @@ function inferTrack(lower: string) {
   if (/\b(cloud|aws|azure|gcp|vpc|iam|devops|kubernetes|kubectl)\b/.test(lower)) return "cloud_devops";
   if (/\b(data|ai|model|dataset|analysis|metric)\b/.test(lower)) return "data_ai";
   if (/\b(software|code|api|typescript|react|testing)\b/.test(lower)) return "software_engineering";
+  if (/\b(applied engineering|troubleshooting|fault isolation|root cause|maintenance)\b/.test(lower)) return "applied_engineering";
   if (/\b(documentation|runbook|postmortem|report|writing)\b/.test(lower)) return "technical_writing";
   if (/\b(network|networking|routing|switching|ospf|bgp|vlan|stp|firewall)\b/.test(lower)) return "networking";
   return null;

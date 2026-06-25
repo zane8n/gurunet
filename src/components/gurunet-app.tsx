@@ -138,7 +138,12 @@ type DisciplineTemplate = {
   formats: string[];
   evidenceTypes: string[];
   responseSections: string[];
+  weakPatterns: string[];
+  unsafePatterns: string[];
   rubric: Record<string, { label: string; description: string }>;
+  targetDifficulty: string;
+  weeklyTimeBudgetHours: number;
+  preferenceNotes?: string;
 };
 
 type CheckboxOption = string | { value: string; label: string };
@@ -184,7 +189,12 @@ type ActiveDiscipline = {
   formats: string[];
   evidenceTypes: string[];
   responseSections: string[];
+  weakPatterns: string[];
+  unsafePatterns: string[];
   rubric: Record<string, { label: string; description: string }>;
+  targetDifficulty: string;
+  weeklyTimeBudgetHours: number;
+  preferenceNotes?: string;
 };
 
 type CohortSummary = {
@@ -380,6 +390,15 @@ const trackOptions = [
   ["applied_engineering", "Applied Engineering / Troubleshooting"],
   ["technical_writing", "Technical Writing / Documentation"],
 ] as const;
+
+const professionalGoalOptions = [
+  "Stronger troubleshooting discipline",
+  "Better technical communication",
+  "Production-ready judgment",
+  "Broader STEM fluency",
+  "Interview/certification readiness",
+  "Build a reusable notebook",
+];
 
 const difficultyOptions = ["Guided", "Normal", "Advanced", "Production", "Expert"] as const;
 
@@ -1160,6 +1179,7 @@ export function GurunetApp() {
         busy={busy}
         dashboard={dashboard}
         deadline={deadline}
+        disciplines={disciplines}
         draftSavedAt={draftSavedAt}
         grade={todayGrade}
         hasDraft={hasDraft}
@@ -1174,8 +1194,10 @@ export function GurunetApp() {
         onOpenResponse={() => setResponseOpen(true)}
         onRedeem={redeem}
         onSample={loadSampleAnswer}
+        onSaveProfile={saveStudyProfile}
         onSaveSettings={saveChallengeSettings}
         onVerify={answerVerification}
+        profileErrors={profileErrors}
         setVerification={setVerification}
         status={status}
         submission={todaySubmission ?? null}
@@ -1278,6 +1300,7 @@ function DashboardWorkspace({
   busy,
   dashboard,
   deadline,
+  disciplines,
   draftSavedAt,
   grade,
   hasDraft,
@@ -1292,8 +1315,10 @@ function DashboardWorkspace({
   onOpenResponse,
   onRedeem,
   onSample,
+  onSaveProfile,
   onSaveSettings,
   onVerify,
+  profileErrors,
   setVerification,
   status,
   submission,
@@ -1303,6 +1328,7 @@ function DashboardWorkspace({
   busy: boolean;
   dashboard: Dashboard;
   deadline: string;
+  disciplines: DisciplineTemplate[];
   draftSavedAt: string;
   grade: Grade | null;
   hasDraft: boolean;
@@ -1317,8 +1343,10 @@ function DashboardWorkspace({
   onOpenResponse: () => void;
   onRedeem: (event: FormEvent<HTMLFormElement>) => void;
   onSample: () => void;
+  onSaveProfile: (input: unknown) => void;
   onSaveSettings: (settings: ChallengeSettings) => void;
   onVerify: () => void;
+  profileErrors: string[];
   setVerification: (value: string) => void;
   status: string;
   submission: Submission | null;
@@ -1447,10 +1475,15 @@ function DashboardWorkspace({
           <AstroCard title="Challenge settings and cohorts">
             <VersatilityPanel
               busy={busy}
+              activeDiscipline={dashboard.activeDiscipline}
               cohorts={dashboard.cohorts}
+              disciplines={disciplines}
+              profile={dashboard.studyProfile}
+              profileErrors={profileErrors}
               settings={dashboard.challengeSettings}
               onCreateCohort={onCreateCohort}
               onJoinCohort={onJoinCohort}
+              onSaveProfile={onSaveProfile}
               onSaveSettings={onSaveSettings}
               plain
             />
@@ -1498,7 +1531,7 @@ function DashboardHero({
             One rigorous challenge. One submitted answer. One serious correction.
           </h1>
           <p className="mt-5 max-w-2xl text-base leading-8 text-slate-600 sm:text-lg">
-            {dashboard.activeDiscipline.label} training for {user.name}. Today's brief is{" "}
+            {dashboard.activeDiscipline.label} training for {user.name}. Today&apos;s brief is{" "}
             <span className="font-semibold text-slate-900">{dashboard.today.title}</span>, due {deadline}.
           </p>
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
@@ -1536,7 +1569,7 @@ function DashboardHero({
           </div>
           <div className="mt-6 rounded-md border border-slate-200 bg-slate-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-            Today's focus
+            Today&apos;s focus
             </p>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               {dashboard.today.topic}. Submit evidence, reasoning, exact checks, risk, rollback, and a defensible recommendation.
@@ -1777,8 +1810,58 @@ function StudyProfileOnboarding({
   status: string;
   onSave: (input: unknown) => void;
 }) {
+  return (
+    <section className="astrowind-shell">
+      <section className="astrowind-hero">
+        <div className="mx-auto max-w-4xl text-center">
+          <p className="astrowind-kicker">Study profile</p>
+          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
+            Calibrate GURUnet before it starts challenging you.
+          </h1>
+          <p className="mx-auto mt-5 max-w-2xl text-base leading-8 text-slate-600">
+            The profile anchors the discipline, evidence standards, response format,
+            examiner language, challenge topics, and notebook emphasis.
+          </p>
+        </div>
+      </section>
+
+      <AstroSection
+        id="profile-calibration"
+        eyebrow="Configuration"
+        title="Build a governed capacity profile"
+        text="Choose from the governed STEM and technical domains. Use written preferences only for bespoke nuance, not vague standards."
+      >
+        <StudyProfileForm
+          busy={busy}
+          disciplines={disciplines}
+          errors={errors}
+          status={status}
+          onSave={onSave}
+        />
+      </AstroSection>
+    </section>
+  );
+}
+
+function StudyProfileForm({
+  busy,
+  disciplines,
+  errors,
+  initialProfile,
+  status,
+  submitLabel = "Save profile",
+  onSave,
+}: {
+  busy: boolean;
+  disciplines: DisciplineTemplate[];
+  errors: string[];
+  initialProfile?: StudyProfile | null;
+  status: string;
+  submitLabel?: string;
+  onSave: (input: unknown) => void;
+}) {
   const first = disciplines[0];
-  const [selectedId, setSelectedId] = useState(first?.id ?? "networking");
+  const [selectedId, setSelectedId] = useState(initialProfile?.primaryDiscipline ?? first?.id ?? "networking");
   const selected = disciplines.find((item) => item.id === selectedId) ?? first;
   const topics = selected?.topics ?? [];
   const formats = selected?.formats ?? [];
@@ -1811,21 +1894,9 @@ function StudyProfileOnboarding({
   }
 
   return (
-    <section className="grid w-full gap-5 px-2 py-4 sm:px-3">
-      <div>
-        <p className="font-mono text-xs uppercase tracking-[0.16em] text-slate-500">
-          Study profile
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-normal">
-          Calibrate the system before it starts challenging you.
-        </h1>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-          GURUnet is not trying to guess your field from vague prompts. This
-          profile gives the examiner enough structure to generate useful work,
-          expect the right evidence, and grade you against standards that fit the
-          discipline.
-        </p>
-        <div className="mt-4 grid gap-3 rounded-md border border-slate-200 bg-white/65 p-4 text-sm leading-6 text-slate-600 md:grid-cols-3">
+    <div className="grid gap-6">
+      <div className="astrowind-card">
+        <div className="grid gap-4 text-sm leading-6 text-slate-600 md:grid-cols-3">
           <div>
             <p className="font-semibold text-slate-950">What it controls</p>
             <p className="mt-1">Challenge topics, formats, response templates, evidence standards, grading language, and notebook emphasis.</p>
@@ -1843,7 +1914,7 @@ function StudyProfileOnboarding({
       </div>
 
       <form onSubmit={submit} className="grid gap-5">
-        <div className="quiet-panel rounded-md p-5">
+        <div className="astrowind-card">
           <div className="grid gap-4 md:grid-cols-[0.75fr_1.25fr]">
             <label className="grid gap-2 text-sm font-medium text-slate-700">
               Primary discipline
@@ -1859,9 +1930,16 @@ function StudyProfileOnboarding({
                   </option>
                 ))}
               </select>
+              <span className="text-xs font-normal leading-5 text-slate-500">
+                The primary discipline is the fallback template for all generated challenges.
+              </span>
             </label>
-            <div className="rounded-md bg-white/60 p-3 text-sm leading-6 text-slate-600">
-              {selected?.summary}
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+              <p>{selected?.summary}</p>
+              <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Governed topics
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">{topics.join(", ")}</p>
             </div>
           </div>
         </div>
@@ -1872,6 +1950,7 @@ function StudyProfileOnboarding({
               key={`${selectedId}-rankedTopics`}
               name="rankedTopics"
               values={topics}
+              defaultValues={initialProfile?.rankedTopics}
               min={3}
               max={8}
               limitHint="Pick 3-8. These become the priority topic pool for generated challenges."
@@ -1882,9 +1961,10 @@ function StudyProfileOnboarding({
               key={`${selectedId}-preferredFormats`}
               name="preferredFormats"
               values={formats}
+              defaultValues={initialProfile?.preferredFormats}
               min={2}
               max={6}
-              limitHint="Pick 2-6. This controls the shape of the task, not the discipline itself."
+              limitHint="Pick 2-6. Lab/hands-on selections are treated as real generation rules."
             />
           </SurveyGroup>
           <SurveyGroup title="Expected evidence/output">
@@ -1892,6 +1972,7 @@ function StudyProfileOnboarding({
               key={`${selectedId}-evidenceTypes`}
               name="evidenceTypes"
               values={evidenceTypes}
+              defaultValues={initialProfile?.evidenceTypes}
               min={2}
               max={8}
               limitHint="Pick 2-8. These are the proof types the grader expects to see."
@@ -1902,6 +1983,7 @@ function StudyProfileOnboarding({
               key={`${selectedId}-weakAreas`}
               name="weakAreas"
               values={topics}
+              defaultValues={initialProfile?.weakAreas}
               min={1}
               max={8}
               limitHint="Pick 1-8. These become pressure points and recovery targets."
@@ -1909,27 +1991,36 @@ function StudyProfileOnboarding({
           </SurveyGroup>
         </div>
 
-        <div className="quiet-panel rounded-md p-5">
+        <div className="astrowind-card">
           <div className="grid gap-3 md:grid-cols-4">
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Current level
-              <select name="currentLevel" defaultValue="Intermediate" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm">
-                {["Beginner", "Intermediate", "Advanced", "Production", "Expert"].map((item) => <option key={item}>{item}</option>)}
+              <select name="currentLevel" defaultValue={initialProfile?.currentLevel ?? "Intermediate"} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm">
+                {[
+                  ["Beginner", "I need guided tasks and examples."],
+                  ["Intermediate", "I can execute with structure."],
+                  ["Advanced", "I can reason through ambiguity."],
+                  ["Production", "I operate under real constraints."],
+                  ["Expert", "I need high-pressure edge cases."],
+                ].map(([value, label]) => <option key={value} value={value}>{value} - {label}</option>)}
               </select>
             </label>
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Target difficulty
-              <select name="targetDifficulty" defaultValue="Normal" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm">
+              <select name="targetDifficulty" defaultValue={initialProfile?.targetDifficulty ?? "Normal"} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm">
                 {difficultyOptions.map((item) => <option key={item}>{item}</option>)}
               </select>
             </label>
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Weekly hours
-              <input name="weeklyTimeBudgetHours" type="number" min={1} max={40} defaultValue={4} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" />
+              <input name="weeklyTimeBudgetHours" type="number" min={1} max={40} defaultValue={initialProfile?.weeklyTimeBudgetHours ?? 4} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" />
             </label>
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-              Custom request
-              <input name="customDiscipline" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Optional" />
+              Custom path request
+              <input name="customDiscipline" defaultValue={initialProfile?.customDiscipline ?? ""} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Optional specialty" />
+              <span className="text-xs font-normal leading-5 text-slate-500">
+                Draft only. The governed discipline remains the fallback.
+              </span>
             </label>
           </div>
           <label className="mt-4 grid gap-1.5 text-sm font-medium text-slate-700">
@@ -1938,6 +2029,7 @@ function StudyProfileOnboarding({
               name="preferenceNotes"
               className="min-h-24 rounded-md border border-slate-300 bg-white p-3 text-sm leading-6"
               maxLength={1000}
+              defaultValue={initialProfile?.preferenceNotes ?? ""}
               placeholder="Example: I prefer hands-on lab challenges with clear setup, tasks, evidence capture, and validation. Avoid purely theoretical questions unless needed."
             />
             <span className="text-xs font-normal leading-5 text-slate-500">
@@ -1954,6 +2046,7 @@ function StudyProfileOnboarding({
               values={disciplines
                 .filter((item) => item.id !== selectedId)
                 .map((item) => ({ value: item.id, label: item.label }))}
+              defaultValues={initialProfile?.secondaryInterests}
               max={4}
               limitHint="Optional. Pick up to 4 adjacent areas for occasional cross-training."
             />
@@ -1961,20 +2054,25 @@ function StudyProfileOnboarding({
           <SurveyGroup title="Professional goals">
             <CheckboxGrid
               name="goals"
-              values={[
-                "Stronger troubleshooting discipline",
-                "Better technical communication",
-                "Production-ready judgment",
-                "Broader STEM fluency",
-                "Interview/certification readiness",
-                "Build a reusable notebook",
-              ]}
+              values={professionalGoalOptions}
+              defaultValues={initialProfile?.goals}
               min={1}
               max={6}
               limitHint="Pick 1-6. These steer the examiner's long-term emphasis."
             />
           </SurveyGroup>
         </div>
+
+        <SurveyGroup title="Avoid areas">
+          <CheckboxGrid
+            key={`${selectedId}-avoidAreas`}
+            name="avoidAreas"
+            values={topics}
+            defaultValues={initialProfile?.avoidAreas}
+            max={8}
+            limitHint="Optional. Avoid areas are de-emphasized and cannot also be weak-area targets."
+          />
+        </SurveyGroup>
 
         {(status || visibleErrors.length > 0) && (
           <div className={`rounded-md border p-4 text-sm leading-6 ${
@@ -1993,10 +2091,10 @@ function StudyProfileOnboarding({
           </div>
         )}
         <button disabled={busy} className="h-11 w-fit rounded-md bg-slate-950 px-5 text-sm font-semibold text-white disabled:opacity-60">
-          Save profile
+          {submitLabel}
         </button>
       </form>
-    </section>
+    </div>
   );
 }
 
@@ -2057,19 +2155,27 @@ function SurveyGroup({ title, children }: { title: string; children: ReactNode }
 }
 
 function CheckboxGrid({
+  defaultValues,
   max,
   min,
   name,
   values,
   limitHint,
 }: {
+  defaultValues?: string[];
   max?: number;
   min?: number;
   name: string;
   values: CheckboxOption[];
   limitHint?: string;
 }) {
-  const [selected, setSelected] = useState<string[]>([]);
+  const allowedValues = useMemo(
+    () => new Set(values.map((option) => (typeof option === "string" ? option : option.value))),
+    [values],
+  );
+  const [selected, setSelected] = useState<string[]>(
+    () => (defaultValues ?? []).filter((value) => allowedValues.has(value)).slice(0, max),
+  );
 
   function toggle(value: string) {
     setSelected((current) => {
@@ -3995,33 +4101,89 @@ function EmptyState({ title, text }: { title: string; text: string }) {
 }
 
 function VersatilityPanel({
+  activeDiscipline,
   busy,
   cohorts,
+  disciplines,
   plain = false,
+  profile,
+  profileErrors,
   settings,
   onCreateCohort,
   onJoinCohort,
+  onSaveProfile,
   onSaveSettings,
 }: {
+  activeDiscipline: ActiveDiscipline;
   busy: boolean;
   cohorts: CohortSummary[];
+  disciplines: DisciplineTemplate[];
   plain?: boolean;
+  profile: StudyProfile | null;
+  profileErrors: string[];
   settings: ChallengeSettings;
   onCreateCohort: (event: FormEvent<HTMLFormElement>) => void;
   onJoinCohort: (event: FormEvent<HTMLFormElement>) => void;
+  onSaveProfile: (input: unknown) => void;
   onSaveSettings: (settings: ChallengeSettings) => void;
 }) {
   const TrackShell = plain ? PlainSection : Panel;
+  const domainOptions = disciplines.length
+    ? disciplines.map((discipline) => [discipline.id, discipline.label] as const)
+    : trackOptions;
   return (
-    <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-      <TrackShell icon={<CircleGauge size={20} />} title="Challenge tracks">
+    <div className="grid gap-6">
+      <TrackShell icon={<CircleGauge size={20} />} title="Active study profile">
+        <div className="grid gap-4">
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-semibold text-slate-950">{activeDiscipline.label}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Future challenges use this governed profile for topics, formats, evidence expectations,
+              response sections, weak-pattern penalties, unsafe-pattern penalties, and rubric language.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {activeDiscipline.formats.slice(0, 4).map((format) => (
+                <span key={format} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600">
+                  {format}
+                </span>
+              ))}
+            </div>
+          </div>
+          {profile ? (
+            <details className="rounded-md border border-slate-200 bg-white/70 p-4">
+              <summary className="cursor-pointer list-none text-sm font-semibold text-slate-950 marker:hidden">
+                Edit governed study profile
+              </summary>
+              <div className="mt-5 border-t border-slate-200 pt-5">
+                <StudyProfileForm
+                  busy={busy}
+                  disciplines={disciplines}
+                  errors={profileErrors}
+                  initialProfile={profile}
+                  status=""
+                  submitLabel="Update profile"
+                  onSave={onSaveProfile}
+                />
+              </div>
+            </details>
+          ) : (
+            <EmptyState
+              title="No completed profile"
+              text="Complete onboarding to unlock discipline-specific challenge generation and grading language."
+            />
+          )}
+        </div>
+      </TrackShell>
+
+      <div className="grid gap-5 lg:grid-cols-[0.88fr_1.12fr]">
+      <TrackShell icon={<Settings size={20} />} title="Daily challenge overrides">
         <form
           className="grid gap-3"
           onSubmit={(event) => {
             event.preventDefault();
             const form = new FormData(event.currentTarget);
             onSaveSettings({
-              track: String(form.get("track") || "networking"),
+              track: activeDiscipline.id,
               durationMinutes: Number(form.get("durationMinutes") || 45),
               difficultyFloor: String(form.get("difficultyFloor") || "Normal"),
               topicFocus: String(form.get("topicFocus") || ""),
@@ -4030,24 +4192,16 @@ function VersatilityPanel({
             });
           }}
         >
+          <p className="rounded-md border border-slate-200 bg-white/65 px-3 py-2 text-sm leading-6 text-slate-600">
+            The domain comes from the study profile: <strong className="font-semibold text-slate-900">{activeDiscipline.label}</strong>.
+            These settings only tune the next generated challenge.
+          </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-              Track
-              <select
-                name="track"
-                defaultValue={settings.track}
-                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
-              >
-                {trackOptions.map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </label>
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Difficulty floor
               <select
                 name="difficultyFloor"
-                defaultValue={settings.difficultyFloor}
+                defaultValue={settings.difficultyFloor || activeDiscipline.targetDifficulty}
                 className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
               >
                 {difficultyOptions.map((value) => (
@@ -4070,12 +4224,19 @@ function VersatilityPanel({
             </label>
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Topic focus
-              <input
+              <select
                 name="topicFocus"
                 defaultValue={settings.topicFocus}
                 className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
-                placeholder="BGP policy, journald, packet captures..."
-              />
+              >
+                <option value="">Use profile priority order</option>
+                {activeDiscipline.topics.map((topic) => (
+                  <option key={topic} value={topic}>{topic}</option>
+                ))}
+                {settings.topicFocus && !activeDiscipline.topics.includes(settings.topicFocus) && (
+                  <option value={settings.topicFocus}>{settings.topicFocus}</option>
+                )}
+              </select>
             </label>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -4110,7 +4271,7 @@ function VersatilityPanel({
           <form onSubmit={onCreateCohort} className="grid gap-2 lg:grid-cols-[1fr_0.7fr_0.7fr_0.45fr_auto]">
             <input name="name" required className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Cohort name" />
             <select name="track" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" defaultValue={settings.track}>
-              {trackOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              {domainOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
             <select name="difficulty" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" defaultValue={settings.difficultyFloor}>
               {difficultyOptions.map((value) => <option key={value} value={value}>{value}</option>)}
@@ -4161,6 +4322,7 @@ function VersatilityPanel({
           </div>
         </div>
       </TrackShell>
+      </div>
     </div>
   );
 }
