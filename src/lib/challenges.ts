@@ -296,9 +296,9 @@ export function generateChallenge(
   const timezone = getUserTimezone(user.timezone);
   const today = options?.dateKey ?? challengeDateKeyFor(new Date(), timezone);
   const difficulty = difficultyForPis(user.pisScore);
-  const seed = today
+  const seed = `${today}:${user.id}:${user.email}:${user.pisScore}`
     .split("")
-    .reduce((total, char) => total + char.charCodeAt(0), user.id.length);
+    .reduce((total, char) => total + char.charCodeAt(0), 0);
   const template = templates[seed % templates.length];
 
   const challenge: Challenge = {

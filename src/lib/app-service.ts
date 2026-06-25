@@ -423,6 +423,9 @@ export async function getOrCreateTodayChallenge(user: User) {
     select: { userId: true, dateKey: true, createdAt: true },
   });
   const today = currentChallengeDateKey(currentUser, existingChallenges);
+  const settings = await getChallengeSettings(currentUser);
+  const profileState = await getStudyProfile(currentUser);
+  const discipline = profileState.activeDiscipline;
 
   const existing = await prisma.challenge.findFirst({
     where: { userId: user.id, dateKey: today },
@@ -430,6 +433,51 @@ export async function getOrCreateTodayChallenge(user: User) {
     orderBy: { createdAt: "desc" },
   });
   if (existing) {
+    const existingDomain = fromDbChallenge(existing);
+    const canRefreshForProfile =
+      existing.submissions.length === 0 &&
+      existing.grades.length === 0 &&
+      existingDomain.disciplineSnapshot?.id !== discipline.id;
+
+    if (canRefreshForProfile) {
+      const refreshed = createDailyChallenge(currentUser, {
+        dateKey: today,
+        recovery: existing.isRecovery,
+        pressure: existing.isPressure,
+        recentWeaknesses: [],
+        settings,
+        discipline,
+      });
+      const updated = await prisma.challenge.update({
+        where: { id: existing.id },
+        data: {
+          title: refreshed.title,
+          difficulty: refreshed.difficulty,
+          topic: refreshed.topic,
+          scenario: refreshed.scenario,
+          objective: refreshed.objective,
+          constraints: refreshed.constraints,
+          allowedTools: refreshed.allowedTools,
+          expectedAnswerFormat: refreshed.expectedAnswerFormat,
+          submissionRequirements: refreshed.submissionRequirements,
+          solution: refreshed.solution,
+          antiGenericRequirement: refreshed.antiGenericRequirement,
+          disciplineSnapshot: discipline,
+        },
+      });
+      await enqueueAiJob("ChallengeGeneration", `challenge-profile:${user.id}:${today}:${discipline.id}`, {
+        userId: user.id,
+        challengeId: updated.id,
+        dateKey: today,
+        difficulty: difficultyForPis(currentUser.pisScore),
+        track: discipline.id,
+        topicFocus: settings.topicFocus,
+        durationMinutes: settings.durationMinutes,
+        disciplineSnapshot: discipline,
+      });
+      return fromDbChallenge(updated);
+    }
+
     const normalized = await normalizeActiveChallengeDeadline(currentUser, existing);
     return fromDbChallenge(normalized);
   }
@@ -443,10 +491,6 @@ export async function getOrCreateTodayChallenge(user: User) {
       select: { nextImprovementTarget: true, createdAt: true },
     }),
   ]);
-  const settings = await getChallengeSettings(currentUser);
-  const profileState = await getStudyProfile(currentUser);
-  const discipline = profileState.activeDiscipline;
-
   const challenge = createDailyChallenge(currentUser, {
     dateKey: today,
     recovery: settings.recoveryMode || needsRecovery(records.map(fromDbDisciplineRecord), currentUser),
@@ -1375,15 +1419,16 @@ function createDailyChallenge(
     discipline?: DisciplineSnapshot;
   },
 ) {
-  const challenge = templateFallbackChallenge(user, options.recovery, options.pressure, options.dateKey);
-  if (!options.settings && !options.discipline) return challenge;
   const discipline = options.discipline ?? defaultDisciplineSnapshot();
+  const challenge = createDisciplineFallbackChallenge(user, {
+    ...options,
+    discipline,
+  });
+  if (!options.settings && !options.discipline) return challenge;
   const preferredFormat = discipline.formats[0] ?? "Practical assessment";
   const isLab = /\blab|hands-on|practical|exercise\b/i.test(preferredFormat);
   return {
     ...challenge,
-    topic: discipline.label,
-    title: isLab ? `${discipline.label} lab: ${challenge.title}` : `${preferredFormat}: ${challenge.title}`,
     difficulty: higherDifficulty(challenge.difficulty, options.settings?.difficultyFloor ?? discipline.targetDifficulty),
     objective: options.settings?.topicFocus
       ? `${challenge.objective} Focus the work on: ${options.settings.topicFocus}.`
@@ -1416,6 +1461,226 @@ function createDailyChallenge(
         .map((evidence) => `Profile evidence expectation: ${evidence}.`),
     ].slice(0, 10),
   };
+}
+
+function createDisciplineFallbackChallenge(
+  user: User,
+  options: {
+    dateKey: string;
+    recovery: boolean;
+    pressure: boolean;
+    recentWeaknesses: string[];
+    settings?: Awaited<ReturnType<typeof getChallengeSettings>>;
+    discipline: DisciplineSnapshot;
+  },
+) {
+  const base = templateFallbackChallenge(user, options.recovery, options.pressure, options.dateKey);
+  const discipline = options.discipline;
+  if (discipline.id === "networking") return base;
+
+  const focus = validFocus(options.settings?.topicFocus, discipline.topics) ?? discipline.topics[0] ?? discipline.label;
+  const preferredFormat = discipline.formats[0] ?? "Practical assessment";
+  const packet = fallbackPacketForDiscipline(discipline.id, focus);
+  const sections = discipline.responseSections.length
+    ? discipline.responseSections
+    : ["Observation", "Evidence", "Plan", "Validation", "Risk"];
+
+  return {
+    ...base,
+    title: `${discipline.label}: ${packet.title}`,
+    topic: focus,
+    scenario: [
+      "Scenario / Background",
+      packet.background,
+      "",
+      "Evidence Provided",
+      ...packet.evidence,
+      "",
+      "Optional Lab",
+      packet.lab,
+      "",
+      "Submission Deadline",
+      "15:00 local time. Do not reveal the solution until after submission.",
+    ].join("\n"),
+    objective: packet.objective,
+    constraints: [
+      "Do not invent evidence that is not present in the brief.",
+      "Do not recommend destructive changes without verification and rollback.",
+      `Use the active discipline context: ${discipline.label}.`,
+      `Preferred challenge format: ${preferredFormat}.`,
+      `Target completion time: ${options.settings?.durationMinutes ?? Math.max(30, Math.min(120, discipline.weeklyTimeBudgetHours * 12))} minutes.`,
+      ...(discipline.preferenceNotes ? [`User preference notes: ${discipline.preferenceNotes}.`] : []),
+    ].slice(0, 8),
+    allowedTools: packet.allowedTools,
+    expectedAnswerFormat: sections.map((section, index) => `${index + 1}. ${section}`).join("\n"),
+    submissionRequirements: [
+      "Core answer or root cause.",
+      "Evidence tied to the provided artifacts.",
+      "Exact checks, commands, code, or work product.",
+      "Verification method.",
+      "Risk, rollback, limitation, or escalation note.",
+      ...discipline.evidenceTypes.slice(0, 4).map((item) => `Profile evidence expectation: ${item}.`),
+    ].slice(0, 10),
+    solution: packet.solution,
+    antiGenericRequirement:
+      `Your answer must use ${discipline.label} evidence from the brief and follow the expected sections: ${sections.join(", ")}.`,
+  };
+}
+
+function validFocus(value: string | null | undefined, topics: string[]) {
+  if (!value) return null;
+  return topics.includes(value) ? value : null;
+}
+
+function fallbackPacketForDiscipline(disciplineId: string, focus: string) {
+  const packets: Record<string, {
+    title: string;
+    background: string;
+    evidence: string[];
+    objective: string;
+    allowedTools: string[];
+    lab: string;
+    solution: string;
+  }> = {
+    linux_systems: {
+      title: `Service Degradation After ${focus} Change`,
+      background:
+        "A production Linux host started returning intermittent 502 responses after a maintenance change. The application process is running, but users report slow responses and occasional failures. You have SSH access, but you must avoid unnecessary restarts because the host is serving active traffic.",
+      evidence: [
+        "systemctl status app.service: active (running), recent warning: worker timeout after 30s",
+        "journalctl -u app.service --since -30m: repeated 'permission denied opening /var/lib/app/cache/session.db'",
+        "ls -ld /var/lib/app/cache: drwx------ root root",
+        "ss -ltnp: app is listening on 127.0.0.1:8080",
+      ],
+      objective:
+        "Determine the most likely cause, propose a safe verification sequence, and provide the least disruptive correction and rollback plan.",
+      allowedTools: ["systemctl status", "journalctl", "ls -l", "stat", "ss", "grep", "sudoedit", "chown/chmod with scope"],
+      lab: "Create a service user, a cache directory with wrong ownership, and observe application permission errors before applying the narrow ownership fix.",
+      solution:
+        "The likely issue is a permissions regression on the application cache directory. The app is running and listening, so this is not primarily a down service or network listener failure. The journal permission errors and root-owned mode 700 cache directory are the decisive evidence. Verify the service user, inspect directory ownership and recent changes, apply the narrow ownership or mode fix required by the app, then confirm logs clear and responses stabilize. Roll back by restoring the previous permission state if the change creates broader access risk.",
+    },
+    cybersecurity: {
+      title: `${focus} Investigation With Conflicting Login Signals`,
+      background:
+        "A security alert reports multiple failed logins followed by one successful internal login to a privileged service account. The business says automation may have run overnight, but there is no approved change ticket.",
+      evidence: [
+        "auth.log: Failed password for invalid user admin from 185.22.14.8",
+        "auth.log: Accepted publickey for svc_deploy from 10.30.4.18",
+        "last: svc_deploy pts/2 10.30.4.18 01:43 - 01:46",
+        "authorized_keys modified 5 minutes before the accepted login",
+      ],
+      objective:
+        "Classify the incident, separate noisy failures from the material signal, and propose containment that preserves evidence.",
+      allowedTools: ["journalctl", "grep", "last", "lastlog", "audit logs", "authorized_keys review", "identity owner check"],
+      lab: "Replay SSH auth log excerpts and build a timeline separating failed noise, successful access, and key-change evidence.",
+      solution:
+        "The failed external attempts are suspicious but not the strongest signal. The accepted service-account login from an internal host shortly after authorized_keys modification requires investigation. Preserve logs and key material, identify the owner of 10.30.4.18, validate whether deployment automation was expected, rotate or disable the specific service credential only if unauthorized, and avoid destroying evidence or blocking broad networks without business impact review.",
+    },
+    software_engineering: {
+      title: `${focus} Regression With Incomplete Reproduction`,
+      background:
+        "A recent deployment introduced sporadic API failures. The error rate is low but rising. Product wants an immediate rollback, while engineering suspects a narrow input-validation edge case.",
+      evidence: [
+        "Error sample: POST /api/orders returns 500 when discountCode is an empty string",
+        "Recent diff: validation moved from controller to shared schema",
+        "Test output: order creation passes without discountCode but fails with discountCode: ''",
+        "Logs: TypeError: cannot read properties of undefined (reading 'amount')",
+      ],
+      objective:
+        "Diagnose the likely bug path, propose a minimal patch strategy, and define tests that prove the fix without an overbroad refactor.",
+      allowedTools: ["read diff", "unit tests", "integration test", "structured logs", "schema validation", "feature flag rollback"],
+      lab: "Write a failing unit test for empty-string discount codes, patch validation normalization, and verify no regression for absent discountCode.",
+      solution:
+        "The likely issue is a validation/normalization regression that treats an empty string differently from an absent optional field. A strong answer reproduces the exact failing input, avoids a broad rollback unless blast radius grows, patches schema normalization or guard logic, and adds tests for absent, empty, valid, and invalid discount codes. Verification should include the failing endpoint path and relevant integration coverage.",
+    },
+    automation_scripting: {
+      title: `${focus} Script Safety Review Before Production Run`,
+      background:
+        "A shell automation script is ready to clean old log files across several servers. The script worked on a test directory, but production contains symlinks, spaces in paths, and mixed ownership.",
+      evidence: [
+        "Script excerpt: for f in $(find /var/log/app -mtime +14); do rm -rf $f; done",
+        "Test output ignored paths containing spaces",
+        "find output includes /var/log/app/current -> /mnt/shared/current",
+        "Requirement: dry-run must show exact files before deletion",
+      ],
+      objective:
+        "Identify unsafe script behavior and propose a safer, idempotent version with dry-run and validation.",
+      allowedTools: ["bash", "find -print0", "xargs -0", "shellcheck reasoning", "dry-run output", "set -euo pipefail"],
+      lab: "Create files with spaces and symlinks, run the unsafe loop in dry-run form, then rewrite with null-delimited paths and explicit file-type constraints.",
+      solution:
+        "The unsafe loop performs word splitting, lacks quoting, follows a dangerous rm pattern, and does not enforce dry-run visibility. A safer answer uses find predicates to constrain type and path, null-delimited output, quoted variables, a dry-run mode, explicit confirmation, logging, and rollback/restore assumptions. It should avoid deleting symlink targets or unreviewed directories.",
+    },
+    cloud_devops: {
+      title: `${focus} Deployment Risk Review After IAM Change`,
+      background:
+        "A deployment pipeline began failing after an IAM policy cleanup. The service still runs, but new deployments cannot publish artifacts and an engineer proposes adding wildcard permissions.",
+      evidence: [
+        "Pipeline log: AccessDenied on s3:PutObject to arn:aws:s3:::app-artifacts/prod/*",
+        "Recent IAM diff removed s3:PutObject from the deploy role",
+        "CloudTrail shows denied action from role ci-prod-deploy",
+        "Existing runtime role is unaffected",
+      ],
+      objective:
+        "Identify the minimum IAM correction, verification steps, and rollback without broadening access unnecessarily.",
+      allowedTools: ["IAM policy diff", "CloudTrail", "pipeline logs", "least-privilege policy", "staged deployment", "rollback plan"],
+      lab: "Model a deploy role denied from one artifact prefix and write the minimum policy statement needed for the pipeline.",
+      solution:
+        "The failure is a deploy-role artifact permission regression, not a runtime outage. The correct response is to restore the narrow s3:PutObject permission for the required artifact prefix, validate with a staged pipeline run, and avoid wildcard permissions. Rollback is to reapply the prior deploy policy or pause deployments while preserving runtime stability.",
+    },
+    data_ai: {
+      title: `${focus} Evaluation Drift in a Model Report`,
+      background:
+        "A weekly model report shows improved accuracy, but support tickets increased. The team suspects the evaluation sample no longer represents production traffic.",
+      evidence: [
+        "Offline accuracy: 91% this week, 86% last week",
+        "Support tickets tagged 'wrong recommendation' increased 38%",
+        "Evaluation sample excludes records with missing region",
+        "Production logs show missing region in 22% of recent requests",
+      ],
+      objective:
+        "Assess whether the reported improvement is trustworthy and propose a validation plan that catches the production failure mode.",
+      allowedTools: ["metric comparison", "sample audit", "confusion matrix", "slice analysis", "baseline check", "data-quality report"],
+      lab: "Compare aggregate accuracy with a slice containing missing-region records and report the difference in model behavior.",
+      solution:
+        "The aggregate metric is not trustworthy because the evaluation sample excludes a production-heavy slice. A strong answer calls for slice analysis, data-quality checks, comparison to a baseline, and support-ticket correlation. It should avoid claiming causal improvement from aggregate accuracy alone and should recommend adding missing-region cases back into evaluation before deployment decisions.",
+    },
+    applied_engineering: {
+      title: `${focus} Fault Isolation Under Service Pressure`,
+      background:
+        "A field system intermittently overheats after a maintenance window. Operators report no full outage, but performance drops under load. You cannot shut down the whole system during business hours.",
+      evidence: [
+        "Temperature rises only when load exceeds 70%",
+        "Recent maintenance replaced one cooling fan assembly",
+        "Sensor B reports 12C higher than adjacent sensors",
+        "No alarms when the system is idle",
+      ],
+      objective:
+        "Build a safe fault-isolation plan with stop conditions, verification, and prevention.",
+      allowedTools: ["sensor trend review", "maintenance log", "controlled load test", "visual checklist by remote hands", "rollback/stop criteria"],
+      lab: "Simulate a load-dependent fault and write a decision tree that separates sensor error, cooling failure, and workload anomaly.",
+      solution:
+        "The evidence suggests a load-dependent cooling or sensor-placement issue after maintenance. A strong plan isolates with trend review, controlled load below safe thresholds, remote visual inspection, comparison across sensors, and explicit stop conditions. It should not recommend full shutdown or unsafe load testing without rollback and operator coordination.",
+    },
+    technical_writing: {
+      title: `${focus} Runbook Fails During Incident Handoff`,
+      background:
+        "During an incident, a junior engineer followed a runbook but escalated late because the document lacked prerequisites, verification criteria, and stop conditions.",
+      evidence: [
+        "Runbook step: 'Restart the service if errors continue'",
+        "Missing: how to identify the service owner",
+        "Missing: expected healthy output after restart",
+        "Incident note: restart was attempted twice before escalation",
+      ],
+      objective:
+        "Rewrite the runbook structure so it is safer, auditable, and usable by a less experienced responder.",
+      allowedTools: ["runbook outline", "prerequisite list", "verification criteria", "escalation matrix", "risk warning", "post-incident review"],
+      lab: "Transform the vague restart step into a runbook section with prerequisites, exact command placeholders, validation, stop criteria, and escalation.",
+      solution:
+        "The runbook failed because it gave an action without prerequisites, owner context, verification, or stop conditions. A strong answer rewrites it with audience, scope, prerequisites, exact observable checks, a single controlled restart condition, expected healthy output, rollback/escalation path, and incident-note requirements.",
+    },
+  };
+
+  return packets[disciplineId] ?? packets.applied_engineering;
 }
 
 function isValidExcuseReason(reason: string) {
