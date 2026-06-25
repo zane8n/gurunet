@@ -69,6 +69,11 @@ export async function clearUploadStorage() {
   return { uploadRoot };
 }
 
+export async function clearUserUploadStorage(userId: string) {
+  await rm(path.join(uploadRoot, userId), { recursive: true, force: true });
+  return { uploadRoot, userId };
+}
+
 function safeExtension(name: string) {
   const ext = path.extname(name).toLowerCase().replace(/[^a-z0-9.]/g, "");
   return ext.length <= 12 ? ext : "";

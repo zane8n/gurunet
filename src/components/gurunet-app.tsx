@@ -417,6 +417,7 @@ export function GurunetApp() {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [focusOpen, setFocusOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(() => initialTheme());
   const [responseOpen, setResponseOpen] = useState(false);
@@ -661,6 +662,10 @@ export function GurunetApp() {
   async function logout() {
     await apiRequest("/api/auth/logout", { method: "POST" });
     setDashboard(null);
+  }
+
+  function updateAccountUser(updatedUser: SafeUser) {
+    setDashboard((current) => (current ? { ...current, user: updatedUser } : current));
   }
 
   async function submitAnswer() {
@@ -1029,6 +1034,13 @@ export function GurunetApp() {
               shortcut: "X",
               action: () => void exportLearningRecord(),
             },
+            {
+              id: "account",
+              title: "Account settings",
+              description: "Update profile details, change password, export data, or delete your account.",
+              shortcut: "A",
+              action: () => setAccountOpen(true),
+            },
           ]
         : [],
     [dashboard, hasDraft, today, todaySubmission, user],
@@ -1169,6 +1181,7 @@ export function GurunetApp() {
     <main className="app-background min-h-screen text-slate-950">
       <AppHeader
         user={user}
+        onAccount={() => setAccountOpen(true)}
         onCommand={() => setCommandOpen(true)}
         onExport={() => void exportLearningRecord()}
         onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
@@ -1243,6 +1256,21 @@ export function GurunetApp() {
         open={commandOpen}
         onOpenChange={setCommandOpen}
       />
+      {user && (
+        <AccountSettingsModal
+          key={`${user.id}:${accountOpen ? "open" : "closed"}`}
+          open={accountOpen}
+          user={user}
+          onDeleted={() => {
+            setAccountOpen(false);
+            setDashboard(null);
+            window.location.assign("/");
+          }}
+          onExport={() => void exportLearningRecord()}
+          onOpenChange={setAccountOpen}
+          onUserUpdated={updateAccountUser}
+        />
+      )}
       <Footer />
     </main>
   );
@@ -2450,8 +2478,239 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
   );
 }
 
+function AccountSettingsModal({
+  open,
+  user,
+  onDeleted,
+  onExport,
+  onOpenChange,
+  onUserUpdated,
+}: {
+  open: boolean;
+  user: SafeUser;
+  onDeleted: () => void;
+  onExport: () => void;
+  onOpenChange: (open: boolean) => void;
+  onUserUpdated: (user: SafeUser) => void;
+}) {
+  const [name, setName] = useState(user.name);
+  const [timezone, setTimezone] = useState(user.timezone);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [localBusy, setLocalBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function saveDetails(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLocalBusy(true);
+    setMessage("");
+    try {
+      const result = await apiRequest<{ user: SafeUser }>("/api/me", {
+        method: "PATCH",
+        body: JSON.stringify({ name, timezone }),
+      });
+      onUserUpdated(result.user);
+      setMessage("Account details updated.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Account update failed.");
+    } finally {
+      setLocalBusy(false);
+    }
+  }
+
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLocalBusy(true);
+    setMessage("");
+    try {
+      await apiRequest<{ user: SafeUser }>("/api/me", {
+        method: "PATCH",
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setMessage("Password updated.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Password update failed.");
+    } finally {
+      setLocalBusy(false);
+    }
+  }
+
+  async function deleteAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLocalBusy(true);
+    setMessage("");
+    try {
+      await apiRequest<{ ok: true }>("/api/me", {
+        method: "DELETE",
+        body: JSON.stringify({ confirmation, password: deletePassword }),
+      });
+      onDeleted();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Account deletion failed.");
+    } finally {
+      setLocalBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Account and data controls</DialogTitle>
+        </DialogHeader>
+
+        <div className="grid gap-4">
+          <section className="rounded-md border border-slate-200 bg-white/70 p-4">
+            <p className="text-sm font-semibold text-slate-950">Profile details</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Change the details GURUnet uses to identify your account inside the platform.
+            </p>
+            <form onSubmit={saveDetails} className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+                Name
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  minLength={2}
+                  maxLength={80}
+                  className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
+                  required
+                />
+              </label>
+              <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+                Timezone
+                <input
+                  value={timezone}
+                  onChange={(event) => setTimezone(event.target.value)}
+                  minLength={3}
+                  maxLength={80}
+                  className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
+                  required
+                />
+              </label>
+              <div className="sm:col-span-2">
+                <p className="text-xs text-slate-500">
+                  Email changes are intentionally not editable here until verified email-change flow is added.
+                </p>
+                <button
+                  type="submit"
+                  disabled={localBusy}
+                  className="mt-3 h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  Save details
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="rounded-md border border-slate-200 bg-white/70 p-4">
+            <p className="text-sm font-semibold text-slate-950">Password</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Password-backed accounts must provide the current password. Google-only accounts can set a local password while signed in.
+            </p>
+            <form onSubmit={changePassword} className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+                Current password
+                <input
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  type="password"
+                  autoComplete="current-password"
+                  className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
+                />
+              </label>
+              <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+                New password
+                <input
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  type="password"
+                  minLength={8}
+                  maxLength={160}
+                  autoComplete="new-password"
+                  className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
+                  required
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={localBusy}
+                className="h-10 w-fit rounded-md border border-cyan-700/20 bg-cyan-50 px-4 text-sm font-semibold text-cyan-800 disabled:opacity-60"
+              >
+                Change password
+              </button>
+            </form>
+          </section>
+
+          <section className="rounded-md border border-slate-200 bg-white/70 p-4">
+            <p className="text-sm font-semibold text-slate-950">Your data</p>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Export your learning record as machine-readable JSON, or permanently delete the account and its linked records.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onExport}
+                className="flex h-10 items-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700"
+              >
+                <Download size={15} />
+                Export data
+              </button>
+            </div>
+            <form onSubmit={deleteAccount} className="mt-4 grid gap-3 rounded-md border border-red-200 bg-red-50 p-3">
+              <p className="text-sm font-semibold text-red-900">Delete account</p>
+              <p className="text-sm leading-6 text-red-800">
+                This removes your account, sessions, study profile, challenges, submissions, grades, notebook entries, social records, and local uploaded files.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1.5 text-sm font-medium text-red-900">
+                  Type DELETE
+                  <input
+                    value={confirmation}
+                    onChange={(event) => setConfirmation(event.target.value)}
+                    className="h-10 rounded-md border border-red-200 bg-white px-3 text-sm outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/15"
+                    required
+                  />
+                </label>
+                <label className="grid gap-1.5 text-sm font-medium text-red-900">
+                  Password if applicable
+                  <input
+                    value={deletePassword}
+                    onChange={(event) => setDeletePassword(event.target.value)}
+                    type="password"
+                    autoComplete="current-password"
+                    className="h-10 rounded-md border border-red-200 bg-white px-3 text-sm outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/15"
+                  />
+                </label>
+              </div>
+              <button
+                type="submit"
+                disabled={localBusy || confirmation !== "DELETE"}
+                className="h-10 w-fit rounded-md bg-red-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                Permanently delete account
+              </button>
+            </form>
+          </section>
+
+          {message && (
+            <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              {message}
+            </p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function AppHeader({
   user,
+  onAccount,
   onCommand,
   onExport,
   onThemeToggle,
@@ -2459,6 +2718,7 @@ function AppHeader({
   theme,
 }: {
   user?: SafeUser;
+  onAccount?: () => void;
   onCommand?: () => void;
   onExport?: () => void;
   onThemeToggle?: () => void;
@@ -2503,6 +2763,14 @@ function AppHeader({
             <span className="hidden text-sm font-medium text-stone-600 sm:inline">
               {user.name}
             </span>
+            <button
+              onClick={onAccount}
+              className="grid size-10 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              aria-label="Account settings"
+              type="button"
+            >
+              <Settings size={15} />
+            </button>
             <button
               onClick={onCommand}
               className="grid size-10 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
