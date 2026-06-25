@@ -161,9 +161,9 @@
     flex-direction: column;
     overflow-x: clip;
     background:
-      radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.9), transparent 24rem),
-      radial-gradient(circle at 84% 20%, rgba(220, 236, 206, 0.42), transparent 28rem),
-      linear-gradient(180deg, #fffdf8 0%, #f8f4ec 46%, #f4efe5 100%);
+      radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.95), transparent 24rem),
+      radial-gradient(circle at 86% 12%, rgba(224, 242, 254, 0.28), transparent 30rem),
+      linear-gradient(180deg, #ffffff 0%, #f8fafc 44%, #f6f7fb 100%);
   }
 
   .app-background::before,
@@ -186,16 +186,16 @@
       36px 36px,
       72px 72px,
       72px 72px;
-    opacity: 0.5;
+    opacity: 0.26;
     animation: circuit-drift 34s ease-in-out infinite alternate;
   }
 
   .app-background::after {
     background:
-      linear-gradient(112deg, transparent 0%, transparent 35%, rgba(255, 255, 255, 0.56) 47%, rgba(28, 99, 54, 0.06) 50%, transparent 64%, transparent 100%),
-      radial-gradient(ellipse at 26% 74%, rgba(28, 99, 54, 0.08), transparent 28rem),
-      radial-gradient(ellipse at 78% 28%, rgba(120, 113, 108, 0.1), transparent 30rem);
-    opacity: 0.42;
+      linear-gradient(112deg, transparent 0%, transparent 38%, rgba(255, 255, 255, 0.62) 48%, rgba(59, 130, 246, 0.04) 52%, transparent 66%, transparent 100%),
+      radial-gradient(ellipse at 26% 74%, rgba(15, 118, 110, 0.045), transparent 28rem),
+      radial-gradient(ellipse at 78% 28%, rgba(15, 23, 42, 0.045), transparent 30rem);
+    opacity: 0.34;
     filter: blur(12px) saturate(0.95);
     transform: translate3d(-1.4rem, 0.4rem, 0) scale(1.04);
     transition:
@@ -234,6 +234,67 @@
       inset 0 1px 0 rgba(255, 255, 255, 0.78),
       0 10px 26px rgba(87, 83, 78, 0.045);
     backdrop-filter: blur(6px);
+  }
+
+  .astrowind-shell {
+    margin-inline: auto;
+    display: grid;
+    width: 100%;
+    max-width: 1180px;
+    gap: 4.5rem;
+    padding: 2rem 1rem 5rem;
+  }
+
+  @media (min-width: 640px) {
+    .astrowind-shell {
+      padding-inline: 1.5rem;
+    }
+  }
+
+  .astrowind-hero {
+    padding: 4rem 0 2.5rem;
+  }
+
+  .astrowind-section {
+    scroll-margin-top: 5rem;
+  }
+
+  .astrowind-card,
+  .astrowind-feature-card {
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    border-radius: 0.75rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.86)),
+      #fff;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.055);
+  }
+
+  .astrowind-card {
+    padding: 1.25rem;
+  }
+
+  @media (min-width: 640px) {
+    .astrowind-card {
+      padding: 1.5rem;
+    }
+  }
+
+  .astrowind-feature-card {
+    padding: 1.25rem;
+  }
+
+  @media (min-width: 640px) {
+    .astrowind-feature-card {
+      padding: 1.5rem;
+    }
+  }
+
+  .astrowind-kicker {
+    color: #0f766e;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
   }
 
   .interactive-lift {
@@ -328,44 +389,6 @@
     animation: slow-breathe 5.8s ease-in-out infinite;
   }
 
-  .dashboard-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
-    align-items: start;
-  }
-
-  @media (min-width: 1024px) {
-    .dashboard-grid {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-  }
-
-  .dashboard-widget {
-    min-height: 4.25rem;
-    transition:
-      opacity 180ms ease,
-      border-color 180ms ease,
-      box-shadow 180ms ease;
-  }
-
-  .dashboard-widget-header {
-    display: flex;
-    min-height: 3rem;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-    padding: 0.625rem 0.75rem;
-  }
-
-  .dashboard-widget-body {
-    min-height: 10rem;
-    overflow: auto;
-    resize: vertical;
-    padding: 0.875rem;
-  }
-
   .challenge-packet {
     display: grid;
     gap: 0.18rem;
@@ -417,14 +440,6 @@
     font-family: var(--font-app-mono);
     font-size: 0.82rem;
     line-height: 1.55;
-  }
-
-  .dashboard-drag-handle {
-    cursor: grab;
-  }
-
-  .dashboard-widget:active .dashboard-drag-handle {
-    cursor: grabbing;
   }
 
   .dark .app-background {
@@ -515,8 +530,13 @@
     fill: #94a3b8;
   }
 
-  .dark .dashboard-widget-header {
-    border-bottom-color: rgba(148, 163, 184, 0.18);
+  .dark .astrowind-card,
+  .dark .astrowind-feature-card {
+    border-color: rgba(148, 163, 184, 0.18);
+    background:
+      linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.72)),
+      #020617;
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.18);
   }
 }
 

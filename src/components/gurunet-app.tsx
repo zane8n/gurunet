@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, ReactNode } from "react";
+import type { ChangeEvent, ClipboardEvent, FormEvent, ReactNode } from "react";
 import {
   BookOpenText,
   Bold,
@@ -13,9 +13,7 @@ import {
   Code2,
   Command,
   Download,
-  EyeOff,
   FileText,
-  GripVertical,
   Heading2,
   ImagePlus,
   Italic,
@@ -26,13 +24,10 @@ import {
   Loader2,
   LockKeyhole,
   LogOut,
-  Maximize2,
   Medal,
-  Minimize2,
   Moon,
   NotebookTabs,
   Pencil,
-  RotateCcw,
   Search,
   Settings,
   ShieldCheck,
@@ -240,67 +235,7 @@ type Dashboard = {
 
 type AuthMode = "login" | "signup";
 type ThemeMode = "light" | "dark";
-type WidgetSize = "sm" | "md" | "lg" | "xl";
-type WidgetId =
-  | "challenge"
-  | "teaching"
-  | "pisTrend"
-  | "scoreDistribution"
-  | "streakMap"
-  | "scoresheet"
-  | "history"
-  | "social"
-  | "settings"
-  | "notebook"
-  | "rewards";
-
-type DashboardWidget = {
-  id: WidgetId;
-  title: string;
-  size: WidgetSize;
-  collapsed: boolean;
-  visible: boolean;
-};
-
-const dashboardLayoutKey = "gurunet.dashboard.layout.v2";
 const themeStorageKey = "gurunet.theme.v1";
-
-function defaultDashboardWidgets(): DashboardWidget[] {
-  return [
-    { id: "challenge", title: "Today", size: "xl", collapsed: false, visible: true },
-    { id: "pisTrend", title: "PIS trend", size: "lg", collapsed: false, visible: true },
-    { id: "scoresheet", title: "Scoresheet", size: "md", collapsed: false, visible: true },
-    { id: "streakMap", title: "Streak map", size: "sm", collapsed: false, visible: true },
-    { id: "scoreDistribution", title: "Score distribution", size: "sm", collapsed: false, visible: true },
-    { id: "history", title: "Recent history", size: "lg", collapsed: true, visible: true },
-    { id: "teaching", title: "Teaching", size: "lg", collapsed: true, visible: true },
-    { id: "social", title: "Social hub", size: "xl", collapsed: false, visible: true },
-    { id: "notebook", title: "Notebook", size: "lg", collapsed: false, visible: true },
-    { id: "settings", title: "Settings and cohorts", size: "lg", collapsed: true, visible: true },
-    { id: "rewards", title: "Rewards", size: "sm", collapsed: true, visible: true },
-  ];
-}
-
-function mergeDashboardWidgets(saved: unknown): DashboardWidget[] {
-  const defaults = defaultDashboardWidgets();
-  if (!Array.isArray(saved)) return defaults;
-  const byId = new Map(defaults.map((widget) => [widget.id, widget]));
-  const merged = saved
-    .filter((item): item is Partial<DashboardWidget> & { id: WidgetId } =>
-      Boolean(item && typeof item === "object" && "id" in item && byId.has((item as { id: WidgetId }).id)),
-    )
-    .map((item) => {
-      const base = byId.get(item.id)!;
-      return {
-        ...base,
-        size: ["sm", "md", "lg", "xl"].includes(String(item.size)) ? (item.size as WidgetSize) : base.size,
-        collapsed: typeof item.collapsed === "boolean" ? item.collapsed : base.collapsed,
-        visible: typeof item.visible === "boolean" ? item.visible : base.visible,
-      };
-    });
-  const seen = new Set(merged.map((widget) => widget.id));
-  return [...merged, ...defaults.filter((widget) => !seen.has(widget.id))];
-}
 
 function initialTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
@@ -310,16 +245,6 @@ function initialTheme(): ThemeMode {
     return "light";
   } catch {
     return "light";
-  }
-}
-
-function initialDashboardWidgets(): DashboardWidget[] {
-  if (typeof window === "undefined") return defaultDashboardWidgets();
-  try {
-    const saved = localStorage.getItem(dashboardLayoutKey);
-    return saved ? mergeDashboardWidgets(JSON.parse(saved)) : defaultDashboardWidgets();
-  } catch {
-    return defaultDashboardWidgets();
   }
 }
 
@@ -475,9 +400,6 @@ export function GurunetApp() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [focusOpen, setFocusOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(() => initialTheme());
-  const [dashboardWidgets, setDashboardWidgets] = useState<DashboardWidget[]>(() =>
-    initialDashboardWidgets(),
-  );
   const [responseOpen, setResponseOpen] = useState(false);
   const [examinerOpen, setExaminerOpen] = useState(false);
   const [examinerMessages, setExaminerMessages] = useState<ExaminerMessage[]>([]);
@@ -498,10 +420,6 @@ export function GurunetApp() {
     document.documentElement.classList.toggle("dark", theme === "dark");
     localStorage.setItem(themeStorageKey, theme);
   }, [theme]);
-
-  useEffect(() => {
-    localStorage.setItem(dashboardLayoutKey, JSON.stringify(dashboardWidgets));
-  }, [dashboardWidgets]);
 
   useEffect(() => {
     async function bootstrap() {
@@ -1255,7 +1173,6 @@ export function GurunetApp() {
         onJoinCohort={joinCohort}
         onOpenResponse={() => setResponseOpen(true)}
         onRedeem={redeem}
-        onResetWidgets={() => setDashboardWidgets(defaultDashboardWidgets())}
         onSample={loadSampleAnswer}
         onSaveSettings={saveChallengeSettings}
         onVerify={answerVerification}
@@ -1264,8 +1181,6 @@ export function GurunetApp() {
         submission={todaySubmission ?? null}
         user={user}
         verification={verification}
-        widgets={dashboardWidgets}
-        onWidgetsChange={setDashboardWidgets}
       />
 
       <ResponseEditorModal
@@ -1376,17 +1291,14 @@ function DashboardWorkspace({
   onJoinCohort,
   onOpenResponse,
   onRedeem,
-  onResetWidgets,
   onSample,
   onSaveSettings,
   onVerify,
-  onWidgetsChange,
   setVerification,
   status,
   submission,
   user,
   verification,
-  widgets,
 }: {
   busy: boolean;
   dashboard: Dashboard;
@@ -1404,42 +1316,37 @@ function DashboardWorkspace({
   onJoinCohort: (event: FormEvent<HTMLFormElement>) => void;
   onOpenResponse: () => void;
   onRedeem: (event: FormEvent<HTMLFormElement>) => void;
-  onResetWidgets: () => void;
   onSample: () => void;
   onSaveSettings: (settings: ChallengeSettings) => void;
   onVerify: () => void;
-  onWidgetsChange: (widgets: DashboardWidget[]) => void;
   setVerification: (value: string) => void;
   status: string;
   submission: Submission | null;
   user: SafeUser;
   verification: string;
-  widgets: DashboardWidget[];
 }) {
-  const [dragging, setDragging] = useState<WidgetId | null>(null);
-  const visible = widgets.filter((widget) => widget.visible);
-  const hidden = widgets.filter((widget) => !widget.visible);
+  return (
+    <section className="astrowind-shell">
+      <DashboardHero
+        dashboard={dashboard}
+        deadline={deadline}
+        grade={grade}
+        hasDraft={hasDraft}
+        nextUnlock={nextUnlock}
+        onExaminer={onExaminer}
+        onGrade={onGrade}
+        onOpenResponse={onOpenResponse}
+        submission={submission}
+        user={user}
+      />
 
-  function updateWidget(id: WidgetId, patch: Partial<DashboardWidget>) {
-    onWidgetsChange(widgets.map((widget) => (widget.id === id ? { ...widget, ...patch } : widget)));
-  }
-
-  function moveWidget(targetId: WidgetId) {
-    if (!dragging || dragging === targetId) return;
-    const from = widgets.findIndex((widget) => widget.id === dragging);
-    const to = widgets.findIndex((widget) => widget.id === targetId);
-    if (from < 0 || to < 0) return;
-    const next = widgets.slice();
-    const [item] = next.splice(from, 1);
-    next.splice(to, 0, item);
-    onWidgetsChange(next);
-    setDragging(null);
-  }
-
-  function renderWidget(id: WidgetId) {
-    switch (id) {
-      case "challenge":
-        return (
+      <AstroSection
+        id="daily-challenge"
+        eyebrow="Daily assessment"
+        title="Today's challenge"
+        text="A single evidence-led brief, a response workspace, and the examiner route in one focused section."
+      >
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.42fr)]">
           <ChallengeWidget
             busy={busy}
             challenge={dashboard.today}
@@ -1459,132 +1366,102 @@ function DashboardWorkspace({
             submission={submission}
             verification={verification}
           />
-        );
-      case "teaching":
-        return <TeachingPanel challenge={dashboard.today} grade={grade} submission={submission} plain />;
-      case "pisTrend":
-        return <PisTrendChart currentPis={user.pisScore} rows={dashboard.progress} />;
-      case "scoreDistribution":
-        return <FrequencyPolygon rows={dashboard.progress} />;
-      case "streakMap":
-        return <ActivityGrid rows={dashboard.progress} />;
-      case "scoresheet":
-        return grade ? (
-          <GradeSummary grade={grade} plain />
-        ) : (
-          <EmptyState
-            title="No grade yet"
-            text="Submit and grade today&apos;s response to see the verdict, score movement, ERT earned, and correction."
-          />
-        );
-      case "history":
-        return <ProgressPanel rows={dashboard.progress} />;
-      case "social":
-        return (
-          <SocialPanel
-            social={dashboard.social}
-            busy={busy}
-            onAddFriend={onAddFriend}
-            onEnroll={onEnrollMarketplace}
-            plain
-          />
-        );
-      case "settings":
-        return (
-          <VersatilityPanel
-            busy={busy}
-            cohorts={dashboard.cohorts}
-            settings={dashboard.challengeSettings}
-            onCreateCohort={onCreateCohort}
-            onJoinCohort={onJoinCohort}
-            onSaveSettings={onSaveSettings}
-            plain
-          />
-        );
-      case "notebook":
-        return (
-          <NotebookPanel
-            key={dashboard.notebookEntries.map((entry) => entry.id).join(":")}
-            busy={busy}
-            entries={dashboard.notebookEntries}
-            redemptions={dashboard.redemptions}
-            onAskExaminer={onExaminer}
-            showRedemptions={false}
-            plain
-          />
-        );
-      case "rewards":
-        return <RewardPanel busy={busy} onRedeem={onRedeem} plain />;
-    }
-  }
-
-  return (
-    <section className="mx-auto grid w-full max-w-[1320px] gap-4 px-3 py-4 sm:px-5">
-      <DailyOperatingStrip
-        dashboard={dashboard}
-        deadline={deadline}
-        hasDraft={hasDraft}
-        nextUnlock={nextUnlock}
-        onExaminer={onExaminer}
-        onOpenResponse={onOpenResponse}
-        onGrade={onGrade}
-        submission={submission}
-        grade={grade}
-        user={user}
-      />
-
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-stone-200 bg-[#fffdf8]/70 px-3 py-2">
-        <div>
-          <p className="text-sm font-semibold text-slate-950">Workspace</p>
-          <p className="text-xs leading-5 text-slate-500">
-            Drag panels, collapse noise, and cycle width with the expand control.
-          </p>
+          <div className="grid content-start gap-4">
+            {grade ? (
+              <GradeSummary grade={grade} plain />
+            ) : (
+              <AstroCard title="Score unlock">
+                <EmptyState
+                  title="No grade yet"
+                  text="Submit and grade today's response to unlock the daily scoresheet, correction, PIS movement, and ERT result."
+                />
+              </AstroCard>
+            )}
+            <RewardPanel busy={busy} onRedeem={onRedeem} plain />
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {hidden.map((widget) => (
-            <button
-              key={widget.id}
-              type="button"
-              onClick={() => updateWidget(widget.id, { visible: true })}
-              className="h-8 rounded-md border border-stone-300 bg-[#fffdf8] px-2 text-xs font-semibold text-stone-700"
-            >
-              Show {widget.title}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={onResetWidgets}
-            className="flex h-8 items-center gap-2 rounded-md border border-stone-300 bg-[#fffdf8] px-2 text-xs font-semibold text-stone-700"
-          >
-            <RotateCcw size={13} />
-            Reset
-          </button>
-        </div>
-      </div>
+      </AstroSection>
 
-      <div className="dashboard-grid">
-        {visible.map((widget) => (
-          <WidgetShell
-            key={widget.id}
-            dragging={dragging === widget.id}
-            widget={widget}
-            onCollapse={() => updateWidget(widget.id, { collapsed: !widget.collapsed })}
-            onDragEnd={() => setDragging(null)}
-            onDragOver={(event) => event.preventDefault()}
-            onDragStart={() => setDragging(widget.id)}
-            onDrop={() => moveWidget(widget.id)}
-            onHide={() => updateWidget(widget.id, { visible: false })}
-            onResize={() => updateWidget(widget.id, { size: nextWidgetSize(widget.size) })}
-          >
-            {renderWidget(widget.id)}
-          </WidgetShell>
-        ))}
-      </div>
+      <AstroSection
+        id="metrics"
+        eyebrow="Signals"
+        title="Progress without the control room clutter"
+        text="The key training signals are grouped as a simple reading section: trend, distribution, streak behavior, and recent history."
+      >
+        <div className="grid gap-4 lg:grid-cols-3">
+          <AstroCard title="PIS trend" className="lg:col-span-2">
+            <PisTrendChart currentPis={user.pisScore} rows={dashboard.progress} />
+          </AstroCard>
+          <AstroCard title="Streak map">
+            <ActivityGrid rows={dashboard.progress} />
+          </AstroCard>
+          <AstroCard title="Score distribution">
+            <FrequencyPolygon rows={dashboard.progress} />
+          </AstroCard>
+          <AstroCard title="Recent history" className="lg:col-span-2">
+            <ProgressPanel rows={dashboard.progress} />
+          </AstroCard>
+        </div>
+      </AstroSection>
+
+      <AstroSection
+        id="learning"
+        eyebrow="Learning layer"
+        title="Corrections, notebook, and examiner memory"
+        text="Keep the teaching loop visible, but separate from the daily brief so the assessment itself stays calm."
+      >
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+          <AstroCard title="Assessment teaching">
+            <TeachingPanel challenge={dashboard.today} grade={grade} submission={submission} plain />
+          </AstroCard>
+          <AstroCard title="Notebook">
+            <NotebookPanel
+              key={dashboard.notebookEntries.map((entry) => entry.id).join(":")}
+              busy={busy}
+              entries={dashboard.notebookEntries}
+              redemptions={dashboard.redemptions}
+              onAskExaminer={onExaminer}
+              showRedemptions={false}
+              plain
+            />
+          </AstroCard>
+        </div>
+      </AstroSection>
+
+      <AstroSection
+        id="social"
+        eyebrow="Network"
+        title="Community, cohorts, and configuration"
+        text="Social comparison and challenge configuration live at the bottom of the page where they support the core loop without interrupting it."
+      >
+        <div className="grid gap-5">
+          <AstroCard title="Social hub">
+            <SocialPanel
+              social={dashboard.social}
+              busy={busy}
+              onAddFriend={onAddFriend}
+              onEnroll={onEnrollMarketplace}
+              plain
+            />
+          </AstroCard>
+          <AstroCard title="Challenge settings and cohorts">
+            <VersatilityPanel
+              busy={busy}
+              cohorts={dashboard.cohorts}
+              settings={dashboard.challengeSettings}
+              onCreateCohort={onCreateCohort}
+              onJoinCohort={onJoinCohort}
+              onSaveSettings={onSaveSettings}
+              plain
+            />
+          </AstroCard>
+        </div>
+      </AstroSection>
     </section>
   );
 }
 
-function DailyOperatingStrip({
+function DashboardHero({
   dashboard,
   deadline,
   grade,
@@ -1608,52 +1485,66 @@ function DailyOperatingStrip({
   user: SafeUser;
 }) {
   const primaryAction = grade
-    ? { label: "Review score", action: () => scrollToWidget("scoresheet") }
+    ? { label: "Review teaching", action: () => scrollToSection("learning") }
     : submission
       ? { label: "Grade response", action: onGrade }
       : { label: hasDraft ? "Continue response" : "Respond", action: onOpenResponse };
   return (
-    <div className="glass-panel rounded-md p-3">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+    <section className="astrowind-hero">
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(22rem,0.95fr)] lg:items-center">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusPill status={dashboard.today.status} />
-            <span className="rounded-md border border-slate-200 bg-white/70 px-2 py-1 font-mono text-xs font-semibold text-slate-600">
-              {dashboard.today.dateKey} · {dashboard.today.difficulty}
-            </span>
-            <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
-              Due {deadline}
-            </span>
-          </div>
-          <h1 className="mt-2 truncate text-xl font-semibold text-slate-950">
-            {dashboard.today.title}
+          <p className="astrowind-kicker">GURUnet operating loop</p>
+          <h1 className="mt-4 max-w-4xl text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
+            One rigorous challenge. One submitted answer. One serious correction.
           </h1>
-          <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600">
-            {dashboard.activeDiscipline.label} · {dashboard.today.topic} · Next unlock {nextUnlock}
+          <p className="mt-5 max-w-2xl text-base leading-8 text-slate-600 sm:text-lg">
+            {dashboard.activeDiscipline.label} training for {user.name}. Today's brief is{" "}
+            <span className="font-semibold text-slate-900">{dashboard.today.title}</span>, due {deadline}.
+          </p>
+          <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={primaryAction.action}
+              className="interactive-lift h-11 rounded-md bg-slate-950 px-5 text-sm font-semibold text-white"
+            >
+              {primaryAction.label}
+            </button>
+            <button
+              type="button"
+              onClick={onExaminer}
+              className="interactive-lift h-11 rounded-md border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700"
+            >
+              Talk to examiner
+            </button>
+          </div>
+          <p className="mt-4 text-sm text-slate-500">
+            Next challenge unlocks {nextUnlock}. Current status: {dashboard.today.status}.
           </p>
         </div>
-        <div className="grid gap-2 sm:grid-cols-[repeat(3,minmax(5rem,auto))_auto_auto] sm:items-center">
-          <MiniStat label="PIS" value={user.pisScore.toFixed(1)} />
-          <MiniStat label="ERT" value={String(user.ertBalance)} />
-          <MiniStat label="Streak" value={`${user.currentStreak}d`} />
-          <button
-            type="button"
-            onClick={primaryAction.action}
-            disabled={submission && !grade ? false : false}
-            className="interactive-lift h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white"
-          >
-            {primaryAction.label}
-          </button>
-          <button
-            type="button"
-            onClick={onExaminer}
-            className="interactive-lift h-10 rounded-md border border-stone-300 bg-[#fffdf8] px-4 text-sm font-semibold text-stone-700"
-          >
-            Examiner
-          </button>
+
+        <div className="astrowind-feature-card">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill status={dashboard.today.status} />
+            <span className="rounded-md border border-slate-200 bg-white px-2 py-1 font-mono text-xs font-semibold text-slate-600">
+              {dashboard.today.dateKey} · {dashboard.today.difficulty}
+            </span>
+          </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <MiniStat label="PIS" value={user.pisScore.toFixed(1)} />
+            <MiniStat label="ERT" value={String(user.ertBalance)} />
+            <MiniStat label="Streak" value={`${user.currentStreak}d`} />
+          </div>
+          <div className="mt-6 rounded-md border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Today's focus
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              {dashboard.today.topic}. Submit evidence, reasoning, exact checks, risk, rollback, and a defensible recommendation.
+            </p>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1666,100 +1557,48 @@ function MiniStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function scrollToWidget(id: WidgetId) {
-  document.getElementById(`widget-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-}
-
-function WidgetShell({
+function AstroSection({
   children,
-  dragging,
-  onCollapse,
-  onDragEnd,
-  onDragOver,
-  onDragStart,
-  onDrop,
-  onHide,
-  onResize,
-  widget,
+  eyebrow,
+  id,
+  text,
+  title,
 }: {
   children: ReactNode;
-  dragging: boolean;
-  onCollapse: () => void;
-  onDragEnd: () => void;
-  onDragOver: (event: DragEvent<HTMLElement>) => void;
-  onDragStart: () => void;
-  onDrop: () => void;
-  onHide: () => void;
-  onResize: () => void;
-  widget: DashboardWidget;
+  eyebrow: string;
+  id: string;
+  text: string;
+  title: string;
 }) {
   return (
-    <section
-      id={`widget-${widget.id}`}
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      className={`dashboard-widget quiet-panel rounded-md ${widgetSizeClass(widget.size)} ${dragging ? "opacity-60 ring-2 ring-cyan-500" : ""}`}
-    >
-      <div className="dashboard-widget-header">
-        <div className="flex min-w-0 items-center gap-2">
-          <GripVertical size={16} className="dashboard-drag-handle shrink-0 text-slate-400" />
-          <h2 className="truncate text-sm font-semibold text-slate-950">{widget.title}</h2>
-          <span className="rounded-sm bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">
-            {widget.size.toUpperCase()}
-          </span>
-        </div>
-        <div className="flex items-center gap-1">
-          <IconControl label="Resize widget" onClick={onResize}>
-            <Maximize2 size={14} />
-          </IconControl>
-          <IconControl label={widget.collapsed ? "Expand widget" : "Collapse widget"} onClick={onCollapse}>
-            <Minimize2 size={14} />
-          </IconControl>
-          <IconControl label="Hide widget" onClick={onHide}>
-            <EyeOff size={14} />
-          </IconControl>
-        </div>
+    <section id={id} className="astrowind-section">
+      <div className="mx-auto mb-10 max-w-3xl text-center">
+        <p className="astrowind-kicker">{eyebrow}</p>
+        <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+          {title}
+        </h2>
+        <p className="mt-4 text-base leading-7 text-slate-600">{text}</p>
       </div>
-      {!widget.collapsed && <div className="dashboard-widget-body">{children}</div>}
+      {children}
     </section>
   );
 }
 
-function IconControl({
+function AstroCard({
   children,
-  label,
-  onClick,
+  className = "",
+  title,
 }: {
   children: ReactNode;
-  label: string;
-  onClick: () => void;
+  className?: string;
+  title: string;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className="grid size-8 place-items-center rounded-md border border-slate-200 bg-white/70 text-slate-600 transition-colors hover:border-cyan-700/30 hover:text-cyan-800"
-    >
+    <section className={`astrowind-card ${className}`}>
+      <h3 className="mb-4 text-lg font-semibold tracking-tight text-slate-950">{title}</h3>
       {children}
-    </button>
+    </section>
   );
-}
-
-function widgetSizeClass(size: WidgetSize) {
-  if (size === "sm") return "lg:col-span-1";
-  if (size === "md") return "lg:col-span-2";
-  if (size === "lg") return "lg:col-span-3";
-  return "lg:col-span-4";
-}
-
-function nextWidgetSize(size: WidgetSize): WidgetSize {
-  const sizes: WidgetSize[] = ["sm", "md", "lg", "xl"];
-  return sizes[(sizes.indexOf(size) + 1) % sizes.length];
 }
 
 const packetHeadings = new Set([
@@ -2521,8 +2360,8 @@ function AppHeader({
   theme?: ThemeMode;
 }) {
   return (
-    <header className="border-b border-stone-200/80 bg-[#fffdf8]/78 backdrop-blur-xl">
-      <div className="mx-auto flex w-full max-w-[1320px] items-center justify-between px-3 py-3 sm:px-5">
+    <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/80 backdrop-blur-xl">
+      <div className="mx-auto flex w-full max-w-[1180px] items-center justify-between px-4 py-3 sm:px-6">
         <div className="flex items-center gap-3">
           <Image
             src="/gurunet.svg"
@@ -2536,38 +2375,47 @@ function AppHeader({
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-stone-500">
               GURUnet
             </p>
-            <h2 className="text-lg font-semibold text-stone-950">Structured capacity builder</h2>
+            <h2 className="text-base font-semibold text-stone-950 sm:text-lg">Capacity builder</h2>
           </div>
         </div>
         {user && (
           <div className="flex items-center gap-3">
+            <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 lg:flex">
+              <button type="button" onClick={() => scrollToSection("daily-challenge")} className="nav-link">
+                Today
+              </button>
+              <button type="button" onClick={() => scrollToSection("metrics")} className="nav-link">
+                Metrics
+              </button>
+              <button type="button" onClick={() => scrollToSection("learning")} className="nav-link">
+                Learning
+              </button>
+              <button type="button" onClick={() => scrollToSection("social")} className="nav-link">
+                Network
+              </button>
+            </nav>
             <span className="hidden text-sm font-medium text-stone-600 sm:inline">
               {user.name}
             </span>
             <button
               onClick={onCommand}
-              className="interactive-lift grid size-10 place-items-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm sm:flex sm:w-auto sm:px-3"
+              className="grid size-10 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
               aria-label="Open command palette"
               type="button"
             >
               <Command size={15} />
-              <span className="hidden lg:inline">Command</span>
-              <kbd className="rounded-sm bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
-                Ctrl K
-              </kbd>
             </button>
             <button
               onClick={onExport}
-              className="interactive-lift grid size-10 place-items-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm sm:flex sm:w-auto sm:px-3"
+              className="grid size-10 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
               aria-label="Export learning record"
               type="button"
             >
               <Download size={15} />
-              <span className="hidden lg:inline">Export</span>
             </button>
             <button
               onClick={onThemeToggle}
-              className="interactive-lift grid size-10 place-items-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm"
+              className="grid size-10 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
               aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
               type="button"
             >
@@ -2575,7 +2423,7 @@ function AppHeader({
             </button>
             <button
               onClick={onLogout}
-              className="interactive-lift grid size-10 place-items-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm"
+              className="grid size-10 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
               aria-label="Logout"
             >
               <LogOut size={17} />
