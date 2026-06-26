@@ -430,6 +430,28 @@
     background-color: var(--palette-accent-soft) !important;
   }
 
+  .app-background [class*="bg-white/"],
+  .app-background [class*="bg-slate-50"],
+  .app-background [class*="bg-slate-100"] {
+    background-color: var(--palette-accent-soft) !important;
+    background-color: color-mix(in srgb, #ffffff 76%, var(--palette-accent-soft)) !important;
+  }
+
+  .app-background [class*="border-slate-200"],
+  .app-background [class*="border-cyan-950/10"] {
+    border-color: var(--palette-accent-border) !important;
+  }
+
+  .app-background thead {
+    background-color: var(--palette-accent-soft);
+    background-color: color-mix(in srgb, #ffffff 68%, var(--palette-accent-soft));
+    color: var(--palette-accent-strong) !important;
+  }
+
+  .app-background table tbody tr:hover {
+    background-color: color-mix(in srgb, #ffffff 72%, var(--palette-accent-soft));
+  }
+
   .app-background .bg-cyan-700 {
     background-color: var(--palette-accent) !important;
   }
@@ -555,8 +577,8 @@
     background-color: rgba(30, 41, 59, 0.82) !important;
   }
 
-  .dark .app-background [class*="bg-cyan-50"] {
-    background-color: rgba(8, 145, 178, 0.16) !important;
+  .dark .app-background :is([class*="bg-cyan-50"], [class*="bg-cyan-100"]) {
+    background-color: color-mix(in srgb, #020617 84%, var(--palette-accent)) !important;
   }
 
   .dark .app-background [class*="bg-amber-50"],
@@ -577,8 +599,8 @@
     color: #94a3b8 !important;
   }
 
-  .dark .app-background :is(.text-cyan-800, .text-cyan-900, .text-cyan-950) {
-    color: #67e8f9 !important;
+  .dark .app-background :is(.text-cyan-700, .text-cyan-800, .text-cyan-900, .text-cyan-950) {
+    color: color-mix(in srgb, #ffffff 68%, var(--palette-accent)) !important;
   }
 
   .dark .app-background :is(.text-amber-800, .text-orange-800, .text-red-700) {

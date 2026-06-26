@@ -2436,8 +2436,8 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
         >
           <defs>
             <linearGradient id="score-area" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="#0891b2" stopOpacity="0.2" />
-              <stop offset="100%" stopColor="#0891b2" stopOpacity="0.02" />
+              <stop offset="0%" stopColor="var(--palette-accent)" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="var(--palette-accent)" stopOpacity="0.03" />
             </linearGradient>
           </defs>
           <line
@@ -2445,27 +2445,28 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
             x2={width - padX}
             y1={height - padY}
             y2={height - padY}
-            stroke="rgba(15,23,42,0.18)"
+            stroke="var(--palette-accent-border)"
           />
           <line
             x1={padX}
             x2={padX}
             y1={padY}
             y2={height - padY}
-            stroke="rgba(15,23,42,0.12)"
+            stroke="var(--palette-accent-border)"
+            opacity="0.65"
           />
           <polygon points={area} fill="url(#score-area)" />
           <polyline
             points={line}
             fill="none"
-            stroke="#0891b2"
+            stroke="var(--palette-accent)"
             strokeWidth="3"
             strokeLinejoin="round"
             strokeLinecap="round"
           />
           {points.map((point, index) => (
             <g key={bins[index].label}>
-              <circle cx={point.x} cy={point.y} r="4" fill="#0891b2" />
+              <circle cx={point.x} cy={point.y} r="4" fill="var(--palette-accent)" />
               <text
                 x={point.x}
                 y={height - 3}
@@ -2478,7 +2479,8 @@ function FrequencyPolygon({ rows }: { rows: ProgressRow[] }) {
                 x={point.x}
                 y={Math.max(10, point.y - 8)}
                 textAnchor="middle"
-                className="fill-slate-700 text-[10px] font-semibold"
+                className="text-[10px] font-semibold"
+                fill="var(--palette-accent-strong)"
               >
                 {point.count}
               </text>
@@ -2760,7 +2762,7 @@ function PisTrendChart({ currentPis, rows }: { currentPis: number; rows: Progres
           const y = height - padY - ((tick - min) / range) * (height - padY * 2);
           return (
             <g key={tick}>
-              <line x1={padX} x2={width - padX} y1={y} y2={y} stroke="rgba(15,23,42,0.08)" />
+              <line x1={padX} x2={width - padX} y1={y} y2={y} stroke="var(--palette-accent-border)" opacity="0.55" />
               <text x={8} y={y + 4} className="fill-slate-500 text-[10px]">
                 {tick}
               </text>
@@ -2770,14 +2772,14 @@ function PisTrendChart({ currentPis, rows }: { currentPis: number; rows: Progres
         <polyline
           points={line}
           fill="none"
-          stroke="#0891b2"
+          stroke="var(--palette-accent)"
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth="4"
         />
         {points.map((point, index) => (
           <g key={`${point.label}-${index}`}>
-            <circle cx={point.x} cy={point.y} r={index === points.length - 1 ? 5 : 3.5} fill="#0891b2" />
+            <circle cx={point.x} cy={point.y} r={index === points.length - 1 ? 5 : 3.5} fill="var(--palette-accent)" />
             {(index === 0 || index === points.length - 1 || index % 4 === 0) && (
               <text x={point.x} y={height - 6} textAnchor="middle" className="fill-slate-500 text-[10px]">
                 {point.label}
@@ -2785,7 +2787,7 @@ function PisTrendChart({ currentPis, rows }: { currentPis: number; rows: Progres
             )}
           </g>
         ))}
-        <text x={last.x} y={Math.max(14, last.y - 12)} textAnchor="middle" className="fill-cyan-800 text-[12px] font-semibold">
+        <text x={last.x} y={Math.max(14, last.y - 12)} textAnchor="middle" className="text-[12px] font-semibold" fill="var(--palette-accent-strong)">
           {last.value.toFixed(1)}
         </text>
       </svg>
@@ -4333,7 +4335,8 @@ function AxisPerformancePrism({ grade }: { grade: Grade }) {
               key={scale}
               points={axes.map((_, index) => prismPoint(index, axes.length, scale)).join(" ")}
               fill="none"
-              stroke={scale === 1 ? "#94a3b8" : "#cbd5e1"}
+              stroke={scale === 1 ? "var(--palette-accent-border)" : "var(--palette-ring)"}
+              opacity={scale === 1 ? 0.95 : 0.38}
               strokeWidth={scale === 1 ? 1.2 : 0.8}
             />
           ))}
@@ -4346,18 +4349,25 @@ function AxisPerformancePrism({ grade }: { grade: Grade }) {
                 y1="130"
                 x2={x}
                 y2={y}
-                stroke="#cbd5e1"
+                stroke="var(--palette-accent-border)"
                 strokeWidth="0.8"
+                opacity="0.7"
               />
             );
           })}
-          <polygon points={shadow} fill="#0f172a" opacity="0.08" />
-          <polygon points={polygon} fill="#0e7490" opacity="0.22" stroke="#0e7490" strokeWidth="2.5" />
+          <polygon points={shadow} fill="var(--palette-accent-strong)" opacity="0.08" />
+          <polygon
+            points={polygon}
+            fill="var(--palette-accent)"
+            opacity="0.24"
+            stroke="var(--palette-accent)"
+            strokeWidth="2.5"
+          />
           {axes.map((axis, index) => {
             const [x, y] = prismPoint(index, axes.length, axis.score / 7).split(",").map(Number);
             return (
               <g key={axis.key}>
-                <circle cx={x} cy={y} r="4.5" fill="#0f172a" />
+                <circle cx={x} cy={y} r="4.5" fill="var(--palette-accent-strong)" />
                 <circle cx={x} cy={y} r="2" fill="#f8fafc" />
               </g>
             );
@@ -4749,7 +4759,7 @@ function VersatilityPanel({
     <div className="grid gap-6">
       <TrackShell icon={<CircleGauge size={20} />} title="Active study profile">
         <div className="grid gap-4">
-          <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+          <div className="rounded-md border border-cyan-700/15 bg-cyan-50 p-4">
             <p className="text-sm font-semibold text-slate-950">{activeDiscipline.label}</p>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               Future challenges use this governed profile for topics, formats, evidence expectations,
@@ -4757,7 +4767,7 @@ function VersatilityPanel({
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               {activeDiscipline.formats.slice(0, 4).map((format) => (
-                <span key={format} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600">
+                <span key={format} className="rounded-md border border-cyan-700/15 bg-white/70 px-2 py-1 text-xs font-semibold text-cyan-800">
                   {format}
                 </span>
               ))}
