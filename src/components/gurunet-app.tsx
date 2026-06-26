@@ -2763,7 +2763,7 @@ function PisTrendChart({ currentPis, rows }: { currentPis: number; rows: Progres
 function ChallengeAccordions({ challenge }: { challenge: Challenge }) {
   return (
     <div className="grid gap-3 py-5">
-      <div className="grid gap-3 lg:grid-cols-3">
+      <div className="grid gap-3 border-y border-slate-200/80 py-3 lg:grid-cols-3">
         <ChallengeScanCard
           icon={<ShieldCheck size={16} />}
           tone="red"
@@ -2827,10 +2827,10 @@ function ChallengeScanCard({
 }) {
   const colors =
     tone === "red"
-      ? "border-red-200 bg-red-50 text-red-900"
+      ? "text-red-900"
       : tone === "cyan"
-        ? "border-cyan-700/15 bg-cyan-50 text-cyan-950"
-        : "border-slate-200 bg-white/70 text-slate-800";
+        ? "text-cyan-950"
+        : "text-slate-800";
   const iconColors =
     tone === "red"
       ? "bg-red-100 text-red-800"
@@ -2839,13 +2839,13 @@ function ChallengeScanCard({
         : "bg-slate-100 text-slate-700";
 
   return (
-    <section className={`rounded-md border p-3 ${colors}`}>
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <section className={`min-w-0 ${colors}`}>
+      <div className="mb-2 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className={`grid size-8 place-items-center rounded-full ${iconColors}`}>{icon}</span>
           <h3 className="text-sm font-semibold">{title}</h3>
         </div>
-        <span className="rounded-full bg-white/70 px-2 py-0.5 font-mono text-[11px] font-semibold">
+        <span className="rounded-full border border-slate-200 bg-white/55 px-2 py-0.5 font-mono text-[11px] font-semibold">
           {items.length}
         </span>
       </div>
@@ -4273,7 +4273,7 @@ function AxisPerformancePrism({ grade }: { grade: Grade }) {
     .join(" ");
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white/72 p-4">
+    <div className="grid gap-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -4288,12 +4288,12 @@ function AxisPerformancePrism({ grade }: { grade: Grade }) {
         </span>
       </div>
 
-      <div className="mt-3 grid gap-4 md:grid-cols-[minmax(13rem,0.8fr)_minmax(0,1fr)]">
+      <div className="grid gap-4 md:grid-cols-[minmax(11rem,0.58fr)_minmax(0,1fr)]">
         <svg
           viewBox="0 0 260 260"
           role="img"
           aria-label="Multi-axis score radar chart"
-          className="mx-auto aspect-square w-full max-w-[18rem]"
+          className="mx-auto aspect-square w-full max-w-[15rem]"
         >
           {[0.25, 0.5, 0.75, 1].map((scale) => (
             <polygon
@@ -4333,7 +4333,7 @@ function AxisPerformancePrism({ grade }: { grade: Grade }) {
 
         <div className="grid content-center gap-2">
           {axes.map((axis) => (
-            <div key={axis.key} className="grid gap-1 rounded-md border border-slate-200 bg-white/70 p-2">
+            <div key={axis.key} className="grid gap-1 border-t border-slate-200 py-2 first:border-t-0">
               <div className="flex items-center justify-between gap-2">
                 <p className="truncate text-sm font-semibold text-slate-950">{axis.label}</p>
                 <span className="font-mono text-xs font-semibold text-cyan-800">{axis.score}/7</span>
@@ -4358,9 +4358,10 @@ function ScoreMathPanel({ grade }: { grade: Grade }) {
   const total = axes.reduce((sum, axis) => sum + axis.score, 0);
   const afterDeductions = Number((grade.rawScore - grade.balancePenalty - grade.latePenalty).toFixed(2));
   const cap = technicalCapLimit(grade.technicalCap);
+  const capApplied = cap < afterDeductions;
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white/72 p-4">
+    <div className="border-t border-slate-200 pt-4">
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
         Score calculation
       </p>
@@ -4370,12 +4371,21 @@ function ScoreMathPanel({ grade }: { grade: Grade }) {
         <MathRow label="Balance penalty" value={`-${grade.balancePenalty}`} />
         <MathRow label="Late penalty" value={`-${grade.latePenalty}`} />
         <MathRow label="After penalties" value={`${afterDeductions}/20`} />
-        <MathRow label="Competence cap" value={`${technicalCapLabel(grade.technicalCap)} (${cap}/20 max)`} />
-        <MathRow strong label="Final score" value={`${grade.finalScore}/20`} />
+        <MathRow
+          label="Competence cap"
+          value={`${technicalCapLabel(grade.technicalCap)} (${cap}/20 max)${capApplied ? " applied" : ""}`}
+        />
+        <MathRow
+          strong
+          label="Final score"
+          value={`min(${afterDeductions}, ${cap}) = ${grade.finalScore}/20`}
+        />
       </div>
-      <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
-        ERT is awarded only when final score, timing, cap status, and balance checks pass. This attempt earned{" "}
-        <strong>{grade.ertEarned}</strong>.
+      <p className={`mt-3 border-l-2 px-3 py-1 text-xs leading-5 ${capApplied ? "border-amber-500 text-amber-800" : "border-slate-300 text-slate-600"}`}>
+        {capApplied
+          ? "The cap overrode the score after penalties because the answer was not defensible enough to receive the higher numeric score."
+          : "No lower cap overrode the score after penalties."}{" "}
+        ERT earned: <strong>{grade.ertEarned}</strong>.
       </p>
     </div>
   );
@@ -4391,9 +4401,9 @@ function MathRow({
   value: string;
 }) {
   return (
-    <div className={`grid grid-cols-[8rem_1fr] gap-3 rounded-md px-2 py-1 ${strong ? "bg-slate-950 text-white" : "bg-white/60 text-slate-700"}`}>
-      <span className={strong ? "text-white/70" : "text-slate-500"}>{label}</span>
-      <span className="min-w-0 break-words font-mono text-xs font-semibold">{value}</span>
+    <div className={`grid grid-cols-[7.25rem_1fr] gap-3 border-t border-slate-200 px-0 py-1.5 first:border-t-0 ${strong ? "text-slate-950" : "text-slate-700"}`}>
+      <span className={strong ? "font-semibold text-slate-950" : "text-slate-500"}>{label}</span>
+      <span className={`min-w-0 break-words font-mono text-xs ${strong ? "font-semibold text-slate-950" : "font-semibold"}`}>{value}</span>
     </div>
   );
 }

@@ -257,30 +257,37 @@
 
   .astrowind-section {
     scroll-margin-top: 5rem;
+    animation: soft-enter 560ms ease both;
   }
 
   .astrowind-card,
   .astrowind-feature-card {
-    border: 1px solid rgba(226, 232, 240, 0.95);
-    border-radius: 0.75rem;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.86)),
-      #fff;
-    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.055);
+    border: 0;
+    border-top: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .astrowind-card {
-    padding: 1.25rem;
+    padding: 1.25rem 0 0;
+    animation: soft-enter 520ms ease both;
   }
 
   @media (min-width: 640px) {
     .astrowind-card {
-      padding: 1.5rem;
+      padding: 1.5rem 0 0;
     }
   }
 
   .astrowind-feature-card {
+    border: 1px solid rgba(226, 232, 240, 0.82);
+    border-radius: 0.65rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 250, 252, 0.62)),
+      #fff;
     padding: 1.25rem;
+    box-shadow: 0 16px 42px rgba(15, 23, 42, 0.04);
   }
 
   @media (min-width: 640px) {
@@ -530,7 +537,12 @@
     fill: #94a3b8;
   }
 
-  .dark .astrowind-card,
+  .dark .astrowind-card {
+    border-color: rgba(148, 163, 184, 0.18);
+    background: transparent;
+    box-shadow: none;
+  }
+
   .dark .astrowind-feature-card {
     border-color: rgba(148, 163, 184, 0.18);
     background:
