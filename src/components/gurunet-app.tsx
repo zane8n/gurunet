@@ -37,6 +37,7 @@ import {
   UserPlus,
   Users,
   WalletCards,
+  Wrench,
 } from "lucide-react";
 import type {
   Challenge,
@@ -4514,7 +4515,7 @@ function TeacherMarkedResponse({
   );
 }
 
-type MarkKind = "correct" | "evidence" | "vague" | "risk" | "neutral";
+type MarkKind = "correct" | "evidence" | "vague" | "risk" | "action" | "neutral";
 
 function markResponseSegments(body: string, grade: Grade) {
   const segments = body
@@ -4539,16 +4540,39 @@ function markResponseSegments(body: string, grade: Grade) {
 
   return segments.map((text) => {
     const lower = text.toLowerCase();
-    const hasEvidence = /\b(show|log|output|trace|because|therefore|screenshot|attached|config|metric|evidence)\b/.test(lower);
+    const headingOnly = /^#{1,4}\s+\S[\s\S]{0,80}$/.test(text) && !/[.!?]\s*$/.test(text);
+    const rawArtifact =
+      /^(sw-|cpu utilization|pid\s+runtime|vlan\s+\d+|%sw_|show\s+|gi\d+\/\d+\/\d+|\d+\s+\d+|\S+#)/i.test(text.trim()) ||
+      /\b(cpu utilization|macflap|flapping between|topology changes|cdp|lldp|dynamic gi)\b/i.test(lower);
+    const hasEvidence = /\b(show|log|output|trace|because|therefore|screenshot|attached|config|metric|evidence|mac table|macflap|flapping|topology changes|cpu utilization|stp|cdp|lldp)\b/.test(lower);
     const hasRisk = /\b(risk|rollback|blast radius|impact|safe|backout|change window)\b/.test(lower);
-    const hasAction = /\b(recommend|fix|correct|shut|change|verify|validate|monitor|rollback)\b/.test(lower);
+    const hasAction = /\b(recommend|fix|correct|shut|shutdown|change|verify|validate|monitor|rollback|no shutdown|bpdu|storm control|root guard)\b/.test(lower);
+    const hasCorrectDiagnosis = /\b(layer 2|l2|loop|broadcast storm|mac flapp?ing|stp|gi\s*1\/0\/22|gi1\/0\/22|unmanaged switch)\b/.test(lower);
     const hedged = /\b(maybe|probably|could be|seems|i think)\b/.test(lower);
 
-    if (hasEvidence) {
+    if (headingOnly) {
+      return {
+        kind: "neutral" as MarkKind,
+        label: "Section",
+        note: "This is structure, not something to penalize by itself.",
+        text,
+      };
+    }
+    if (hasCorrectDiagnosis && hasEvidence) {
+      return {
+        kind: "correct" as MarkKind,
+        label: "Correct direction",
+        note: "The diagnosis is aligned with the scenario; strengthen it with exact command sequence and verification.",
+        text,
+      };
+    }
+    if (rawArtifact || hasEvidence) {
       return {
         kind: "evidence" as MarkKind,
-        label: "Evidence used",
-        note: "This is the kind of material the examiner can grade.",
+        label: rawArtifact ? "Evidence artifact" : "Evidence used",
+        note: rawArtifact
+          ? "Useful artifact. The next step is to state what it proves."
+          : "This is gradable material; tie it directly to a decision.",
         text,
       };
     }
@@ -4562,9 +4586,9 @@ function markResponseSegments(body: string, grade: Grade) {
     }
     if (hasAction && !hasEvidence) {
       return {
-        kind: "vague" as MarkKind,
-        label: "Needs proof",
-        note: "Actionable, but it should cite evidence or verification before the recommendation.",
+        kind: "action" as MarkKind,
+        label: "Action needs detail",
+        note: "Good operational intent. Add exact commands, order, and verification criteria.",
         text,
       };
     }
@@ -4588,6 +4612,28 @@ function markResponseSegments(body: string, grade: Grade) {
 function missingSubmissionRequirements(body: string, challenge: Challenge) {
   const lower = body.toLowerCase();
   return challenge.submissionRequirements.filter((requirement) => {
+    const req = requirement.toLowerCase();
+    if (/root cause/.test(req)) {
+      return !/\b(root cause|hypothesis|layer 2|l2|loop|broadcast storm|mac flapp?ing|stp)\b/.test(lower);
+    }
+    if (/operational reasoning|tied to evidence/.test(req)) {
+      return !/\b(because|evidence|show|log|cpu|mac|flapp?ing|topology|stp|cdp|lldp)\b/.test(lower);
+    }
+    if (/which interface|disable/.test(req)) {
+      return !/\b(gi\s*1\/0\/22|gi1\/0\/22|1\/0\/22|shutdown|shut)\b/.test(lower);
+    }
+    if (/exact commands/.test(req)) {
+      return !/\b(show\s+|configure terminal|interface\s+\S+|shutdown|no shutdown|show run interface|show interfaces|show spanning-tree)\b/.test(lower);
+    }
+    if (/verification steps/.test(req)) {
+      return !/\b(verify|validate|monitor|check|show\s+|cpu|topology changes|mac flapp?ing|logging)\b/.test(lower);
+    }
+    if (/rollback/.test(req)) {
+      return !/\b(rollback|backout|no shutdown|bring it back|restore|revert)\b/.test(lower);
+    }
+    if (/long-term prevention/.test(req)) {
+      return !/\b(bpdu guard|root guard|storm control|loop guard|portfast|documentation|interface description|contractor|alerting|prevention)\b/.test(lower);
+    }
     const keywords = requirement
       .toLowerCase()
       .split(/[^a-z0-9]+/)
@@ -4599,6 +4645,7 @@ function missingSubmissionRequirements(body: string, challenge: Challenge) {
 function markStyle(kind: MarkKind) {
   if (kind === "evidence") return { border: "border-l-cyan-700", pill: "bg-cyan-50 text-cyan-900" };
   if (kind === "risk") return { border: "border-l-slate-950", pill: "bg-slate-950 text-white" };
+  if (kind === "action") return { border: "border-l-blue-600", pill: "bg-blue-50 text-blue-900" };
   if (kind === "vague") return { border: "border-l-amber-600", pill: "bg-amber-50 text-amber-900" };
   if (kind === "correct") return { border: "border-l-emerald-700", pill: "bg-emerald-50 text-emerald-900" };
   return { border: "border-l-slate-300", pill: "bg-slate-100 text-slate-700" };
@@ -4607,6 +4654,7 @@ function markStyle(kind: MarkKind) {
 function markIcon(kind: MarkKind) {
   if (kind === "evidence" || kind === "correct") return <CheckCircle2 size={12} />;
   if (kind === "risk") return <ShieldCheck size={12} />;
+  if (kind === "action") return <Wrench size={12} />;
   if (kind === "vague") return <Pencil size={12} />;
   return <FileText size={12} />;
 }

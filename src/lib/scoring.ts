@@ -22,6 +22,41 @@ const unsafePattern =
 const evidencePattern =
   /\b(show|ping|traceroute|tcpdump|wireshark|journalctl|grep|awk|log|packet|screenshot|attachment|attached|pcap|rollback|risk|verify|baseline|config|interface|route|vlan|stp|ospf|bgp|acl|nat)\b/i;
 
+const weakStopWords = new Set([
+  "and",
+  "the",
+  "with",
+  "without",
+  "level",
+  "command",
+  "commands",
+  "evidence",
+  "reasoning",
+]);
+
+function meaningfulWords(value: string) {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 5 && !weakStopWords.has(word));
+}
+
+function hasDisciplineEvidenceSignal(lower: string, challenge?: Challenge) {
+  return challenge?.disciplineSnapshot?.evidenceTypes?.some((item) => {
+    const words = meaningfulWords(item);
+    return words.length > 0 && words.some((word) => lower.includes(word));
+  });
+}
+
+function hasGovernedPattern(lower: string, pattern: string) {
+  const normalized = pattern.toLowerCase().trim();
+  if (normalized.length >= 8 && lower.includes(normalized)) return true;
+  const words = meaningfulWords(pattern);
+  if (words.length === 0) return false;
+  if (words.length === 1) return lower.includes(words[0]);
+  return words.every((word) => lower.includes(word));
+}
+
 export function calculateLatePenalty(submittedAt: string, deadlineAt: string) {
   const minutesLate = minutesAfterDeadline(submittedAt, deadlineAt);
   if (minutesLate <= 0) return 0;
@@ -55,9 +90,7 @@ function categoryScores(content: string, challenge?: Challenge) {
   const plainText = analysis.plainText;
   const lower = plainText.toLowerCase();
   const wordCount = analysis.wordCount;
-  const disciplineEvidence = challenge?.disciplineSnapshot?.evidenceTypes?.some((item) =>
-    lower.includes(item.toLowerCase().split(" ")[0] ?? item.toLowerCase()),
-  );
+  const disciplineEvidence = hasDisciplineEvidenceSignal(lower, challenge);
 
   const hasSequence = /\b(first|then|next|after|finally|step)\b/i.test(plainText);
   const hasRisk = /\b(risk|rollback|change window|impact|safe|non-disruptive)\b/i.test(
@@ -120,19 +153,22 @@ function technicalCapFor(content: string, challenge?: Challenge): TechnicalCap {
   const analysis = submissionAnalysis(content);
   const plainText = analysis.plainText;
   const lower = plainText.toLowerCase();
-  const hasDisciplineEvidence = challenge?.disciplineSnapshot?.evidenceTypes?.some((item) =>
-    lower.includes(item.toLowerCase().split(" ")[0] ?? item.toLowerCase()),
-  );
+  const hasDisciplineEvidence = hasDisciplineEvidenceSignal(lower, challenge);
   const hasUnsafeDisciplinePattern = challenge?.disciplineSnapshot?.unsafePatterns?.some((item) =>
-    lower.includes(item.toLowerCase().split(" ")[0] ?? item.toLowerCase()),
+    hasGovernedPattern(lower, item),
   );
   const hasWeakDisciplinePattern = challenge?.disciplineSnapshot?.weakPatterns?.some((item) =>
-    lower.includes(item.toLowerCase().split(" ")[0] ?? item.toLowerCase()),
+    hasGovernedPattern(lower, item),
   );
+  const hasSomeOperationalProof =
+    evidencePattern.test(plainText) ||
+    hasDisciplineEvidence ||
+    analysis.hasStructuredEvidence;
   if (unsafePattern.test(plainText) || hasUnsafeDisciplinePattern) return "UNSAFE";
   if (analysis.attachmentCount > 0 && analysis.wordCount < 45) return "INCOMPLETE";
   if (analysis.wordCount < 50) return "INCOMPLETE";
-  if ((!evidencePattern.test(plainText) && !hasDisciplineEvidence && !analysis.hasStructuredEvidence) || hasWeakDisciplinePattern) return "MOSTLY_WRONG";
+  if (!hasSomeOperationalProof) return "MOSTLY_WRONG";
+  if (hasWeakDisciplinePattern) return "INCOMPLETE";
   return "NONE";
 }
 
