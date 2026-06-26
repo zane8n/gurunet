@@ -380,6 +380,35 @@ const responseOutlineChips = [
   "Recommendation",
 ];
 
+function responseStarterForChallenge(challenge: Challenge) {
+  const snapshotSections = challenge.disciplineSnapshot?.responseSections ?? [];
+  const expectedSections = challenge.expectedAnswerFormat
+    .split(/\n|;/)
+    .map((line) => line.replace(/^\s*(\d+\.|-|\*)\s*/, "").trim())
+    .filter((line) => line.length > 2 && line.length <= 64 && !line.includes(": "))
+    .slice(0, 10);
+  const sections = Array.from(
+    new Set(
+      (snapshotSections.length ? snapshotSections : expectedSections.length ? expectedSections : responseOutlineChips)
+        .map((section) => section.replace(/\.$/, "").trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 9);
+
+  const body = sections.map((section) => `## ${section}\n\n- `).join("\n\n");
+  const checklist = challenge.submissionRequirements
+    .slice(0, 6)
+    .map((item) => `- [ ] ${item}`)
+    .join("\n");
+
+  return `${body}
+
+## Submission checklist
+
+${checklist}
+`;
+}
+
 const trackOptions = [
   ["networking", "Networking"],
   ["linux_systems", "Linux / Systems"],
@@ -663,6 +692,14 @@ export function GurunetApp() {
     await apiRequest("/api/auth/logout", { method: "POST" });
     setDashboard(null);
   }
+
+  const openResponseEditor = useCallback(() => {
+    if (today && !todaySubmission && !draftBody.trim() && draftAttachments.length === 0) {
+      setDraftBody(responseStarterForChallenge(today));
+      setDraftSavedAt(new Date().toISOString());
+    }
+    setResponseOpen(true);
+  }, [draftAttachments.length, draftBody, today, todaySubmission]);
 
   async function submitAnswer() {
     if (!today || !hasDraft) return;
@@ -979,7 +1016,7 @@ export function GurunetApp() {
               title: todaySubmission ? "View submitted response" : hasDraft ? "Continue response" : "Respond to challenge",
               description: "Open the response editor and evidence workspace.",
               shortcut: "R",
-              action: () => setResponseOpen(true),
+              action: openResponseEditor,
             },
             {
               id: "examiner",
@@ -1039,7 +1076,7 @@ export function GurunetApp() {
             },
           ]
         : [],
-    [dashboard, hasDraft, today, todaySubmission, user],
+    [dashboard, hasDraft, openResponseEditor, today, todaySubmission, user],
   );
 
   if (!bootstrapped) {
@@ -1200,7 +1237,7 @@ export function GurunetApp() {
         onFocus={() => setFocusOpen(true)}
         onGrade={gradeSubmission}
         onJoinCohort={joinCohort}
-        onOpenResponse={() => setResponseOpen(true)}
+        onOpenResponse={openResponseEditor}
         onRedeem={redeem}
         onSample={loadSampleAnswer}
         onSaveProfile={saveStudyProfile}
@@ -1237,7 +1274,7 @@ export function GurunetApp() {
         grade={todayGrade}
         onExaminer={openExaminer}
         onOpenChange={setFocusOpen}
-        onRespond={() => setResponseOpen(true)}
+        onRespond={openResponseEditor}
       />
       <ExaminerChatModal
         busy={busy}
@@ -1405,12 +1442,7 @@ function DashboardWorkspace({
           />
           <div className="grid content-start gap-4">
             {grade ? (
-              <GradeSummary
-                challenge={dashboard.today}
-                grade={grade}
-                plain
-                submission={submission}
-              />
+              <GradeSummary grade={grade} plain />
             ) : (
               <AstroCard title="Score unlock">
                 <EmptyState
@@ -1431,6 +1463,11 @@ function DashboardWorkspace({
         text="The key training signals are grouped as a simple reading section: trend, distribution, streak behavior, and recent history."
       >
         <div className="grid gap-4 lg:grid-cols-3">
+          {grade && (
+            <AstroCard title="Axis performance" className="lg:col-span-2">
+              <AxisPerformancePrism grade={grade} />
+            </AstroCard>
+          )}
           <AstroCard title="PIS trend" className="lg:col-span-2">
             <PisTrendChart currentPis={user.pisScore} rows={dashboard.progress} />
           </AstroCard>
@@ -1792,6 +1829,7 @@ function ChallengeWidget({
 
       <SubmissionControl
         busy={busy}
+        challenge={challenge}
         draftSavedAt={draftSavedAt}
         hasDraft={hasDraft}
         onFocus={onFocus}
@@ -2724,28 +2762,105 @@ function PisTrendChart({ currentPis, rows }: { currentPis: number; rows: Progres
 
 function ChallengeAccordions({ challenge }: { challenge: Challenge }) {
   return (
-    <div className="grid gap-2 py-5">
-      <AccordionPanel title="Constraints" defaultOpen>
-        <List items={challenge.constraints} />
-      </AccordionPanel>
-      <AccordionPanel title="Allowed tools">
-        <List items={challenge.allowedTools} />
-      </AccordionPanel>
-      <AccordionPanel title="Expected answer">
-        <PacketText compact text={challenge.expectedAnswerFormat} />
-      </AccordionPanel>
-      <AccordionPanel title="Rubric lens">
-        <ChallengeRubricLens challenge={challenge} />
-      </AccordionPanel>
-      <AccordionPanel title="Anti-generic check">
-        <p className="text-sm leading-6 text-slate-600">
-          {challenge.antiGenericRequirement}
-        </p>
-      </AccordionPanel>
-      <AccordionPanel title="Submission requirements">
-        <List items={challenge.submissionRequirements} />
-      </AccordionPanel>
+    <div className="grid gap-3 py-5">
+      <div className="grid gap-3 lg:grid-cols-3">
+        <ChallengeScanCard
+          icon={<ShieldCheck size={16} />}
+          tone="red"
+          title="Do not break"
+          items={challenge.constraints}
+        />
+        <ChallengeScanCard
+          icon={<Code2 size={16} />}
+          tone="cyan"
+          title="Allowed tools"
+          items={challenge.allowedTools}
+        />
+        <ChallengeScanCard
+          icon={<CheckCircle2 size={16} />}
+          tone="slate"
+          title="Submit these"
+          items={challenge.submissionRequirements}
+        />
+      </div>
+
+      <details className="group rounded-md border border-slate-200 bg-white/55">
+        <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-semibold text-slate-900 marker:hidden">
+          Full answer format, rubric, and anti-generic check
+          <ChevronRight
+            size={16}
+            className="text-cyan-700 transition-transform group-open:rotate-90"
+          />
+        </summary>
+        <div className="grid gap-3 border-t border-slate-200 p-4">
+          <div className="rounded-md bg-white/70 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Expected answer
+            </p>
+            <PacketText compact text={challenge.expectedAnswerFormat} />
+          </div>
+          <ChallengeRubricLens challenge={challenge} compact />
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
+              Anti-generic check
+            </p>
+            <p className="mt-1 text-sm leading-6 text-amber-900">
+              {challenge.antiGenericRequirement}
+            </p>
+          </div>
+        </div>
+      </details>
     </div>
+  );
+}
+
+function ChallengeScanCard({
+  icon,
+  items,
+  title,
+  tone,
+}: {
+  icon: ReactNode;
+  items: string[];
+  title: string;
+  tone: "cyan" | "red" | "slate";
+}) {
+  const colors =
+    tone === "red"
+      ? "border-red-200 bg-red-50 text-red-900"
+      : tone === "cyan"
+        ? "border-cyan-700/15 bg-cyan-50 text-cyan-950"
+        : "border-slate-200 bg-white/70 text-slate-800";
+  const iconColors =
+    tone === "red"
+      ? "bg-red-100 text-red-800"
+      : tone === "cyan"
+        ? "bg-cyan-100 text-cyan-800"
+        : "bg-slate-100 text-slate-700";
+
+  return (
+    <section className={`rounded-md border p-3 ${colors}`}>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className={`grid size-8 place-items-center rounded-full ${iconColors}`}>{icon}</span>
+          <h3 className="text-sm font-semibold">{title}</h3>
+        </div>
+        <span className="rounded-full bg-white/70 px-2 py-0.5 font-mono text-[11px] font-semibold">
+          {items.length}
+        </span>
+      </div>
+      <div className="grid gap-2">
+        {items.slice(0, 4).map((item) => (
+          <div key={item} className="flex gap-2 text-sm leading-5">
+            <CheckCircle2 size={14} className="mt-0.5 shrink-0 opacity-75" />
+            <span>{item}</span>
+          </div>
+        ))}
+        {items.length > 4 && (
+          <p className="text-xs font-semibold opacity-70">+{items.length - 4} more in full details</p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -2919,6 +3034,7 @@ function PlainSection({
 
 function SubmissionControl({
   busy,
+  challenge,
   draftSavedAt,
   hasDraft,
   onFocus,
@@ -2935,6 +3051,7 @@ function SubmissionControl({
   onExaminer,
 }: {
   busy: boolean;
+  challenge: Challenge;
   draftSavedAt: string;
   hasDraft: boolean;
   onFocus: () => void;
@@ -2966,6 +3083,7 @@ function SubmissionControl({
 
       {submission ? (
         <SubmittedPanel
+          challenge={challenge}
           submission={submission}
           grade={grade}
           verification={verification}
@@ -3537,15 +3655,12 @@ function ResponseEditorModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="max-h-[92vh] overflow-y-auto sm:max-w-5xl"
-        onPointerDownOutside={(event) => event.preventDefault()}
-      >
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-6xl">
         <DialogHeader>
           <DialogTitle>Challenge response</DialogTitle>
         </DialogHeader>
 
-        <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(18rem,0.9fr)]">
+        <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(19rem,0.8fr)]">
           <div className="grid min-h-0 gap-3">
             <div className="flex flex-wrap items-center gap-2">
               {responseTemplates.map((template) => (
@@ -3620,8 +3735,9 @@ function ResponseEditorModal({
           </div>
 
           <div className="grid min-h-0 gap-3">
+            <ChallengeEditorReference challenge={challenge} />
             <ResponseReadinessPanel readiness={readiness} />
-            <div className="max-h-[22rem] overflow-auto rounded-md border border-slate-200 bg-white/70 p-4">
+            <div className="max-h-[16rem] overflow-auto rounded-md border border-slate-200 bg-white/70 p-4">
               <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                 Preview
               </p>
@@ -3649,7 +3765,7 @@ function ResponseEditorModal({
               onClick={() => onOpenChange(false)}
               className="h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700"
             >
-              Close
+              Close draft
             </button>
             <button
               type="button"
@@ -3748,6 +3864,77 @@ function responseReadiness(
   return { checks, score, next };
 }
 
+function ChallengeEditorReference({ challenge }: { challenge: Challenge }) {
+  return (
+    <aside className="rounded-md border border-slate-200 bg-white/70 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Prompt reference
+          </p>
+          <h3 className="mt-1 text-sm font-semibold leading-6 text-slate-950">
+            {challenge.title}
+          </h3>
+        </div>
+        <span className="rounded-full bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-800">
+          {challenge.difficulty}
+        </span>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-slate-600">{challenge.objective}</p>
+      <div className="mt-3 grid gap-2">
+        <CompactSignal icon={<ShieldCheck size={14} />} label="Constraints" value={challenge.constraints.length} />
+        <CompactSignal icon={<Code2 size={14} />} label="Tools" value={challenge.allowedTools.length} />
+        <CompactSignal icon={<CheckCircle2 size={14} />} label="Required" value={challenge.submissionRequirements.length} />
+      </div>
+      <details className="mt-3 rounded-md border border-slate-200 bg-slate-50">
+        <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold text-slate-700 marker:hidden">
+          View essentials
+        </summary>
+        <div className="grid gap-3 border-t border-slate-200 p-3">
+          <MiniChecklist title="Do not" items={challenge.constraints.slice(0, 4)} />
+          <MiniChecklist title="Submit" items={challenge.submissionRequirements.slice(0, 4)} />
+        </div>
+      </details>
+    </aside>
+  );
+}
+
+function CompactSignal({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm">
+      <span className="flex items-center gap-2 text-slate-600">
+        <span className="text-cyan-700">{icon}</span>
+        {label}
+      </span>
+      <span className="font-mono text-xs font-semibold text-slate-900">{value}</span>
+    </div>
+  );
+}
+
+function MiniChecklist({ items, title }: { items: string[]; title: string }) {
+  return (
+    <div>
+      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{title}</p>
+      <div className="grid gap-1">
+        {items.map((item) => (
+          <p key={item} className="flex gap-2 text-xs leading-5 text-slate-600">
+            <CheckCircle2 size={12} className="mt-1 shrink-0 text-cyan-700" />
+            <span>{item}</span>
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ResponseReadinessPanel({
   readiness,
 }: {
@@ -3820,6 +4007,7 @@ function EditorButton({
 }
 
 function SubmittedPanel({
+  challenge,
   submission,
   grade,
   verification,
@@ -3828,6 +4016,7 @@ function SubmittedPanel({
   onGrade,
   busy,
 }: {
+  challenge: Challenge;
   submission: Submission;
   grade: Grade | null;
   verification: string;
@@ -3838,7 +4027,11 @@ function SubmittedPanel({
 }) {
   return (
     <div className="grid gap-4">
-      <SubmissionViewer content={submission.content} />
+      {grade ? (
+        <TeacherMarkedResponse challenge={challenge} grade={grade} submission={submission} />
+      ) : (
+        <SubmissionViewer content={submission.content} />
+      )}
       {submission.requiresVerification && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
           <p className="text-sm font-semibold text-amber-900">
@@ -4010,55 +4203,12 @@ function RichSubmissionBody({ body }: { body: string }) {
   return <div className="grid gap-2">{nodes}</div>;
 }
 
-function GradeSummary({
-  challenge,
-  grade,
-  plain = false,
-  submission,
-}: {
-  challenge: Challenge;
-  grade: Grade;
-  plain?: boolean;
-  submission: Submission | null;
-}) {
+function GradeSummary({ grade, plain = false }: { grade: Grade; plain?: boolean }) {
   const content = (
       <div className="grid gap-4">
         <GradeScoreStrip grade={grade} />
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.78fr)]">
-          <AxisPerformancePrism grade={grade} />
-          <ScoreMathPanel grade={grade} />
-        </div>
-
-        <div className="rounded-md border border-slate-200 bg-white/65 p-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-            Examiner correction
-          </p>
-          <CorrectionText text={grade.correction} />
-          {grade.contentionNotes.length > 0 && (
-            <div className="mt-3 grid gap-2">
-              {grade.contentionNotes.map((note) => (
-                <p
-                  key={note}
-                  className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-900"
-                >
-                  {note}
-                </p>
-              ))}
-            </div>
-          )}
-        </div>
-        {submission && <TeacherMarkedResponse challenge={challenge} grade={grade} submission={submission} />}
-        {grade.rubricSnapshot && (
-          <div className="rounded-md border border-slate-200 bg-white/65 p-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Rubric used
-            </p>
-            <div className="mt-2">
-              <RubricGrid rubric={grade.rubricSnapshot} compact />
-            </div>
-          </div>
-        )}
+        <ScoreMathPanel grade={grade} />
         <p className="rounded-md bg-cyan-50 px-3 py-2 text-sm font-semibold leading-6 text-cyan-900">
           Next target: {grade.nextImprovementTarget}
         </p>
@@ -4248,38 +4398,6 @@ function MathRow({
   );
 }
 
-function CorrectionText({ text }: { text: string }) {
-  const sections = text
-    .split(/\n{2,}/)
-    .map((section) => section.trim())
-    .filter(Boolean);
-
-  if (sections.length <= 1) {
-    return <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{text}</p>;
-  }
-
-  return (
-    <div className="mt-2 grid gap-2">
-      {sections.map((section) => {
-        const [first, ...rest] = section.split(/\n/);
-        const looksLikeHeading = rest.length > 0 && first.length <= 80 && !/[.!?]$/.test(first);
-        return (
-          <div key={section} className="rounded-md bg-white/65 p-3">
-            {looksLikeHeading ? (
-              <>
-                <p className="text-sm font-semibold text-slate-950">{first.replace(/^#+\s*/, "")}</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-600">{rest.join("\n")}</p>
-              </>
-            ) : (
-              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">{section}</p>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function TeacherMarkedResponse({
   challenge,
   grade,
@@ -4301,7 +4419,7 @@ function TeacherMarkedResponse({
             Teacher-marked response
           </p>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Your answer is shown with examiner-style margin notes. Future AI critiques can add more exact false/correct callouts.
+            Examiner marks are attached directly to your submitted answer.
           </p>
         </div>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
@@ -4316,7 +4434,8 @@ function TeacherMarkedResponse({
             className={`rounded-md border-l-4 bg-white p-3 ${markStyle(mark.kind).border}`}
           >
             <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${markStyle(mark.kind).pill}`}>
+              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${markStyle(mark.kind).pill}`}>
+                {markIcon(mark.kind)}
                 {mark.label}
               </span>
               <span className="text-xs text-slate-500">{mark.note}</span>
@@ -4430,6 +4549,13 @@ function markStyle(kind: MarkKind) {
   if (kind === "vague") return { border: "border-l-amber-600", pill: "bg-amber-50 text-amber-900" };
   if (kind === "correct") return { border: "border-l-emerald-700", pill: "bg-emerald-50 text-emerald-900" };
   return { border: "border-l-slate-300", pill: "bg-slate-100 text-slate-700" };
+}
+
+function markIcon(kind: MarkKind) {
+  if (kind === "evidence" || kind === "correct") return <CheckCircle2 size={12} />;
+  if (kind === "risk") return <ShieldCheck size={12} />;
+  if (kind === "vague") return <Pencil size={12} />;
+  return <FileText size={12} />;
 }
 
 const gradeAxisKeys = ["creativity", "ingenuity", "reporting", "alienness", "neatness"] as const;
