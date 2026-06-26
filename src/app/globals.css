@@ -6,6 +6,12 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --palette-accent: #1f6f43;
+  --palette-accent-soft: rgba(230, 242, 223, 0.78);
+  --palette-accent-strong: #174d32;
+  --palette-accent-border: rgba(31, 111, 67, 0.2);
+  --palette-ring: rgba(31, 111, 67, 0.32);
+  --palette-surface-tint: rgba(230, 242, 223, 0.3);
   --font-app-sans: "Fira Sans", Inter, Aptos, "Segoe UI", Arial,
     ui-sans-serif, system-ui, sans-serif;
   --font-app-mono: "Fira Code", "JetBrains Mono", "SFMono-Regular",
@@ -42,6 +48,69 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+}
+
+:root[data-palette="nord"] {
+  --palette-accent: #5e81ac;
+  --palette-accent-soft: rgba(229, 237, 245, 0.86);
+  --palette-accent-strong: #3b5f8a;
+  --palette-accent-border: rgba(94, 129, 172, 0.24);
+  --palette-ring: rgba(94, 129, 172, 0.34);
+  --palette-surface-tint: rgba(229, 237, 245, 0.34);
+}
+
+:root[data-palette="solarized"] {
+  --palette-accent: #268bd2;
+  --palette-accent-soft: rgba(238, 232, 213, 0.82);
+  --palette-accent-strong: #0b669f;
+  --palette-accent-border: rgba(38, 139, 210, 0.24);
+  --palette-ring: rgba(38, 139, 210, 0.32);
+  --palette-surface-tint: rgba(238, 232, 213, 0.34);
+}
+
+:root[data-palette="gruvbox"] {
+  --palette-accent: #b57614;
+  --palette-accent-soft: rgba(243, 234, 219, 0.82);
+  --palette-accent-strong: #7c4f0b;
+  --palette-accent-border: rgba(181, 118, 20, 0.24);
+  --palette-ring: rgba(181, 118, 20, 0.32);
+  --palette-surface-tint: rgba(243, 234, 219, 0.34);
+}
+
+:root[data-palette="dracula"] {
+  --palette-accent: #7c5bbf;
+  --palette-accent-soft: rgba(241, 234, 253, 0.84);
+  --palette-accent-strong: #5b3f92;
+  --palette-accent-border: rgba(124, 91, 191, 0.24);
+  --palette-ring: rgba(124, 91, 191, 0.32);
+  --palette-surface-tint: rgba(241, 234, 253, 0.32);
+}
+
+:root[data-palette="tokyo"] {
+  --palette-accent: #3d68c7;
+  --palette-accent-soft: rgba(232, 239, 255, 0.84);
+  --palette-accent-strong: #29498f;
+  --palette-accent-border: rgba(61, 104, 199, 0.24);
+  --palette-ring: rgba(61, 104, 199, 0.32);
+  --palette-surface-tint: rgba(232, 239, 255, 0.34);
+}
+
+:root[data-palette="catppuccin"] {
+  --palette-accent: #b42346;
+  --palette-accent-soft: rgba(244, 232, 234, 0.86);
+  --palette-accent-strong: #861733;
+  --palette-accent-border: rgba(180, 35, 70, 0.22);
+  --palette-ring: rgba(180, 35, 70, 0.3);
+  --palette-surface-tint: rgba(244, 232, 234, 0.34);
+}
+
+:root[data-palette="mono"] {
+  --palette-accent: #171717;
+  --palette-accent-soft: rgba(244, 244, 245, 0.9);
+  --palette-accent-strong: #000000;
+  --palette-accent-border: rgba(23, 23, 23, 0.18);
+  --palette-ring: rgba(23, 23, 23, 0.28);
+  --palette-surface-tint: rgba(244, 244, 245, 0.42);
 }
 
 @theme inline {
@@ -162,7 +231,7 @@
     overflow-x: clip;
     background:
       radial-gradient(circle at 12% 8%, rgba(255, 255, 255, 0.95), transparent 24rem),
-      radial-gradient(circle at 86% 12%, rgba(224, 242, 254, 0.28), transparent 30rem),
+      radial-gradient(circle at 86% 12%, var(--palette-surface-tint), transparent 30rem),
       linear-gradient(180deg, #ffffff 0%, #f8fafc 44%, #f6f7fb 100%);
   }
 
@@ -193,7 +262,7 @@
   .app-background::after {
     background:
       linear-gradient(112deg, transparent 0%, transparent 38%, rgba(255, 255, 255, 0.62) 48%, rgba(59, 130, 246, 0.04) 52%, transparent 66%, transparent 100%),
-      radial-gradient(ellipse at 26% 74%, rgba(15, 118, 110, 0.045), transparent 28rem),
+      radial-gradient(ellipse at 26% 74%, var(--palette-surface-tint), transparent 28rem),
       radial-gradient(ellipse at 78% 28%, rgba(15, 23, 42, 0.045), transparent 30rem);
     opacity: 0.34;
     filter: blur(12px) saturate(0.95);
@@ -297,7 +366,7 @@
   }
 
   .astrowind-kicker {
-    color: #0f766e;
+    color: var(--palette-accent);
     font-size: 0.78rem;
     font-weight: 600;
     letter-spacing: 0.16em;
@@ -316,28 +385,25 @@
 
   .nav-link {
     position: relative;
+    border-radius: 999px;
+    padding: 0.45rem 0.8rem;
+    transition:
+      background-color 180ms ease,
+      color 180ms ease;
   }
 
   .nav-link::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: -4px;
-    height: 1px;
-    transform: scaleX(0);
-    transform-origin: center;
-    border-radius: 999px;
-    background: linear-gradient(90deg, transparent, rgba(15, 23, 42, 0.72), transparent);
-    opacity: 0;
-    transition:
-      transform 240ms ease,
-      opacity 240ms ease;
+    content: none;
   }
 
   .nav-link:hover::after {
-    transform: scaleX(1);
-    opacity: 1;
+    transform: none;
+    opacity: 0;
+  }
+
+  .nav-link:hover {
+    background-color: var(--palette-accent-soft);
+    color: var(--palette-accent);
   }
 
   .font-semibold {
@@ -352,40 +418,40 @@
   a.interactive-lift:hover,
   [role="button"].interactive-lift:hover {
     transform: translateY(-1px);
-    border-color: rgba(28, 99, 54, 0.32);
+    border-color: var(--palette-ring);
     box-shadow: 0 14px 32px rgba(87, 83, 78, 0.09);
   }
 
   .app-background :is(.text-cyan-700, .text-cyan-800, .text-cyan-900, .text-cyan-950) {
-    color: #1f6f43 !important;
+    color: var(--palette-accent) !important;
   }
 
   .app-background :is(.bg-cyan-50, .bg-cyan-100) {
-    background-color: rgba(230, 242, 223, 0.78) !important;
+    background-color: var(--palette-accent-soft) !important;
   }
 
   .app-background .bg-cyan-700 {
-    background-color: #1f6f43 !important;
+    background-color: var(--palette-accent) !important;
   }
 
   .app-background :is(.border-cyan-200, .border-cyan-300) {
-    border-color: rgba(31, 111, 67, 0.22) !important;
+    border-color: var(--palette-accent-border) !important;
   }
 
   .app-background [class*="border-cyan-"] {
-    border-color: rgba(31, 111, 67, 0.2) !important;
+    border-color: var(--palette-accent-border) !important;
   }
 
   .app-background :is(.ring-cyan-500, .ring-cyan-700) {
-    --tw-ring-color: rgba(31, 111, 67, 0.32) !important;
+    --tw-ring-color: var(--palette-ring) !important;
   }
 
   .app-background :is(.focus\:border-cyan-700:focus) {
-    border-color: #1f6f43 !important;
+    border-color: var(--palette-accent) !important;
   }
 
   .app-background :is(.focus\:ring-cyan-700\/15:focus) {
-    --tw-ring-color: rgba(31, 111, 67, 0.15) !important;
+    --tw-ring-color: var(--palette-ring) !important;
   }
 
   .soft-enter {

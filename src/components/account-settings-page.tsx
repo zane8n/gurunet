@@ -4,8 +4,14 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { ChevronLeft, Download, Loader2, UserRound } from "lucide-react";
+import { CheckCircle2, ChevronLeft, Download, Loader2, Palette, UserRound } from "lucide-react";
 import type { User } from "@/lib/domain";
+import {
+  initialPalette,
+  paletteStorageKey,
+  themePalettes,
+  type ThemePaletteId,
+} from "@/lib/theme-palettes";
 
 type SafeUser = Omit<User, "passwordHash">;
 
@@ -38,8 +44,19 @@ export function AccountSettingsPage() {
   const [newPassword, setNewPassword] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [palette, setPalette] = useState<ThemePaletteId>(() => initialPalette());
   const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    try {
+      document.documentElement.classList.toggle("dark", localStorage.getItem("gurunet.theme.v1") === "dark");
+      document.documentElement.dataset.palette = palette;
+      localStorage.setItem(paletteStorageKey, palette);
+    } catch {
+      document.documentElement.dataset.palette = palette;
+    }
+  }, [palette]);
 
   useEffect(() => {
     async function load() {
@@ -225,6 +242,51 @@ export function AccountSettingsPage() {
                   {busy ? <Loader2 className="inline animate-spin" size={15} /> : "Save details"}
                 </button>
               </form>
+            </section>
+
+            <section className="rounded-md border border-slate-200 bg-white/72 p-5">
+              <div className="flex items-center gap-2">
+                <Palette size={17} className="text-cyan-700" />
+                <p className="text-sm font-semibold text-slate-950">Color palette</p>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Choose a preset visual tone. Manual colors stay locked so the platform remains consistent.
+              </p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {themePalettes.map((item) => {
+                  const selected = palette === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setPalette(item.id);
+                        setMessage(`${item.label} palette applied.`);
+                      }}
+                      className={`grid gap-3 rounded-md border p-3 text-left transition-colors ${
+                        selected
+                          ? "border-cyan-700/35 bg-cyan-50"
+                          : "border-slate-200 bg-white/70 hover:border-slate-300"
+                      }`}
+                    >
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold text-slate-950">{item.label}</span>
+                        {selected && <CheckCircle2 size={15} className="text-cyan-700" />}
+                      </span>
+                      <span className="text-xs leading-5 text-slate-500">{item.description}</span>
+                      <span className="flex gap-1.5">
+                        {item.swatches.map((swatch) => (
+                          <span
+                            key={swatch}
+                            className="size-5 rounded-full border border-slate-200"
+                            style={{ backgroundColor: swatch }}
+                          />
+                        ))}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </section>
 
             <section className="rounded-md border border-slate-200 bg-white/72 p-5">

@@ -51,6 +51,7 @@ import {
   parseSubmissionContent,
   type SubmissionAttachment,
 } from "@/lib/submission-content";
+import { initialPalette, paletteStorageKey, type ThemePaletteId } from "@/lib/theme-palettes";
 import {
   Dialog,
   DialogContent,
@@ -449,6 +450,7 @@ export function GurunetApp() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [focusOpen, setFocusOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(() => initialTheme());
+  const [palette] = useState<ThemePaletteId>(() => initialPalette());
   const [responseOpen, setResponseOpen] = useState(false);
   const [examinerOpen, setExaminerOpen] = useState(false);
   const [examinerMessages, setExaminerMessages] = useState<ExaminerMessage[]>([]);
@@ -469,6 +471,11 @@ export function GurunetApp() {
     document.documentElement.classList.toggle("dark", theme === "dark");
     localStorage.setItem(themeStorageKey, theme);
   }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.dataset.palette = palette;
+    localStorage.setItem(paletteStorageKey, palette);
+  }, [palette]);
 
   useEffect(() => {
     async function bootstrap() {
@@ -2520,8 +2527,8 @@ function AppHeader({
   theme?: ThemeMode;
 }) {
   return (
-    <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/80 backdrop-blur-xl">
-      <div className="mx-auto flex w-full max-w-[1180px] items-center justify-between px-4 py-3 sm:px-6">
+    <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/78 backdrop-blur-xl">
+      <div className="mx-auto flex w-full max-w-[1180px] items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <div className="flex items-center gap-3">
           <Image
             src="/gurunet.svg"
@@ -2539,8 +2546,8 @@ function AppHeader({
           </div>
         </div>
         {user && (
-          <div className="flex items-center gap-3">
-            <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 lg:flex">
+          <div className="flex min-w-0 items-center gap-3">
+            <nav className="hidden rounded-full border border-slate-200 bg-white/65 p-1 text-sm font-medium text-slate-600 lg:flex">
               <button type="button" onClick={() => scrollToSection("daily-challenge")} className="nav-link">
                 Today
               </button>
@@ -2554,54 +2561,80 @@ function AppHeader({
                 Network
               </button>
             </nav>
-            <button
-              onClick={onCommand}
-              className="grid size-10 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-              aria-label="Open command palette"
-              type="button"
-            >
-              <Command size={15} />
-            </button>
-            <button
-              onClick={onExport}
-              className="grid size-10 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-              aria-label="Export learning record"
-              type="button"
-            >
-              <Download size={15} />
-            </button>
-            <button
-              onClick={onThemeToggle}
-              className="grid size-10 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-              type="button"
-            >
-              {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-            </button>
-            <button
-              onClick={onLogout}
-              className="grid size-10 place-items-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-              aria-label="Logout"
-            >
-              <LogOut size={17} />
-            </button>
+            <div className="hidden items-center rounded-full border border-slate-200 bg-white/65 p-1 sm:flex">
+              <HeaderIconButton label="Open command palette" onClick={onCommand}>
+                <Command size={15} />
+              </HeaderIconButton>
+              <HeaderIconButton label="Export learning record" onClick={onExport}>
+                <Download size={15} />
+              </HeaderIconButton>
+              <HeaderIconButton
+                label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+                onClick={onThemeToggle}
+              >
+                {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+              </HeaderIconButton>
+              <HeaderIconButton label="Logout" onClick={onLogout}>
+                <LogOut size={16} />
+              </HeaderIconButton>
+            </div>
             <button
               onClick={onAccount}
-              className="group flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-1 text-slate-700 transition hover:border-cyan-700/25 hover:bg-cyan-50/50 sm:pr-3"
+              className="group flex h-10 shrink-0 items-center gap-2 rounded-full border border-slate-200 bg-slate-950 py-1 pl-1 pr-1 text-white transition hover:border-cyan-700/25 hover:bg-cyan-800 sm:pr-3"
               aria-label="Account settings"
               type="button"
             >
-              <span className="grid size-8 place-items-center rounded-full bg-slate-950 text-xs font-semibold uppercase text-white shadow-sm transition group-hover:bg-cyan-800">
+              <span className="grid size-8 place-items-center rounded-full bg-white text-xs font-semibold uppercase text-slate-950 shadow-sm">
                 {user.name?.trim()?.[0] ?? <UserRound size={15} />}
               </span>
-              <span className="hidden max-w-32 truncate text-sm font-medium text-stone-700 sm:inline">
+              <span className="hidden max-w-32 truncate text-sm font-medium sm:inline">
                 {user.name}
               </span>
             </button>
           </div>
         )}
       </div>
+      {user && (
+        <nav className="mx-auto flex w-full max-w-[1180px] gap-2 overflow-x-auto px-4 pb-3 text-xs font-semibold text-slate-600 sm:px-6 lg:hidden">
+          {[
+            ["Today", "daily-challenge"],
+            ["Metrics", "metrics"],
+            ["Learning", "learning"],
+            ["Network", "social"],
+          ].map(([label, id]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => scrollToSection(id)}
+              className="rounded-full border border-slate-200 bg-white/72 px-3 py-1.5"
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      )}
     </header>
+  );
+}
+
+function HeaderIconButton({
+  children,
+  label,
+  onClick,
+}: {
+  children: ReactNode;
+  label: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="grid size-8 place-items-center rounded-full text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+      aria-label={label}
+      type="button"
+    >
+      {children}
+    </button>
   );
 }
 
