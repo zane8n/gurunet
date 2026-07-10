@@ -14,6 +14,12 @@ export const themePalettes = [
     swatches: ["#5e81ac", "#e5edf5", "#2e3440"],
   },
   {
+    id: "cobalt",
+    label: "Cobalt",
+    description: "Clear professional blue with cool paper neutrals.",
+    swatches: ["#315fa8", "#eaf0f8", "#17243a"],
+  },
+  {
     id: "solarized",
     label: "Solarized",
     description: "Classic low-glare blue and amber.",
@@ -42,6 +48,12 @@ export const themePalettes = [
     label: "Catppuccin",
     description: "Muted rose and latte neutrals.",
     swatches: ["#d20f39", "#f4e8ea", "#4c4f69"],
+  },
+  {
+    id: "oxide",
+    label: "Oxide",
+    description: "Mature mineral red with restrained warmth.",
+    swatches: ["#a64935", "#f7ebe7", "#30221f"],
   },
   {
     id: "mono",

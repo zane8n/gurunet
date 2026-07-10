@@ -1459,7 +1459,14 @@ function DashboardWorkspace({
                 />
               </AstroCard>
             )}
-            <RewardPanel busy={busy} onRedeem={onRedeem} plain />
+            <DailyMomentumPanel
+              activeDiscipline={dashboard.activeDiscipline.label}
+              busy={busy}
+              grade={grade}
+              nextUnlock={nextUnlock}
+              onRedeem={onRedeem}
+              user={user}
+            />
           </div>
         </div>
       </AstroSection>
@@ -3319,7 +3326,7 @@ function ChallengeFocusModal({
           <DialogTitle>Challenge focus mode</DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(19rem,0.85fr)]">
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
           <article className="rounded-md border border-slate-200 bg-white/75 p-5">
             <div className="flex flex-wrap items-center gap-2">
               <StatusPill status={challenge.status} />
@@ -3345,7 +3352,7 @@ function ChallengeFocusModal({
             </div>
           </article>
 
-          <aside className="grid content-start gap-3">
+          <aside className="grid h-fit content-start gap-3 self-start">
             <div className="rounded-md border border-slate-200 bg-white/70 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                 Work state
@@ -3696,7 +3703,7 @@ function ResponseEditorModal({
           <DialogTitle>Challenge response</DialogTitle>
         </DialogHeader>
 
-        <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(19rem,0.8fr)]">
+        <div className="grid min-h-0 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
           <div className="grid min-h-0 gap-3">
             <div className="flex flex-wrap items-center gap-2">
               {responseTemplates.map((template) => (
@@ -3770,19 +3777,24 @@ function ResponseEditorModal({
             />
           </div>
 
-          <div className="grid min-h-0 gap-3">
+          <div className="grid h-fit min-h-0 content-start gap-3 self-start">
             <ChallengeEditorReference challenge={challenge} />
             <ResponseReadinessPanel readiness={readiness} />
-            <div className="max-h-[16rem] overflow-auto rounded-md border border-slate-200 bg-white/70 p-4">
-              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            <details className="group rounded-md border border-slate-200 bg-white/70">
+              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600 marker:hidden">
                 Preview
-              </p>
-              <RichSubmissionBody body={body || "Draft preview appears here."} />
-            </div>
-            <AttachmentList
-              attachments={attachments}
-              onRemove={onRemoveAttachment}
-            />
+                <ChevronRight size={14} className="transition-transform group-open:rotate-90" />
+              </summary>
+              <div className="max-h-[16rem] overflow-auto border-t border-slate-200 p-3">
+                <RichSubmissionBody body={body || "Draft preview appears here."} />
+              </div>
+            </details>
+            {attachments.length > 0 && (
+              <AttachmentList
+                attachments={attachments}
+                onRemove={onRemoveAttachment}
+              />
+            )}
           </div>
         </div>
 
@@ -3902,7 +3914,7 @@ function responseReadiness(
 
 function ChallengeEditorReference({ challenge }: { challenge: Challenge }) {
   return (
-    <aside className="rounded-md border border-slate-200 bg-white/70 p-4">
+    <aside className="rounded-md border border-slate-200 bg-white/70 p-3">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -3916,8 +3928,8 @@ function ChallengeEditorReference({ challenge }: { challenge: Challenge }) {
           {challenge.difficulty}
         </span>
       </div>
-      <p className="mt-3 text-sm leading-6 text-slate-600">{challenge.objective}</p>
-      <div className="mt-3 grid gap-2">
+      <p className="mt-2 text-sm leading-5 text-slate-600">{challenge.objective}</p>
+      <div className="mt-3 grid grid-cols-3 divide-x divide-slate-200 rounded-md border border-slate-200 bg-slate-50/70">
         <CompactSignal icon={<ShieldCheck size={14} />} label="Constraints" value={challenge.constraints.length} />
         <CompactSignal icon={<Code2 size={14} />} label="Tools" value={challenge.allowedTools.length} />
         <CompactSignal icon={<CheckCircle2 size={14} />} label="Required" value={challenge.submissionRequirements.length} />
@@ -3945,12 +3957,10 @@ function CompactSignal({
   value: number;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm">
-      <span className="flex items-center gap-2 text-slate-600">
-        <span className="text-cyan-700">{icon}</span>
-        {label}
-      </span>
+    <div className="grid min-w-0 place-items-center gap-1 px-1.5 py-2 text-center">
+      <span className="text-cyan-700">{icon}</span>
       <span className="font-mono text-xs font-semibold text-slate-900">{value}</span>
+      <span className="max-w-full truncate text-[10px] text-slate-500">{label}</span>
     </div>
   );
 }
@@ -3976,6 +3986,7 @@ function ResponseReadinessPanel({
 }: {
   readiness: ReturnType<typeof responseReadiness>;
 }) {
+  const completed = readiness.checks.filter((check) => check.complete).length;
   const tone =
     readiness.score >= 80
       ? "text-cyan-800"
@@ -3984,38 +3995,43 @@ function ResponseReadinessPanel({
         : "text-slate-600";
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white/70 p-4">
-      <div className="mb-3 flex items-end justify-between gap-3">
+    <div className="rounded-md border border-slate-200 bg-white/70 p-3">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
             Submit readiness
           </p>
-          <p className={`text-2xl font-semibold ${tone}`}>{readiness.score}%</p>
+          <p className={`text-xl font-semibold ${tone}`}>{readiness.score}%</p>
         </div>
         <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
-          {readiness.checks.filter((check) => check.complete).length}/{readiness.checks.length}
+          {completed}/{readiness.checks.length}
         </span>
       </div>
-      <p className="mb-3 text-xs leading-5 text-slate-500">
-        This is a pre-flight guide, not a score prediction. {readiness.next}
-      </p>
-      <div className="h-2 rounded-full bg-slate-200">
+      <div className="mt-2 h-1 rounded-full bg-slate-200">
         <div
           className="h-full rounded-full bg-cyan-700"
           style={{ width: `${readiness.score}%` }}
         />
       </div>
-      <div className="mt-3 grid gap-2">
-        {readiness.checks.map((check) => (
-          <div key={check.label} className="flex items-start gap-2 text-sm text-slate-600">
-            <CheckCircle2
-              size={15}
-              className={`mt-0.5 shrink-0 ${check.complete ? "text-cyan-700" : "text-slate-300"}`}
-            />
-            <span>{check.label}</span>
-          </div>
-        ))}
-      </div>
+      <p className="mt-2 text-xs leading-5 text-slate-600">{readiness.next}</p>
+      <p className="mt-1 text-[10px] leading-4 text-slate-500">Guidance only, not a score prediction.</p>
+      <details className="group mt-2 border-t border-slate-200 pt-2">
+        <summary className="flex cursor-pointer list-none items-center justify-between text-xs font-semibold text-slate-600 marker:hidden">
+          Review readiness checks
+          <ChevronRight size={14} className="transition-transform group-open:rotate-90" />
+        </summary>
+        <div className="mt-2 grid gap-2">
+          {readiness.checks.map((check) => (
+            <div key={check.label} className="flex items-start gap-2 text-xs text-slate-600">
+              <CheckCircle2
+                size={14}
+                className={`mt-0.5 shrink-0 ${check.complete ? "text-cyan-700" : "text-slate-300"}`}
+              />
+              <span>{check.label}</span>
+            </div>
+          ))}
+        </div>
+      </details>
     </div>
   );
 }
@@ -4696,6 +4712,66 @@ function technicalCapLabel(cap: Grade["technicalCap"]) {
 
 function formatSigned(value: number) {
   return value > 0 ? `+${value}` : `${value}`;
+}
+
+function DailyMomentumPanel({
+  activeDiscipline,
+  busy,
+  grade,
+  nextUnlock,
+  onRedeem,
+  user,
+}: {
+  activeDiscipline: string;
+  busy: boolean;
+  grade: Grade | null;
+  nextUnlock: string;
+  onRedeem: (event: FormEvent<HTMLFormElement>) => void;
+  user: SafeUser;
+}) {
+  const nextFocus = grade
+    ? `${activeDiscipline}, adapted from today's correction`
+    : `${activeDiscipline} evidence and judgment`;
+  return (
+    <section className={`daily-momentum rounded-md border border-slate-200 bg-white/70 p-4 ${grade ? "daily-momentum-complete" : ""}`}>
+      <div className="flex items-start gap-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-cyan-50 text-cyan-800">
+          {grade ? <CheckCircle2 className="reward-confirm" size={19} /> : <CircleGauge size={19} />}
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-950">
+            {grade ? "Today is complete" : "Close today's loop"}
+          </p>
+          <p className="mt-1 text-sm leading-5 text-slate-600">
+            {grade
+              ? `${user.currentStreak}-day rhythm held. Your correction and next target are ready.`
+              : "Submit, review the correction, and bank the lesson before the next brief."}
+          </p>
+        </div>
+      </div>
+
+      <dl className="mt-4 grid gap-3 border-t border-slate-200 pt-3 text-sm">
+        <div className="grid grid-cols-[5.5rem_1fr] gap-3">
+          <dt className="text-slate-500">Next unlock</dt>
+          <dd className="text-right font-medium text-slate-800">{nextUnlock}</dd>
+        </div>
+        <div className="grid grid-cols-[5.5rem_1fr] gap-3">
+          <dt className="text-slate-500">Next focus</dt>
+          <dd className="text-right font-medium leading-5 text-slate-800">{nextFocus}</dd>
+        </div>
+      </dl>
+
+      <details className="group mt-3 border-t border-slate-200 pt-3">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-slate-700 marker:hidden">
+          Plan an ERT reward
+          <ChevronRight size={15} className="text-cyan-700 transition-transform group-open:rotate-90" />
+        </summary>
+        <div className="mt-3">
+          <RewardPanel busy={busy} onRedeem={onRedeem} plain />
+        </div>
+      </details>
+    </section>
+  );
 }
 
 function RewardPanel({

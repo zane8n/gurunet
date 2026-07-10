@@ -34,6 +34,8 @@ import {
 import {
   defaultDisciplineSnapshot,
   disciplineCatalog,
+  disciplineProfileFingerprint,
+  disciplineProfileKey,
   disciplineSnapshot,
   getDiscipline,
 } from "@/lib/disciplines";
@@ -304,10 +306,11 @@ export async function updateStudyProfile(
     track: mapped.primaryDiscipline as DisciplineId,
     durationMinutes: Math.max(15, Math.min(180, Math.round((mapped.weeklyTimeBudgetHours * 60) / 5))),
     difficultyFloor: mapped.targetDifficulty,
-    topicFocus: mapped.rankedTopics[0] ?? "",
+    topicFocus: "",
     recoveryMode: false,
     teamMode: false,
   });
+  await getOrCreateTodayChallenge(user);
   return {
     onboardingRequired: false,
     studyProfile: mapped,
@@ -425,7 +428,12 @@ export async function getOrCreateTodayChallenge(user: User) {
   const today = currentChallengeDateKey(currentUser, existingChallenges);
   const settings = await getChallengeSettings(currentUser);
   const profileState = await getStudyProfile(currentUser);
-  const discipline = profileState.activeDiscipline;
+  const discipline = challengeDisciplineSnapshot(
+    profileState.activeDiscipline,
+    settings,
+    currentUser.id,
+    today,
+  );
 
   const existing = await prisma.challenge.findFirst({
     where: { userId: user.id, dateKey: today },
@@ -437,14 +445,21 @@ export async function getOrCreateTodayChallenge(user: User) {
     const canRefreshForProfile =
       existing.submissions.length === 0 &&
       existing.grades.length === 0 &&
-      existingDomain.disciplineSnapshot?.id !== discipline.id;
+      disciplineProfileKey(existingDomain.disciplineSnapshot) !== disciplineProfileKey(discipline);
 
     if (canRefreshForProfile) {
+      const recentGrades = await prisma.grade.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: "desc" },
+        take: 3,
+        select: { nextImprovementTarget: true },
+      });
+      const recentWeaknesses = recentGrades.map((grade) => grade.nextImprovementTarget);
       const refreshed = createDailyChallenge(currentUser, {
         dateKey: today,
         recovery: existing.isRecovery,
         pressure: existing.isPressure,
-        recentWeaknesses: [],
+        recentWeaknesses,
         settings,
         discipline,
       });
@@ -465,16 +480,21 @@ export async function getOrCreateTodayChallenge(user: User) {
           disciplineSnapshot: discipline,
         },
       });
-      await enqueueAiJob("ChallengeGeneration", `challenge-profile:${user.id}:${today}:${discipline.id}`, {
-        userId: user.id,
-        challengeId: updated.id,
-        dateKey: today,
-        difficulty: difficultyForPis(currentUser.pisScore),
-        track: discipline.id,
-        topicFocus: settings.topicFocus,
-        durationMinutes: settings.durationMinutes,
-        disciplineSnapshot: discipline,
-      });
+      await enqueueAiJob(
+        "ChallengeGeneration",
+        `challenge-profile:${user.id}:${today}:${disciplineProfileFingerprint(discipline)}`,
+        {
+          userId: user.id,
+          challengeId: updated.id,
+          dateKey: today,
+          difficulty: difficultyForPis(currentUser.pisScore),
+          track: discipline.id,
+        topicFocus: discipline.generationContext?.topicFocus,
+          durationMinutes: settings.durationMinutes,
+          disciplineSnapshot: discipline,
+          recentWeaknesses,
+        },
+      );
       return fromDbChallenge(updated);
     }
 
@@ -530,10 +550,11 @@ export async function getOrCreateTodayChallenge(user: User) {
     challengeId: created.id,
     dateKey: today,
     difficulty: difficultyForPis(currentUser.pisScore),
-    track: settings.track,
-    topicFocus: settings.topicFocus,
+    track: discipline.id,
+    topicFocus: discipline.generationContext?.topicFocus,
     durationMinutes: settings.durationMinutes,
     disciplineSnapshot: discipline,
+    recentWeaknesses: recentGrades.map((grade) => grade.nextImprovementTarget),
   });
 
   return fromDbChallenge(created);
@@ -1419,7 +1440,7 @@ function createDailyChallenge(
     discipline?: DisciplineSnapshot;
   },
 ) {
-  const discipline = options.discipline ?? defaultDisciplineSnapshot();
+  const discipline: DisciplineSnapshot = options.discipline ?? defaultDisciplineSnapshot();
   const challenge = createDisciplineFallbackChallenge(user, {
     ...options,
     discipline,
@@ -1427,14 +1448,14 @@ function createDailyChallenge(
   if (!options.settings && !options.discipline) return challenge;
   const preferredFormat = discipline.formats[0] ?? "Practical assessment";
   const isLab = /\blab|hands-on|practical|exercise\b/i.test(preferredFormat);
+  const focus =
+    discipline.generationContext?.topicFocus ??
+    validFocus(options.settings?.topicFocus, discipline.topics) ??
+    discipline.topics[0];
   return {
     ...challenge,
     difficulty: higherDifficulty(challenge.difficulty, options.settings?.difficultyFloor ?? discipline.targetDifficulty),
-    objective: options.settings?.topicFocus
-      ? `${challenge.objective} Focus the work on: ${options.settings.topicFocus}.`
-      : discipline.topics.length
-        ? `${challenge.objective} Focus area: ${discipline.topics[0]}.`
-      : challenge.objective,
+    objective: focus ? `${challenge.objective} Focus the work on: ${focus}.` : challenge.objective,
     constraints: [
       ...challenge.constraints,
       `Preferred challenge format: ${preferredFormat}.`,
@@ -1478,7 +1499,11 @@ function createDisciplineFallbackChallenge(
   const discipline = options.discipline;
   if (discipline.id === "networking") return base;
 
-  const focus = validFocus(options.settings?.topicFocus, discipline.topics) ?? discipline.topics[0] ?? discipline.label;
+  const focus =
+    discipline.generationContext?.topicFocus ??
+    validFocus(options.settings?.topicFocus, discipline.topics) ??
+    discipline.topics[0] ??
+    discipline.label;
   const preferredFormat = discipline.formats[0] ?? "Practical assessment";
   const packet = fallbackPacketForDiscipline(discipline.id, focus);
   const sections = discipline.responseSections.length
@@ -1767,7 +1792,57 @@ function snapshotFromProfile(profile: StudyProfile) {
     targetDifficulty: profile.targetDifficulty,
     weeklyTimeBudgetHours: profile.weeklyTimeBudgetHours,
     preferenceNotes: profile.preferenceNotes,
+    secondaryInterests: profile.secondaryInterests,
+    currentLevel: profile.currentLevel,
+    weakAreas: profile.weakAreas,
+    avoidAreas: profile.avoidAreas,
+    goals: profile.goals,
+    customDiscipline: profile.customDiscipline,
   });
+}
+
+function challengeDisciplineSnapshot(
+  discipline: DisciplineSnapshot,
+  settings: Awaited<ReturnType<typeof getChallengeSettings>>,
+  userId: string,
+  dateKey: string,
+): DisciplineSnapshot {
+  const topicFocus = profileFocusForChallenge(
+    userId,
+    dateKey,
+    discipline,
+    settings.topicFocus,
+  );
+  return {
+    ...discipline,
+    generationContext: {
+      durationMinutes: settings.durationMinutes,
+      difficultyFloor: settings.difficultyFloor as Difficulty,
+      recoveryMode: settings.recoveryMode,
+      teamMode: settings.teamMode,
+      ...(topicFocus ? { topicFocus } : {}),
+    },
+  };
+}
+
+function profileFocusForChallenge(
+  userId: string,
+  dateKey: string,
+  discipline: DisciplineSnapshot,
+  requested?: string | null,
+) {
+  const explicit = validFocus(requested, discipline.topics);
+  if (explicit) return explicit;
+
+  const avoid = new Set(discipline.avoidAreas ?? []);
+  const topics = discipline.topics.filter((topic) => !avoid.has(topic));
+  const weakAreas = (discipline.weakAreas ?? []).filter((topic) => !avoid.has(topic));
+  const seed = `${userId}:${dateKey}:${discipline.id}`
+    .split("")
+    .reduce((total, character) => Math.imul(total ^ character.charCodeAt(0), 16777619), 2166136261);
+  const pool = weakAreas.length > 0 && Math.abs(seed % 3) !== 0 ? weakAreas : topics;
+  if (pool.length === 0) return undefined;
+  return pool[Math.abs(seed) % pool.length];
 }
 
 async function getCohortSnapshot(user: User) {
@@ -2008,13 +2083,20 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
     getChallengeSettings(user),
     getStudyProfile(user),
   ]);
+  const discipline = challengeDisciplineSnapshot(
+    profileState.activeDiscipline,
+    settings,
+    user.id,
+    today,
+  );
+  const recentWeaknesses = recentGrades.map((grade) => grade.nextImprovementTarget);
   const next = createDailyChallenge(user, {
     dateKey: today,
     recovery: settings.recoveryMode || needsRecovery(records.map(fromDbDisciplineRecord), user),
     pressure: false,
-    recentWeaknesses: recentGrades.map((grade) => grade.nextImprovementTarget),
+    recentWeaknesses,
     settings,
-    discipline: profileState.activeDiscipline,
+    discipline,
   });
 
   try {
@@ -2047,7 +2129,7 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
           status: toDbStatus(next.status),
           isRecovery: next.isRecovery,
           isPressure: next.isPressure,
-          disciplineSnapshot: profileState.activeDiscipline,
+          disciplineSnapshot: discipline,
           createdAt: new Date(),
         },
       });
@@ -2058,10 +2140,11 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
       challengeId: updated.id,
       dateKey: today,
       difficulty: difficultyForPis(user.pisScore),
-      track: settings.track,
-      topicFocus: settings.topicFocus,
+      track: discipline.id,
+      topicFocus: discipline.generationContext?.topicFocus,
       durationMinutes: settings.durationMinutes,
-      disciplineSnapshot: profileState.activeDiscipline,
+      disciplineSnapshot: discipline,
+      recentWeaknesses,
     });
 
     return {

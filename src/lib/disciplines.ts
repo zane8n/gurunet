@@ -1,4 +1,4 @@
-import type { Difficulty } from "@/lib/domain";
+import type { Difficulty, DisciplineSnapshot } from "@/lib/domain";
 
 export type RubricAxisKey =
   | "creativity"
@@ -170,8 +170,16 @@ export function disciplineSnapshot(input: {
   targetDifficulty: Difficulty;
   weeklyTimeBudgetHours: number;
   preferenceNotes?: string;
+  secondaryInterests?: string[];
+  currentLevel?: string;
+  weakAreas?: string[];
+  avoidAreas?: string[];
+  goals?: string[];
+  customDiscipline?: string;
 }) {
   const template = getDiscipline(input.disciplineId);
+  const preferenceNotes = input.preferenceNotes?.trim();
+  const customDiscipline = input.customDiscipline?.trim();
   return {
     id: template.id,
     label: template.label,
@@ -184,8 +192,43 @@ export function disciplineSnapshot(input: {
     rubric: template.rubric,
     targetDifficulty: input.targetDifficulty,
     weeklyTimeBudgetHours: input.weeklyTimeBudgetHours,
-    preferenceNotes: input.preferenceNotes?.trim() || undefined,
+    secondaryInterests: input.secondaryInterests ?? [],
+    weakAreas: input.weakAreas ?? [],
+    avoidAreas: input.avoidAreas ?? [],
+    goals: input.goals ?? [],
+    ...(preferenceNotes ? { preferenceNotes } : {}),
+    ...(input.currentLevel ? { currentLevel: input.currentLevel } : {}),
+    ...(customDiscipline ? { customDiscipline } : {}),
   };
+}
+
+export function disciplineProfileKey(snapshot?: DisciplineSnapshot) {
+  if (!snapshot) return "missing-profile";
+  return JSON.stringify({
+    id: snapshot.id,
+    topics: snapshot.topics,
+    formats: snapshot.formats,
+    evidenceTypes: snapshot.evidenceTypes,
+    targetDifficulty: snapshot.targetDifficulty,
+    weeklyTimeBudgetHours: snapshot.weeklyTimeBudgetHours,
+    preferenceNotes: snapshot.preferenceNotes ?? "",
+    secondaryInterests: snapshot.secondaryInterests ?? [],
+    currentLevel: snapshot.currentLevel ?? "",
+    weakAreas: snapshot.weakAreas ?? [],
+    avoidAreas: snapshot.avoidAreas ?? [],
+    goals: snapshot.goals ?? [],
+    customDiscipline: snapshot.customDiscipline ?? "",
+    generationContext: snapshot.generationContext ?? null,
+  });
+}
+
+export function disciplineProfileFingerprint(snapshot?: DisciplineSnapshot) {
+  let hash = 2166136261;
+  for (const character of disciplineProfileKey(snapshot)) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 export function defaultDisciplineSnapshot() {

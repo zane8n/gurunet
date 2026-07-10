@@ -17,6 +17,7 @@ import {
   fromDbUser,
 } from "@/lib/db-mappers";
 import { buildSubmissionContent } from "@/lib/submission-content";
+import { disciplineProfileKey } from "@/lib/disciplines";
 
 type AiJobType =
   | "ChallengeGeneration"
@@ -181,6 +182,18 @@ async function runChallengeGenerationJob(payload: Record<string, unknown>) {
   if (challenge.submissions.length > 0) {
     return { fallback: true, output: { skipped: "challenge already submitted" } };
   }
+  const requestedSnapshot =
+    payload.disciplineSnapshot && typeof payload.disciplineSnapshot === "object"
+      ? (payload.disciplineSnapshot as DisciplineSnapshot)
+      : undefined;
+  const currentSnapshot = fromDbChallenge(challenge).disciplineSnapshot;
+  if (
+    requestedSnapshot &&
+    currentSnapshot &&
+    disciplineProfileKey(requestedSnapshot) !== disciplineProfileKey(currentSnapshot)
+  ) {
+    return { fallback: false, output: { skipped: "stale personalization context" } };
+  }
   const user = fromDbUser(challenge.user);
   const ai = await generateAiChallenge({
     user,
@@ -188,14 +201,13 @@ async function runChallengeGenerationJob(payload: Record<string, unknown>) {
     dateKey: challenge.dateKey,
     recovery: challenge.isRecovery,
     pressure: challenge.isPressure,
-    recentWeaknesses: [],
+    recentWeaknesses: Array.isArray(payload.recentWeaknesses)
+      ? payload.recentWeaknesses.filter((item): item is string => typeof item === "string").slice(0, 5)
+      : [],
     track: typeof payload.track === "string" ? payload.track : challenge.topic,
     topicFocus: typeof payload.topicFocus === "string" ? payload.topicFocus : undefined,
     durationMinutes: typeof payload.durationMinutes === "number" ? payload.durationMinutes : undefined,
-    disciplineSnapshot:
-      payload.disciplineSnapshot && typeof payload.disciplineSnapshot === "object"
-        ? (payload.disciplineSnapshot as DisciplineSnapshot)
-        : undefined,
+    disciplineSnapshot: requestedSnapshot ?? currentSnapshot,
   });
   if (!ai) return { fallback: true, output: { skipped: "no generated challenge" } };
 

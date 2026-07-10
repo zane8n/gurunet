@@ -47,6 +47,19 @@ export type DisciplineSnapshot = {
   targetDifficulty: Difficulty;
   weeklyTimeBudgetHours: number;
   preferenceNotes?: string;
+  secondaryInterests?: string[];
+  currentLevel?: string;
+  weakAreas?: string[];
+  avoidAreas?: string[];
+  goals?: string[];
+  customDiscipline?: string;
+  generationContext?: {
+    topicFocus?: string;
+    durationMinutes: number;
+    difficultyFloor: Difficulty;
+    recoveryMode: boolean;
+    teamMode: boolean;
+  };
 };
 
 export type StudyProfile = {

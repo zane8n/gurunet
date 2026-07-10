@@ -59,6 +59,15 @@
   --palette-surface-tint: rgba(229, 237, 245, 0.34);
 }
 
+:root[data-palette="cobalt"] {
+  --palette-accent: #315fa8;
+  --palette-accent-soft: rgba(234, 240, 248, 0.86);
+  --palette-accent-strong: #234577;
+  --palette-accent-border: rgba(49, 95, 168, 0.23);
+  --palette-ring: rgba(49, 95, 168, 0.32);
+  --palette-surface-tint: rgba(234, 240, 248, 0.34);
+}
+
 :root[data-palette="solarized"] {
   --palette-accent: #268bd2;
   --palette-accent-soft: rgba(238, 232, 213, 0.82);
@@ -102,6 +111,15 @@
   --palette-accent-border: rgba(180, 35, 70, 0.22);
   --palette-ring: rgba(180, 35, 70, 0.3);
   --palette-surface-tint: rgba(244, 232, 234, 0.34);
+}
+
+:root[data-palette="oxide"] {
+  --palette-accent: #a64935;
+  --palette-accent-soft: rgba(247, 235, 231, 0.86);
+  --palette-accent-strong: #733425;
+  --palette-accent-border: rgba(166, 73, 53, 0.23);
+  --palette-ring: rgba(166, 73, 53, 0.32);
+  --palette-surface-tint: rgba(247, 235, 231, 0.34);
 }
 
 :root[data-palette="mono"] {
@@ -484,6 +502,14 @@
     animation: slow-breathe 5.8s ease-in-out infinite;
   }
 
+  .daily-momentum-complete {
+    box-shadow: inset 3px 0 0 var(--palette-accent);
+  }
+
+  .reward-confirm {
+    animation: reward-confirm 560ms cubic-bezier(0.2, 0.9, 0.24, 1.2) both;
+  }
+
   .challenge-packet {
     display: grid;
     gap: 0.18rem;
@@ -658,6 +684,21 @@
   }
   50% {
     transform: translateY(-2px);
+  }
+}
+
+@keyframes reward-confirm {
+  0% {
+    opacity: 0;
+    transform: scale(0.65) rotate(-8deg);
+  }
+  62% {
+    opacity: 1;
+    transform: scale(1.12) rotate(2deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0);
   }
 }
 
