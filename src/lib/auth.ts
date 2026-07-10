@@ -33,6 +33,7 @@ export function publicUser(user: User) {
     pisScore: user.pisScore,
     ertBalance: user.ertBalance,
     currentStreak: user.currentStreak,
+    continuityCredits: user.continuityCredits,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

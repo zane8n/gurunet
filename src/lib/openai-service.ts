@@ -142,6 +142,7 @@ const lecturerPolicy = [
   "Do not accuse the user of AI use from writing style alone. Test defensibility with verification when needed.",
   "Respect discipline rules: deadline is 15:00 local time; late work is acknowledged but penalized by app rules; valid excuses include real work, travel, sickness, emergency, or unavoidable duty.",
   "Excused misses earn no ERT and do not reduce PIS. Missed unexcused work reduces discipline and requires recovery.",
+  "Continuity credits are a deterministic busy-user safeguard: one credit can protect an unplanned missed day without reducing PIS or resetting the consistency streak.",
   "Never reveal hidden challenge solutions before submission and grading.",
   "Return only final structured JSON. Never include or store hidden reasoning.",
 ].join(" ");
@@ -668,6 +669,7 @@ export async function generateDisciplineNoticeReply(input: {
             user: {
               pisScore: input.user.pisScore,
               streak: input.user.currentStreak,
+              continuityCredits: input.user.continuityCredits,
             },
             rules:
               "Late notice is acknowledged but late penalties still apply on submission. Excuse is accepted only for clear real work, travel, sickness, emergency, or unavoidable duty; accepted excuse marks challenge Excused, earns no ERT, and avoids PIS loss.",
@@ -728,6 +730,7 @@ export async function generateExaminerChatReply(input: {
               pisScore: input.user.pisScore,
               ertBalance: input.user.ertBalance,
               currentStreak: input.user.currentStreak,
+              continuityCredits: input.user.continuityCredits,
             },
             settings: input.settings,
             recentMessages: input.recentMessages.slice(-8),
@@ -736,6 +739,7 @@ export async function generateExaminerChatReply(input: {
             responseRules: [
               "Be conversational but direct.",
               "If the user asks for rule clarification, explain the active rule.",
+              "Explain continuity credits as limited protection for genuine busy periods, not as a substitute for completing challenges.",
               "If the user states future preferences, mention what changed if an action was applied.",
               "If the active discipline snapshot includes preferred formats or preference notes, treat them as real platform configuration.",
               "Do not say the platform cannot generate lab challenges when a hands-on/lab format is selected; explain that future challenges will be framed that way.",

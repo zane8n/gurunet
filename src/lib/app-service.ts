@@ -1,10 +1,13 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import type {
+  Challenge,
   DisciplineRecord,
   DisciplineSnapshot,
   Difficulty,
+  Grade,
   MarketplaceChallenge,
+  RetentionSnapshot,
   StudyProfile,
   User,
 } from "@/lib/domain";
@@ -327,7 +330,20 @@ export async function getDashboard(user: User) {
   const currentUser = fromDbUser(dbUser);
   const profileState = await getStudyProfile(currentUser);
   const timezone = getUserTimezone(currentUser.timezone);
-  const [submissions, grades, notebookEntries, redemptions, challenges, gradedChallenges, todayNotice, challengeSettings, cohorts, socialData] =
+  const currentWeekKey = weekKeyFor(new Date(), timezone);
+  const [
+    submissions,
+    grades,
+    notebookEntries,
+    redemptions,
+    challenges,
+    gradedChallenges,
+    todayNotice,
+    challengeSettings,
+    cohorts,
+    socialData,
+    weeklyRecord,
+  ] =
     await Promise.all([
       prisma.submission.findMany({
         where: { userId: user.id },
@@ -358,6 +374,9 @@ export async function getDashboard(user: User) {
       getChallengeSettings(currentUser),
       getCohortSnapshot(currentUser),
       getSocialData(user.id),
+      prisma.weeklyDisciplineRecord.findUnique({
+        where: { userId_weekKey: { userId: user.id, weekKey: currentWeekKey } },
+      }),
     ]);
 
   const todaySubmissionDb =
@@ -371,6 +390,36 @@ export async function getDashboard(user: User) {
   )
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
     .slice(0, 14);
+  const progress = progressChallenges.map((challenge) => {
+    const grade = grades.find((item) => item.challengeId === challenge.id);
+    const submission = submissions.find((item) => item.challengeId === challenge.id);
+    return {
+      id: challenge.id,
+      date: challenge.dateKey,
+      challenge: challenge.title,
+      topic: challenge.topic,
+      difficulty: challenge.difficulty,
+      status: fromDbStatus(challenge.status),
+      submittedAt: submission?.submittedAt.toISOString() ?? null,
+      deadlineAt: challenge.deadlineAt.toISOString(),
+      finalScore: grade?.finalScore ?? null,
+      pis: grade?.updatedPis ?? currentUser.pisScore,
+      ertEarned: grade?.ertEarned ?? 0,
+      ertBalance: grade?.ertBalance ?? currentUser.ertBalance,
+      mainWeakness: grade?.nextImprovementTarget ?? "Not graded",
+      nextFocus: grade?.nextImprovementTarget ?? "Submit the active challenge",
+    };
+  });
+  const retention = buildRetentionSnapshot({
+    user: currentUser,
+    today,
+    todayGrade: todayGradeDb ? fromDbGrade(todayGradeDb) : null,
+    progress,
+    discipline: profileState.activeDiscipline,
+    settings: challengeSettings,
+    weeklyRecord,
+    timezone,
+  });
 
   return {
     user: currentUser,
@@ -393,29 +442,130 @@ export async function getDashboard(user: User) {
     nextChallengeUnlockAt: nextChallengeUnlockIso(today.dateKey, timezone),
     todaySubmission,
     todayGrade: todayGradeDb ? fromDbGrade(todayGradeDb) : null,
-    progress: progressChallenges.map((challenge) => {
-      const grade = grades.find((item) => item.challengeId === challenge.id);
-      const submission = submissions.find((item) => item.challengeId === challenge.id);
-      return {
-        id: challenge.id,
-        date: challenge.dateKey,
-        challenge: challenge.title,
-        difficulty: challenge.difficulty,
-        status: fromDbStatus(challenge.status),
-        submittedAt: submission?.submittedAt.toISOString() ?? null,
-        deadlineAt: challenge.deadlineAt.toISOString(),
-        finalScore: grade?.finalScore ?? null,
-        pis: grade?.updatedPis ?? currentUser.pisScore,
-        ertEarned: grade?.ertEarned ?? 0,
-        ertBalance: grade?.ertBalance ?? currentUser.ertBalance,
-        mainWeakness: grade?.nextImprovementTarget ?? "Not graded",
-        nextFocus: grade?.nextImprovementTarget ?? "Submit the active challenge",
-      };
-    }),
+    progress,
+    retention,
     notebookEntries: notebookEntries.map(fromDbNotebookEntry),
     redemptions: redemptions.map(fromDbRedemption),
     social: buildSocialSnapshot(currentUser, socialData),
   };
+}
+
+type RetentionProgressRow = {
+  date: string;
+  status: string;
+  submittedAt: string | null;
+  deadlineAt: string;
+  finalScore: number | null;
+};
+
+function buildRetentionSnapshot(input: {
+  user: User;
+  today: Challenge;
+  todayGrade: Grade | null;
+  progress: RetentionProgressRow[];
+  discipline: DisciplineSnapshot;
+  settings: Awaited<ReturnType<typeof getChallengeSettings>>;
+  weeklyRecord: { completedCount: number; continuityCreditEarned: boolean } | null;
+  timezone: string;
+}): RetentionSnapshot {
+  const calendarToday = dateKeyFor(new Date(), input.timezone);
+  const weekDates = dateKeysForCurrentWeek(calendarToday);
+  const weekRows = input.progress.filter((row) => weekDates.includes(row.date));
+  const completedFromRows = weekRows.filter((row) => row.finalScore !== null).length;
+  const completedDays = Math.max(completedFromRows, input.weeklyRecord?.completedCount ?? 0);
+  const targetDays = 4;
+  const scores = weekRows
+    .map((row) => row.finalScore)
+    .filter((score): score is number => score !== null);
+  const averageScore = scores.length
+    ? Number((scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(1))
+    : null;
+  const bestScore = scores.length ? Math.max(...scores) : null;
+  const earlySubmissions = weekRows.filter(
+    (row) =>
+      row.submittedAt &&
+      Date.parse(row.submittedAt) <= Date.parse(row.deadlineAt),
+  ).length;
+  const dayOfWeek = new Date(`${calendarToday}T12:00:00.000Z`).getUTCDay();
+  const revealUnlocked = completedDays >= targetDays || (dayOfWeek === 0 && scores.length > 0);
+  const nextDateKey = addDaysToDateKey(input.today.dateKey, 1);
+  const previewFocus =
+    profileFocusForChallenge(
+      input.user.id,
+      nextDateKey,
+      input.discipline,
+      input.settings.topicFocus,
+    ) ??
+    input.discipline.topics[0] ??
+    input.discipline.label;
+  const previewFormat =
+    profileFormatForChallenge(input.user.id, nextDateKey, input.discipline) ??
+    input.discipline.formats[0] ??
+    "Practical assessment";
+
+  return {
+    targetDays,
+    completedDays,
+    continuityCredits: input.user.continuityCredits,
+    creditEarnedThisWeek: input.weeklyRecord?.continuityCreditEarned ?? false,
+    days: weekDates.map((date, index) => {
+      const row = weekRows.find((item) => item.date === date);
+      let state: RetentionSnapshot["days"][number]["state"];
+      if (row?.finalScore !== null && row?.finalScore !== undefined) state = "completed";
+      else if (row?.status === "Protected") state = "protected";
+      else if (row?.status === "Missed") state = "missed";
+      else if (date === calendarToday) state = "today";
+      else if (date > calendarToday) state = "upcoming";
+      else state = "open";
+      return {
+        date,
+        label: ["M", "T", "W", "T", "F", "S", "S"][index],
+        state,
+        score: row?.finalScore ?? null,
+      };
+    }),
+    preview: {
+      available: Boolean(input.todayGrade),
+      unlockAt: nextChallengeUnlockIso(input.today.dateKey, input.timezone),
+      discipline: input.discipline.label,
+      focus: previewFocus,
+      format: previewFormat,
+      durationMinutes: input.settings.durationMinutes,
+      difficulty: higherDifficulty(
+        difficultyForPis(input.user.pisScore),
+        input.settings.difficultyFloor,
+      ),
+    },
+    weeklyReveal: {
+      unlocked: revealUnlocked,
+      averageScore,
+      bestScore,
+      earlySubmissions,
+      message: revealUnlocked
+        ? weeklyRevealMessage(averageScore, completedDays)
+        : `${Math.max(0, targetDays - completedDays)} more completed ${targetDays - completedDays === 1 ? "day" : "days"} unlocks the weekly reveal. Sunday also closes the week without requiring seven submissions.`,
+    },
+  };
+}
+
+function dateKeysForCurrentWeek(dateKey: string) {
+  const current = new Date(`${dateKey}T12:00:00.000Z`);
+  const daysSinceMonday = (current.getUTCDay() + 6) % 7;
+  const monday = addDaysToDateKey(dateKey, -daysSinceMonday);
+  return Array.from({ length: 7 }, (_, index) => addDaysToDateKey(monday, index));
+}
+
+function addDaysToDateKey(dateKey: string, days: number) {
+  const date = new Date(`${dateKey}T12:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function weeklyRevealMessage(averageScore: number | null, completedDays: number) {
+  if (averageScore === null) return `${completedDays} learning days were protected this week.`;
+  if (averageScore >= 15) return `Strong week: ${completedDays} completed days with precise, defensible work.`;
+  if (averageScore >= 11) return `Solid continuity: ${completedDays} completed days with a clear next layer to strengthen.`;
+  return `You kept the learning loop active for ${completedDays} days. Use the correction themes as next week's starting point.`;
 }
 
 export async function getOrCreateTodayChallenge(user: User) {
@@ -592,6 +742,7 @@ export async function getSupportUserSnapshot(input: z.infer<typeof supportUserLo
       pisScore: user.pisScore,
       ertBalance: user.ertBalance,
       currentStreak: user.currentStreak,
+      continuityCredits: user.continuityCredits,
     },
     studyProfile: profileState.studyProfile,
     activeDiscipline: profileState.activeDiscipline,
@@ -632,7 +783,6 @@ export async function runSupportAction(
 
 export async function ensureMissedPreviousChallenge(user: User) {
   const timezone = getUserTimezone(user.timezone);
-  const weekKey = weekKeyFor(new Date(), timezone);
   const existingChallenges = await prisma.challenge.findMany({
     where: { userId: user.id },
     select: { userId: true, dateKey: true, createdAt: true },
@@ -645,11 +795,36 @@ export async function ensureMissedPreviousChallenge(user: User) {
       status: { in: ["Active", "RecoveryChallenge", "PressureChallenge"] },
       submissions: { none: {} },
     },
+    orderBy: { dateKey: "desc" },
   });
 
   for (const challenge of candidates) {
     await prisma.$transaction(async (tx) => {
       const storedUser = await tx.user.findUniqueOrThrow({ where: { id: user.id } });
+      if (storedUser.continuityCredits > 0) {
+        const balanceAfter = storedUser.continuityCredits - 1;
+        await tx.challenge.update({
+          where: { id: challenge.id },
+          data: { status: "Protected" },
+        });
+        await tx.user.update({
+          where: { id: user.id },
+          data: { continuityCredits: balanceAfter },
+        });
+        await tx.ledgerEvent.create({
+          data: {
+            id: createId("cnt"),
+            userId: user.id,
+            type: "CONTINUITY",
+            amount: -1,
+            reason: `Protected absence: ${challenge.title}`,
+            balanceAfter,
+          },
+        });
+        return;
+      }
+
+      const weekKey = weekKeyFor(new Date(`${challenge.dateKey}T12:00:00.000Z`), timezone);
       const nextPis = Math.max(0, Number((storedUser.pisScore - 1).toFixed(1)));
       await tx.challenge.update({
         where: { id: challenge.id },
@@ -682,9 +857,9 @@ export async function ensureMissedPreviousChallenge(user: User) {
       await tx.weeklyDisciplineRecord.update({
         where: { id: record.id },
         data: {
-          pisGainCapMultiplier: record.missedCount + 1 >= 2 ? 0.5 : record.pisGainCapMultiplier,
+          pisGainCapMultiplier: record.missedCount >= 2 ? 0.5 : record.pisGainCapMultiplier,
           weekendRecoveryRequired:
-            record.missedCount + 1 >= 3 ? true : record.weekendRecoveryRequired,
+            record.missedCount >= 3 ? true : record.weekendRecoveryRequired,
         },
       });
     });
@@ -701,8 +876,13 @@ export async function submitChallenge(
     where: { id: challengeId, userId: user.id },
   });
   if (!challenge) throw new Response("Challenge not found", { status: 404 });
-  if (challenge.status === "Excused") {
-    throw new Response("This challenge has been excused. Generate or wait for the next challenge instead.", { status: 409 });
+  if (challenge.status === "Excused" || challenge.status === "Protected") {
+    throw new Response(
+      challenge.status === "Protected"
+        ? "This absence was already protected by a continuity credit. Continue with the current challenge."
+        : "This challenge has been excused. Generate or wait for the next challenge instead.",
+      { status: 409 },
+    );
   }
   const existing = await prisma.submission.findFirst({ where: { challengeId } });
   if (existing) throw new Response("Challenge already submitted", { status: 409 });
@@ -798,6 +978,26 @@ export async function recordChallengeNotice(
 
   const notice = await prisma.$transaction(async (tx) => {
     if (accepted && challenge.status !== "Submitted" && challenge.status !== "Late") {
+      if (challenge.status === "Protected") {
+        const storedUser = await tx.user.findUniqueOrThrow({ where: { id: user.id } });
+        if (storedUser.continuityCredits < 3) {
+          const balanceAfter = storedUser.continuityCredits + 1;
+          await tx.user.update({
+            where: { id: user.id },
+            data: { continuityCredits: { increment: 1 } },
+          });
+          await tx.ledgerEvent.create({
+            data: {
+              id: createId("cnt"),
+              userId: user.id,
+              type: "CONTINUITY",
+              amount: 1,
+              reason: `Continuity credit returned after accepted excuse: ${challenge.title}`,
+              balanceAfter,
+            },
+          });
+        }
+      }
       await tx.challenge.update({
         where: { id: challenge.id },
         data: { status: "Excused" },
@@ -1143,6 +1343,15 @@ export async function gradeExistingSubmission(user: User, submissionId: string) 
   const rubricSnapshot =
     domainChallenge.disciplineSnapshot?.rubric ?? defaultDisciplineSnapshot().rubric;
   const notebookEntry = createNotebookEntry(domainChallenge, grade);
+  const completionDateKey = dateKeyFor(
+    submission.submittedAt,
+    getUserTimezone(fromDbUser(storedUser).timezone),
+  );
+  const completionWeekDates = dateKeysForCurrentWeek(completionDateKey);
+  const completionWeekKey = weekKeyFor(
+    submission.submittedAt,
+    getUserTimezone(fromDbUser(storedUser).timezone),
+  );
 
   const created = await prisma.$transaction(async (tx) => {
     const dbGrade = await tx.grade.create({
@@ -1174,14 +1383,58 @@ export async function gradeExistingSubmission(user: User, submissionId: string) 
         createdAt: new Date(grade.createdAt),
       },
     });
+    const weeklyCompletionCount = await tx.grade.count({
+      where: {
+        userId: user.id,
+        challenge: {
+          dateKey: {
+            gte: completionWeekDates[0],
+            lte: completionWeekDates[completionWeekDates.length - 1],
+          },
+        },
+      },
+    });
+    const completionRecord = await tx.weeklyDisciplineRecord.upsert({
+      where: { userId_weekKey: { userId: user.id, weekKey: completionWeekKey } },
+      update: { completedCount: weeklyCompletionCount },
+      create: {
+        id: createId("wdr"),
+        userId: user.id,
+        weekKey: completionWeekKey,
+        completedCount: weeklyCompletionCount,
+      },
+    });
+    const continuityCreditEarned =
+      completionRecord.completedCount >= 4 &&
+      !completionRecord.continuityCreditEarned &&
+      storedUser.continuityCredits < 3;
+    const continuityBalance = storedUser.continuityCredits + (continuityCreditEarned ? 1 : 0);
+
     await tx.user.update({
       where: { id: user.id },
       data: {
         pisScore: grade.updatedPis,
         ertBalance: grade.ertBalance,
-        currentStreak: grade.finalScore >= 13 ? { increment: 1 } : 0,
+        currentStreak: { increment: 1 },
+        ...(continuityCreditEarned ? { continuityCredits: { increment: 1 } } : {}),
       },
     });
+    if (continuityCreditEarned) {
+      await tx.weeklyDisciplineRecord.update({
+        where: { id: completionRecord.id },
+        data: { continuityCreditEarned: true },
+      });
+      await tx.ledgerEvent.create({
+        data: {
+          id: createId("cnt"),
+          userId: user.id,
+          type: "CONTINUITY",
+          amount: 1,
+          reason: `Four completed challenges in ${completionWeekKey}`,
+          balanceAfter: continuityBalance,
+        },
+      });
+    }
     await tx.ledgerEvent.create({
       data: {
         id: createId("pis"),
@@ -1446,7 +1699,10 @@ function createDailyChallenge(
     discipline,
   });
   if (!options.settings && !options.discipline) return challenge;
-  const preferredFormat = discipline.formats[0] ?? "Practical assessment";
+  const preferredFormat =
+    discipline.generationContext?.preferredFormat ??
+    discipline.formats[0] ??
+    "Practical assessment";
   const isLab = /\blab|hands-on|practical|exercise\b/i.test(preferredFormat);
   const focus =
     discipline.generationContext?.topicFocus ??
@@ -1504,7 +1760,10 @@ function createDisciplineFallbackChallenge(
     validFocus(options.settings?.topicFocus, discipline.topics) ??
     discipline.topics[0] ??
     discipline.label;
-  const preferredFormat = discipline.formats[0] ?? "Practical assessment";
+  const preferredFormat =
+    discipline.generationContext?.preferredFormat ??
+    discipline.formats[0] ??
+    "Practical assessment";
   const packet = fallbackPacketForDiscipline(discipline.id, focus);
   const sections = discipline.responseSections.length
     ? discipline.responseSections
@@ -1813,6 +2072,7 @@ function challengeDisciplineSnapshot(
     discipline,
     settings.topicFocus,
   );
+  const preferredFormat = profileFormatForChallenge(userId, dateKey, discipline);
   return {
     ...discipline,
     generationContext: {
@@ -1821,6 +2081,7 @@ function challengeDisciplineSnapshot(
       recoveryMode: settings.recoveryMode,
       teamMode: settings.teamMode,
       ...(topicFocus ? { topicFocus } : {}),
+      ...(preferredFormat ? { preferredFormat } : {}),
     },
   };
 }
@@ -1843,6 +2104,18 @@ function profileFocusForChallenge(
   const pool = weakAreas.length > 0 && Math.abs(seed % 3) !== 0 ? weakAreas : topics;
   if (pool.length === 0) return undefined;
   return pool[Math.abs(seed) % pool.length];
+}
+
+function profileFormatForChallenge(
+  userId: string,
+  dateKey: string,
+  discipline: DisciplineSnapshot,
+) {
+  if (discipline.formats.length === 0) return undefined;
+  const seed = `${dateKey}:${discipline.id}:${userId}:format`
+    .split("")
+    .reduce((total, character) => Math.imul(total ^ character.charCodeAt(0), 16777619), 2166136261);
+  return discipline.formats[Math.abs(seed) % discipline.formats.length];
 }
 
 async function getCohortSnapshot(user: User) {

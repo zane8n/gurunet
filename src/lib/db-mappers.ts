@@ -39,6 +39,7 @@ export function fromDbUser(user: DbUser): User {
     pisScore: user.pisScore,
     ertBalance: user.ertBalance,
     currentStreak: user.currentStreak,
+    continuityCredits: user.continuityCredits,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
   };
@@ -205,6 +206,8 @@ export function fromDbDisciplineRecord(record: DbDisciplineRecord): DisciplineRe
     missedCount: record.missedCount,
     pisGainCapMultiplier: record.pisGainCapMultiplier,
     weekendRecoveryRequired: record.weekendRecoveryRequired,
+    completedCount: record.completedCount,
+    continuityCreditEarned: record.continuityCreditEarned,
   };
 }
 

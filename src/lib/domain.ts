@@ -4,6 +4,7 @@ export type ChallengeStatus =
   | "Late"
   | "Missed"
   | "Excused"
+  | "Protected"
   | "Recovery Challenge"
   | "Pressure Challenge";
 
@@ -25,6 +26,7 @@ export type User = {
   pisScore: number;
   ertBalance: number;
   currentStreak: number;
+  continuityCredits: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -55,6 +57,7 @@ export type DisciplineSnapshot = {
   customDiscipline?: string;
   generationContext?: {
     topicFocus?: string;
+    preferredFormat?: string;
     durationMinutes: number;
     difficultyFloor: Difficulty;
     recoveryMode: boolean;
@@ -157,7 +160,7 @@ export type Grade = {
 export type LedgerEvent = {
   id: string;
   userId: string;
-  type: "PIS" | "ERT";
+  type: "PIS" | "ERT" | "CONTINUITY";
   amount: number;
   reason: string;
   balanceAfter: number;
@@ -196,6 +199,37 @@ export type DisciplineRecord = {
   missedCount: number;
   pisGainCapMultiplier: number;
   weekendRecoveryRequired: boolean;
+  completedCount: number;
+  continuityCreditEarned: boolean;
+};
+
+export type RetentionSnapshot = {
+  targetDays: number;
+  completedDays: number;
+  continuityCredits: number;
+  creditEarnedThisWeek: boolean;
+  days: {
+    date: string;
+    label: string;
+    state: "completed" | "protected" | "missed" | "today" | "open" | "upcoming";
+    score: number | null;
+  }[];
+  preview: {
+    available: boolean;
+    unlockAt: string;
+    discipline: string;
+    focus: string;
+    format: string;
+    durationMinutes: number;
+    difficulty: Difficulty;
+  };
+  weeklyReveal: {
+    unlocked: boolean;
+    averageScore: number | null;
+    bestScore: number | null;
+    earlySubmissions: number;
+    message: string;
+  };
 };
 
 export type Friendship = {

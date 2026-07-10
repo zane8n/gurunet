@@ -13,6 +13,7 @@ type AdminSnapshot = {
     pisScore: number;
     ertBalance: number;
     currentStreak: number;
+    continuityCredits: number;
   };
   studyProfile: {
     primaryDiscipline: string;
@@ -346,6 +347,7 @@ export function AdminBackend() {
               <Info label="User" value={`${snapshot.user.name} · ${snapshot.user.email}`} />
               <Info label="Profession" value={snapshot.activeDiscipline.label} />
               <Info label="PIS / ERT" value={`${snapshot.user.pisScore.toFixed(1)} / ${snapshot.user.ertBalance}`} />
+              <Info label="Continuity credits" value={String(snapshot.user.continuityCredits)} />
             </div>
             <div className="rounded-md border border-slate-200 bg-white/65 p-3">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Configuration</p>

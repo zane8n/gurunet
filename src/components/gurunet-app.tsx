@@ -44,6 +44,7 @@ import type {
   Grade,
   NotebookEntry,
   Redemption,
+  RetentionSnapshot,
   Submission,
   User,
 } from "@/lib/domain";
@@ -66,6 +67,7 @@ type ProgressRow = {
   id: string;
   date: string;
   challenge: string;
+  topic: string;
   difficulty: string;
   status: string;
   submittedAt: string | null;
@@ -241,6 +243,7 @@ type Dashboard = {
   todaySubmission: Submission | null;
   todayGrade: Grade | null;
   progress: ProgressRow[];
+  retention: RetentionSnapshot;
   notebookEntries: NotebookEntry[];
   redemptions: Redemption[];
   social: SocialSnapshot;
@@ -1460,11 +1463,11 @@ function DashboardWorkspace({
               </AstroCard>
             )}
             <DailyMomentumPanel
-              activeDiscipline={dashboard.activeDiscipline.label}
               busy={busy}
               grade={grade}
               nextUnlock={nextUnlock}
               onRedeem={onRedeem}
+              retention={dashboard.retention}
               user={user}
             />
           </div>
@@ -2309,6 +2312,8 @@ function CheckboxGrid({
 function StatusPill({ status }: { status: string }) {
   const tone = status.includes("Missed")
     ? "border-red-200 bg-red-50 text-red-700"
+    : status.includes("Protected")
+      ? "border-sky-200 bg-sky-50 text-sky-800"
     : status.includes("Late")
       ? "border-amber-200 bg-amber-50 text-amber-800"
       : status.includes("Recovery")
@@ -2351,6 +2356,7 @@ function ActivityGrid({ rows }: { rows: ProgressRow[] }) {
 
 function activityTitle(row?: ProgressRow) {
   if (!row) return "No record";
+  if (row.status.includes("Protected")) return `${row.date}: absence protected by a continuity credit`;
   const timing = row.submittedAt
     ? `${minutesBeforeDeadline(row)} min before deadline`
     : "not submitted";
@@ -2365,6 +2371,7 @@ function minutesBeforeDeadline(row: ProgressRow) {
 function activityStyle(row?: ProgressRow) {
   if (!row) return { backgroundColor: "rgba(203, 213, 225, 0.72)", borderColor: "rgba(148, 163, 184, 0.45)" };
   if (row.status.includes("Missed")) return { backgroundColor: "#b91c1c", borderColor: "#991b1b" };
+  if (row.status.includes("Protected")) return { backgroundColor: "#38bdf8", borderColor: "#0284c7" };
   if (!row.submittedAt) return { backgroundColor: "rgba(148, 163, 184, 0.82)", borderColor: "rgba(100, 116, 139, 0.5)" };
 
   const minutesEarly = minutesBeforeDeadline(row);
@@ -4715,23 +4722,20 @@ function formatSigned(value: number) {
 }
 
 function DailyMomentumPanel({
-  activeDiscipline,
   busy,
   grade,
   nextUnlock,
   onRedeem,
+  retention,
   user,
 }: {
-  activeDiscipline: string;
   busy: boolean;
   grade: Grade | null;
   nextUnlock: string;
   onRedeem: (event: FormEvent<HTMLFormElement>) => void;
+  retention: RetentionSnapshot;
   user: SafeUser;
 }) {
-  const nextFocus = grade
-    ? `${activeDiscipline}, adapted from today's correction`
-    : `${activeDiscipline} evidence and judgment`;
   return (
     <section className={`daily-momentum rounded-md border border-slate-200 bg-white/70 p-4 ${grade ? "daily-momentum-complete" : ""}`}>
       <div className="flex items-start gap-3">
@@ -4750,16 +4754,69 @@ function DailyMomentumPanel({
         </div>
       </div>
 
-      <dl className="mt-4 grid gap-3 border-t border-slate-200 pt-3 text-sm">
-        <div className="grid grid-cols-[5.5rem_1fr] gap-3">
-          <dt className="text-slate-500">Next unlock</dt>
-          <dd className="text-right font-medium text-slate-800">{nextUnlock}</dd>
+      <div className="mt-4 border-t border-slate-200 pt-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Seven-day mastery</p>
+            <p className="mt-1 text-sm text-slate-700">
+              {retention.completedDays}/{retention.targetDays} learning days
+            </p>
+          </div>
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+            <ShieldCheck size={14} className="text-cyan-700" />
+            {retention.continuityCredits} {retention.continuityCredits === 1 ? "credit" : "credits"}
+          </span>
         </div>
-        <div className="grid grid-cols-[5.5rem_1fr] gap-3">
-          <dt className="text-slate-500">Next focus</dt>
-          <dd className="text-right font-medium leading-5 text-slate-800">{nextFocus}</dd>
+        <div className="mt-3 grid grid-cols-7 gap-1.5" aria-label="Current seven-day mastery arc">
+          {retention.days.map((day) => (
+            <MasteryDay key={day.date} day={day} />
+          ))}
         </div>
-      </dl>
+        <p className="mt-2 text-[11px] leading-4 text-slate-500">
+          Four completed days earns a continuity credit, up to three. A credit automatically protects an occasional busy day.
+        </p>
+      </div>
+
+      {retention.preview.available ? (
+        <div className="mt-3 border-t border-slate-200 pt-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Next brief preview</p>
+            <span className="text-xs text-slate-500">08:00 unlock</span>
+          </div>
+          <p className="mt-2 text-sm font-semibold text-slate-900">{retention.preview.focus}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-600">
+            {retention.preview.discipline} · {retention.preview.format} · {retention.preview.durationMinutes} min · {retention.preview.difficulty}
+          </p>
+        </div>
+      ) : (
+        <dl className="mt-3 border-t border-slate-200 pt-3 text-sm">
+          <div className="grid grid-cols-[5.5rem_1fr] gap-3">
+            <dt className="text-slate-500">Next unlock</dt>
+            <dd className="text-right font-medium text-slate-800">{nextUnlock}</dd>
+          </div>
+        </dl>
+      )}
+
+      <div className="mt-3 border-t border-slate-200 pt-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Weekly reveal</p>
+          {retention.creditEarnedThisWeek && (
+            <span className="text-xs font-semibold text-cyan-800">Credit earned</span>
+          )}
+        </div>
+        {retention.weeklyReveal.unlocked ? (
+          <div className="mt-2">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <RevealStat label="Average" value={retention.weeklyReveal.averageScore?.toFixed(1) ?? "--"} />
+              <RevealStat label="Best" value={retention.weeklyReveal.bestScore?.toFixed(1) ?? "--"} />
+              <RevealStat label="On time" value={String(retention.weeklyReveal.earlySubmissions)} />
+            </div>
+            <p className="mt-2 text-xs leading-5 text-slate-600">{retention.weeklyReveal.message}</p>
+          </div>
+        ) : (
+          <p className="mt-2 text-xs leading-5 text-slate-500">{retention.weeklyReveal.message}</p>
+        )}
+      </div>
 
       <details className="group mt-3 border-t border-slate-200 pt-3">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-slate-700 marker:hidden">
@@ -4771,6 +4828,50 @@ function DailyMomentumPanel({
         </div>
       </details>
     </section>
+  );
+}
+
+function MasteryDay({ day }: { day: RetentionSnapshot["days"][number] }) {
+  const styles = {
+    completed: "border-cyan-700 bg-cyan-700 text-white",
+    protected: "border-cyan-700/25 bg-cyan-50 text-cyan-800",
+    missed: "border-orange-300 bg-orange-50 text-orange-800",
+    today: "border-slate-950 bg-white text-slate-950",
+    open: "border-slate-200 bg-white/60 text-slate-400",
+    upcoming: "border-slate-200 bg-slate-50 text-slate-400",
+  }[day.state];
+  const stateLabel = {
+    completed: `completed${day.score !== null ? ` with ${day.score} out of 20` : ""}`,
+    protected: "protected by a continuity credit",
+    missed: "missed",
+    today: "today",
+    open: "flexible day",
+    upcoming: "upcoming",
+  }[day.state];
+  return (
+    <div
+      className={`grid h-11 place-items-center rounded-md border text-[10px] font-semibold ${styles}`}
+      title={`${day.date}: ${stateLabel}`}
+      aria-label={`${day.date}: ${stateLabel}`}
+    >
+      <span>{day.label}</span>
+      {day.state === "completed" ? (
+        <CheckCircle2 size={12} />
+      ) : day.state === "protected" ? (
+        <ShieldCheck size={12} />
+      ) : (
+        <span className="font-mono text-[9px]">{day.score ?? "·"}</span>
+      )}
+    </div>
+  );
+}
+
+function RevealStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border-l border-slate-200 first:border-l-0">
+      <p className="font-mono text-sm font-semibold text-slate-900">{value}</p>
+      <p className="text-[10px] text-slate-500">{label}</p>
+    </div>
   );
 }
 

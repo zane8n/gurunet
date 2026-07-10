@@ -1,0 +1,9 @@
+ALTER TYPE "ChallengeStatus" ADD VALUE IF NOT EXISTS 'Protected';
+ALTER TYPE "LedgerType" ADD VALUE IF NOT EXISTS 'CONTINUITY';
+
+ALTER TABLE "User"
+ADD COLUMN "continuityCredits" INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE "WeeklyDisciplineRecord"
+ADD COLUMN "completedCount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "continuityCreditEarned" BOOLEAN NOT NULL DEFAULT false;

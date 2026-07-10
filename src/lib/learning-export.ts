@@ -139,6 +139,8 @@ export async function buildLearningExport(user: User) {
       missedCount: record.missedCount,
       pisGainCapMultiplier: record.pisGainCapMultiplier,
       weekendRecoveryRequired: record.weekendRecoveryRequired,
+      completedCount: record.completedCount,
+      continuityCreditEarned: record.continuityCreditEarned,
     })),
     examinerMessages: examinerMessages.map((message) => ({
       id: message.id,

@@ -36,6 +36,7 @@ export async function importJsonData(sourcePath?: string) {
         pisScore: user.pisScore,
         ertBalance: user.ertBalance,
         currentStreak: user.currentStreak,
+        continuityCredits: user.continuityCredits ?? 1,
       },
       create: {
         id: user.id,
@@ -46,6 +47,7 @@ export async function importJsonData(sourcePath?: string) {
         pisScore: user.pisScore,
         ertBalance: user.ertBalance,
         currentStreak: user.currentStreak,
+        continuityCredits: user.continuityCredits ?? 1,
         createdAt: new Date(user.createdAt),
         updatedAt: new Date(user.updatedAt),
       },
@@ -223,6 +225,8 @@ export async function importJsonData(sourcePath?: string) {
         missedCount: record.missedCount,
         pisGainCapMultiplier: record.pisGainCapMultiplier,
         weekendRecoveryRequired: record.weekendRecoveryRequired,
+        completedCount: record.completedCount ?? 0,
+        continuityCreditEarned: record.continuityCreditEarned ?? false,
       },
       create: {
         id: createId("wdr"),
@@ -231,6 +235,8 @@ export async function importJsonData(sourcePath?: string) {
         missedCount: record.missedCount,
         pisGainCapMultiplier: record.pisGainCapMultiplier,
         weekendRecoveryRequired: record.weekendRecoveryRequired,
+        completedCount: record.completedCount ?? 0,
+        continuityCreditEarned: record.continuityCreditEarned ?? false,
       },
     });
     counts.disciplineRecords += 1;
