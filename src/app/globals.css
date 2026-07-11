@@ -328,9 +328,9 @@
     margin-inline: auto;
     display: grid;
     width: 100%;
-    max-width: 1180px;
-    gap: 4.5rem;
-    padding: 2rem 1rem 5rem;
+    max-width: 1280px;
+    gap: 3.5rem;
+    padding: 1.5rem 1rem 5rem;
   }
 
   @media (min-width: 640px) {
@@ -340,12 +340,59 @@
   }
 
   .astrowind-hero {
-    padding: 4rem 0 2.5rem;
+    padding: 3rem 0 2rem;
   }
 
   .astrowind-section {
     scroll-margin-top: 5rem;
     animation: soft-enter 560ms ease both;
+  }
+
+  .dashboard-overview {
+    border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+    padding: 1.25rem 0 1.75rem;
+    animation: soft-enter 420ms ease both;
+  }
+
+  .dashboard-task-layout,
+  .dashboard-metrics-layout {
+    display: grid;
+    min-width: 0;
+    align-items: start;
+    gap: 2rem;
+  }
+
+  .dashboard-task-rail {
+    min-width: 0;
+    align-self: start;
+  }
+
+  .dashboard-management {
+    border-top: 1px solid rgba(148, 163, 184, 0.3);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+  }
+
+  @media (min-width: 1180px) {
+    .dashboard-task-layout {
+      grid-template-columns: minmax(0, 1fr) minmax(18rem, 21rem);
+      gap: 2.5rem;
+    }
+
+    .dashboard-task-rail {
+      position: static;
+    }
+
+    .dashboard-metrics-layout {
+      grid-template-columns: minmax(0, 1.65fr) minmax(18rem, 0.65fr);
+      gap: 2.5rem;
+    }
+  }
+
+  @media (min-width: 1180px) and (min-height: 820px) {
+    .dashboard-task-rail {
+      position: sticky;
+      top: 6rem;
+    }
   }
 
   .astrowind-card,

@@ -1111,8 +1111,8 @@ export function GurunetApp() {
       },
       {
         id: "social",
-        title: "Go to social and cohorts",
-        description: "Open leaderboards, marketplace, cohorts, notebook, and rewards.",
+        title: "Go to network",
+        description: "Open leaderboards, friends, marketplace challenges, and cohorts.",
         shortcut: "3",
         action: () => scrollToSection("social"),
       },
@@ -1483,48 +1483,48 @@ function DashboardWorkspace({
 
       <AstroSection
         id="daily-challenge"
-        eyebrow="Daily assessment"
-        title="Today's challenge"
-        text="A single evidence-led brief, a response workspace, and the examiner route in one focused section."
+        title="Assessment workspace"
+        text="Read the brief, build the response, and review the result in one continuous flow."
       >
-        <div className="grid gap-6">
-          <ChallengeWidget
-            busy={busy}
-            challenge={dashboard.today}
-            draftSavedAt={draftSavedAt}
-            grade={grade}
-            hasDraft={hasDraft}
-            nextUnlock={nextUnlock}
-            notice={dashboard.todayNotice}
-            onExaminer={onExaminer}
-            onFocus={onFocus}
-            onGrade={onGrade}
-            onOpen={onOpenResponse}
-            onSample={onSample}
-            onVerify={onVerify}
-            setVerification={setVerification}
-            status={status}
-            submission={submission}
-            verification={verification}
-          />
-          <div className="grid content-start gap-4 lg:grid-cols-[minmax(0,0.92fr)_minmax(20rem,0.38fr)]">
-            {grade ? (
-              <GradeSummary grade={grade} plain />
-            ) : dashboard.today.status === "RestDay" ? (
-              <AstroCard title="Scheduled recovery">
-                <EmptyState
-                  title="No assessment today"
-                  text="Your selected weekly rest day is protected. Tomorrow's assessment contains a normal task and a shorter recovery task."
-                />
-              </AstroCard>
-            ) : (
-              <AstroCard title="Score unlock">
-                <EmptyState
-                  title="No grade yet"
-                  text="Submit and grade today's response to unlock the daily scoresheet, correction, PIS movement, and ERT result."
-                />
-              </AstroCard>
+        <div className="dashboard-task-layout">
+          <div className="grid min-w-0 content-start gap-8">
+            <ChallengeWidget
+              busy={busy}
+              challenge={dashboard.today}
+              draftSavedAt={draftSavedAt}
+              grade={grade}
+              hasDraft={hasDraft}
+              nextUnlock={nextUnlock}
+              notice={dashboard.todayNotice}
+              onExaminer={onExaminer}
+              onFocus={onFocus}
+              onGrade={onGrade}
+              onOpen={onOpenResponse}
+              onSample={onSample}
+              onVerify={onVerify}
+              setVerification={setVerification}
+              status={status}
+              submission={submission}
+              verification={verification}
+            />
+
+            {grade && submission && (
+              <section id="assessment-feedback" className="scroll-mt-24 border-t border-slate-200 pt-6">
+                <div className="mb-5 max-w-2xl">
+                  <h3 className="text-xl font-semibold text-slate-950">Result and worked correction</h3>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    See how the score was formed, then compare your reasoning with the worked solution.
+                  </p>
+                </div>
+                <div className="grid gap-8">
+                  <GradeSummary grade={grade} plain showStrip={false} />
+                  <TeachingPanel challenge={dashboard.today} grade={grade} submission={submission} plain />
+                </div>
+              </section>
             )}
+          </div>
+
+          <aside className="dashboard-task-rail" aria-label="Daily progress and rewards">
             <DailyMomentumPanel
               busy={busy}
               grade={grade}
@@ -1534,93 +1534,98 @@ function DashboardWorkspace({
               restDay={dashboard.today.status === "RestDay"}
               user={user}
             />
-          </div>
+          </aside>
         </div>
       </AstroSection>
 
       <AstroSection
         id="metrics"
-        eyebrow="Signals"
-        title="Progress without the control room clutter"
-        text="The key training signals are grouped as a simple reading section: trend, distribution, streak behavior, and recent history."
+        title="Progress"
+        text="Start with the long-term trend, then inspect consistency, score spread, and recent attempts."
       >
-        <div className="grid gap-4 lg:grid-cols-3">
-          {grade && (
-            <AstroCard title="Axis performance" className="lg:col-span-2">
-              <AxisPerformancePrism grade={grade} />
+        <div className="dashboard-metrics-layout">
+          <div className="grid min-w-0 content-start gap-8">
+            <AstroCard title="PIS trend">
+              <PisTrendChart currentPis={user.pisScore} rows={dashboard.progress} />
             </AstroCard>
-          )}
-          <AstroCard title="PIS trend" className="lg:col-span-2">
-            <PisTrendChart currentPis={user.pisScore} rows={dashboard.progress} />
-          </AstroCard>
-          <AstroCard title="Streak map">
-            <ActivityGrid rows={dashboard.progress} />
-          </AstroCard>
-          <AstroCard title="Score distribution">
-            <FrequencyPolygon rows={dashboard.progress} />
-          </AstroCard>
-          <AstroCard title="Recent history" className="lg:col-span-2">
-            <ProgressPanel rows={dashboard.progress} />
-          </AstroCard>
+            {grade && (
+              <AstroCard title="Latest axis performance">
+                <AxisPerformancePrism grade={grade} />
+              </AstroCard>
+            )}
+          </div>
+          <aside className="grid min-w-0 content-start gap-8" aria-label="Progress summaries">
+            <AstroCard title="Streak and timing">
+              <ActivityGrid rows={dashboard.progress} />
+            </AstroCard>
+            <AstroCard title="Score distribution">
+              <FrequencyPolygon rows={dashboard.progress} />
+            </AstroCard>
+          </aside>
         </div>
+        <AstroCard title="Recent attempts" className="mt-8">
+          <ProgressPanel rows={dashboard.progress} />
+        </AstroCard>
       </AstroSection>
 
       <AstroSection
         id="learning"
-        eyebrow="Learning layer"
-        title="Corrections, notebook, and examiner memory"
-        text="Keep the teaching loop visible, but separate from the daily brief so the assessment itself stays calm."
+        title="Learning record"
+        text="Keep useful corrections and your own field notes searchable without crowding the daily assessment."
       >
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <AstroCard title="Assessment teaching">
-            <TeachingPanel challenge={dashboard.today} grade={grade} submission={submission} plain />
-          </AstroCard>
-          <AstroCard title="Notebook">
-            <NotebookPanel
-              key={dashboard.notebookEntries.map((entry) => entry.id).join(":")}
-              busy={busy}
-              entries={dashboard.notebookEntries}
-              redemptions={dashboard.redemptions}
-              onAskExaminer={onExaminer}
-              showRedemptions={false}
-              plain
-            />
-          </AstroCard>
+        <div className="max-w-3xl">
+          <NotebookPanel
+            key={dashboard.notebookEntries.map((entry) => entry.id).join(":")}
+            busy={busy}
+            entries={dashboard.notebookEntries}
+            redemptions={dashboard.redemptions}
+            onAskExaminer={onExaminer}
+            showRedemptions={false}
+            plain
+          />
         </div>
       </AstroSection>
 
       <AstroSection
         id="social"
-        eyebrow="Network"
-        title="Community, cohorts, and configuration"
-        text="Social comparison and challenge configuration live at the bottom of the page where they support the core loop without interrupting it."
+        title="Network"
+        text="Compare progress, find peers, and join shared work after today's individual loop is complete."
       >
-        <div className="grid gap-5">
-          <AstroCard title="Social hub">
-            <SocialPanel
-              social={dashboard.social}
-              busy={busy}
-              onAddFriend={onAddFriend}
-              onEnroll={onEnrollMarketplace}
-              plain
-            />
-          </AstroCard>
-          <AstroCard title="Challenge settings and cohorts">
-            <VersatilityPanel
-              busy={busy}
-              activeDiscipline={dashboard.activeDiscipline}
-              cohorts={dashboard.cohorts}
-              disciplines={disciplines}
-              profile={dashboard.studyProfile}
-              profileErrors={profileErrors}
-              settings={dashboard.challengeSettings}
-              onCreateCohort={onCreateCohort}
-              onJoinCohort={onJoinCohort}
-              onSaveProfile={onSaveProfile}
-              onSaveSettings={onSaveSettings}
-              plain
-            />
-          </AstroCard>
+        <div className="grid gap-8">
+          <SocialPanel
+            social={dashboard.social}
+            busy={busy}
+            onAddFriend={onAddFriend}
+            onEnroll={onEnrollMarketplace}
+            plain
+          />
+          <details className="dashboard-management group">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-4 marker:hidden">
+              <span>
+                <span className="block font-semibold text-slate-950">Training settings and cohorts</span>
+                <span className="mt-1 block text-sm text-slate-500">
+                  {dashboard.activeDiscipline.label} profile, {dashboard.cohorts.length} active {dashboard.cohorts.length === 1 ? "cohort" : "cohorts"}
+                </span>
+              </span>
+              <ChevronRight size={18} className="shrink-0 text-cyan-700 transition-transform group-open:rotate-90" />
+            </summary>
+            <div className="border-t border-slate-200 py-6">
+              <VersatilityPanel
+                busy={busy}
+                activeDiscipline={dashboard.activeDiscipline}
+                cohorts={dashboard.cohorts}
+                disciplines={disciplines}
+                profile={dashboard.studyProfile}
+                profileErrors={profileErrors}
+                settings={dashboard.challengeSettings}
+                onCreateCohort={onCreateCohort}
+                onJoinCohort={onJoinCohort}
+                onSaveProfile={onSaveProfile}
+                onSaveSettings={onSaveSettings}
+                plain
+              />
+            </div>
+          </details>
         </div>
       </AstroSection>
     </section>
@@ -1653,68 +1658,55 @@ function DashboardHero({
   const primaryAction = dashboard.today.status === "RestDay"
     ? { label: "Review progress", action: () => scrollToSection("metrics") }
     : grade
-    ? { label: "Review teaching", action: () => scrollToSection("learning") }
+    ? { label: "Review result", action: () => scrollToSection("assessment-feedback") }
     : submission
       ? { label: "Grade response", action: onGrade }
       : { label: hasDraft ? "Continue response" : "Respond", action: onOpenResponse };
   return (
-    <section className="astrowind-hero">
-      <div className="grid gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(22rem,0.95fr)] lg:items-center">
-        <div className="min-w-0">
-          <p className="astrowind-kicker">GURUnet operating loop</p>
-          <h1 className="mt-4 max-w-4xl text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
-            One rigorous challenge. One submitted answer. One serious correction.
+    <section className="dashboard-overview">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+        <div className="min-w-0 max-w-4xl">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill status={dashboard.today.status} />
+            <span className="text-sm font-medium text-cyan-800">{dashboard.activeDiscipline.label}</span>
+          </div>
+          <h1 className="mt-3 text-3xl font-semibold leading-tight text-slate-950 sm:text-4xl">
+            {dashboard.today.status === "RestDay" ? "Your weekly rest day" : dashboard.today.title}
           </h1>
-          <p className="mt-5 max-w-2xl text-base leading-8 text-slate-600 sm:text-lg">
+          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600">
             {dashboard.today.status === "RestDay" ? (
-              <>{dashboard.activeDiscipline.label} training for {user.name}. Today is the selected weekly rest day; no assessment is due.</>
+              <span>No assessment is due today.</span>
             ) : (
-              <>{dashboard.activeDiscipline.label} training for {user.name}. Today&apos;s brief is{" "}
-                <span className="font-semibold text-slate-900">{dashboard.today.title}</span>, due {deadline}.</>
+              <span className="inline-flex items-center gap-1.5"><CalendarClock size={15} /> Due {deadline}</span>
             )}
-          </p>
-          <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+            <span>Next brief {nextUnlock}</span>
+            <span>{dashboard.today.topic}</span>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={primaryAction.action}
-              className="interactive-lift h-11 rounded-md bg-slate-950 px-5 text-sm font-semibold text-white"
+              className="interactive-lift inline-flex h-10 items-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white"
             >
+              <FileText size={15} />
               {primaryAction.label}
             </button>
             <button
               type="button"
               onClick={onExaminer}
-              className="interactive-lift h-11 rounded-md border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700"
+              className="interactive-lift inline-flex h-10 items-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700"
             >
+              <ShieldCheck size={15} />
               Talk to examiner
             </button>
           </div>
-          <p className="mt-4 text-sm text-slate-500">
-            Next challenge unlocks {nextUnlock}. Current status: {dashboard.today.status}.
-          </p>
         </div>
 
-        <div className="astrowind-feature-card">
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusPill status={dashboard.today.status} />
-            <span className="rounded-md border border-slate-200 bg-white px-2 py-1 font-mono text-xs font-semibold text-slate-600">
-              {dashboard.today.dateKey} · {dashboard.today.difficulty}
-            </span>
-          </div>
-          <div className="mt-6 grid gap-3 sm:grid-cols-3">
-            <MiniStat label="PIS" value={user.pisScore.toFixed(1)} />
-            <MiniStat label="ERT" value={String(user.ertBalance)} />
-            <MiniStat label="Streak" value={`${user.currentStreak}d`} />
-          </div>
-          <div className="mt-6 rounded-md border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-            Today&apos;s focus
-            </p>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              {dashboard.today.topic}. Submit evidence, reasoning, exact checks, risk, rollback, and a defensible recommendation.
-            </p>
-          </div>
-        </div>
+        <dl className="grid grid-cols-3 border-y border-slate-200 py-3 lg:min-w-[19rem]">
+          <MiniStat label="PIS" value={user.pisScore.toFixed(1)} />
+          <MiniStat label="ERT" value={String(user.ertBalance)} />
+          <MiniStat label="Streak" value={`${user.currentStreak}d`} />
+        </dl>
       </div>
     </section>
   );
@@ -1722,9 +1714,9 @@ function DashboardHero({
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white/58 px-3 py-2">
-      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</p>
-      <p className="text-sm font-semibold text-slate-950">{value}</p>
+    <div className="min-w-0 border-l border-slate-200 px-3 first:border-l-0">
+      <dt className="text-xs text-slate-500">{label}</dt>
+      <dd className="mt-0.5 font-mono text-lg font-semibold text-slate-950">{value}</dd>
     </div>
   );
 }
@@ -1737,19 +1729,19 @@ function AstroSection({
   title,
 }: {
   children: ReactNode;
-  eyebrow: string;
+  eyebrow?: string;
   id: string;
   text: string;
   title: string;
 }) {
   return (
     <section id={id} className="astrowind-section">
-      <div className="mx-auto mb-10 max-w-3xl text-center">
-        <p className="astrowind-kicker">{eyebrow}</p>
-        <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+      <div className="mb-6 max-w-3xl">
+        {eyebrow && <p className="astrowind-kicker">{eyebrow}</p>}
+        <h2 className={`${eyebrow ? "mt-2" : ""} text-2xl font-semibold text-slate-950 sm:text-3xl`}>
           {title}
         </h2>
-        <p className="mt-4 text-base leading-7 text-slate-600">{text}</p>
+        <p className="mt-2 text-sm leading-6 text-slate-600 sm:text-base">{text}</p>
       </div>
       {children}
     </section>
@@ -1766,8 +1758,8 @@ function AstroCard({
   title: string;
 }) {
   return (
-    <section className={`astrowind-card ${className}`}>
-      <h3 className="mb-4 text-lg font-semibold tracking-tight text-slate-950">{title}</h3>
+    <section className={`astrowind-card min-w-0 self-start ${className}`}>
+      <h3 className="mb-3 text-base font-semibold text-slate-950">{title}</h3>
       {children}
     </section>
   );
@@ -1906,8 +1898,8 @@ function ChallengeWidget({
           <div className="mt-4">
             <PacketText text={challenge.scenario} />
           </div>
-          <div className="mt-4 rounded-md border border-slate-200 bg-white/55 p-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          <div className="mt-5 border-l-2 border-cyan-700 pl-4">
+            <p className="text-xs font-semibold text-slate-500">
               Objective
             </p>
             <p className="mt-1 leading-7 text-slate-700">{challenge.objective}</p>
@@ -2653,7 +2645,7 @@ function AppHeader({
 }) {
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/78 backdrop-blur-xl">
-      <div className="mx-auto flex w-full max-w-[1180px] items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      <div className="mx-auto flex w-full max-w-[1280px] items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <div className="flex items-center gap-3">
           <Image
             src="/gurunet.svg"
@@ -2680,7 +2672,7 @@ function AppHeader({
                 Metrics
               </button>
               <button type="button" onClick={() => scrollToSection("learning")} className="nav-link">
-                Learning
+                Notebook
               </button>
               <button type="button" onClick={() => scrollToSection("social")} className="nav-link">
                 Network
@@ -2720,11 +2712,11 @@ function AppHeader({
         )}
       </div>
       {user && (
-        <nav className="mx-auto flex w-full max-w-[1180px] gap-2 overflow-x-auto px-4 pb-3 text-xs font-semibold text-slate-600 sm:px-6 lg:hidden">
+        <nav className="mx-auto flex w-full max-w-[1280px] gap-2 overflow-x-auto px-4 pb-3 text-xs font-semibold text-slate-600 sm:px-6 lg:hidden">
           {[
             ["Today", "daily-challenge"],
             ["Metrics", "metrics"],
-            ["Learning", "learning"],
+            ["Notebook", "learning"],
             ["Network", "social"],
           ].map(([label, id]) => (
             <button
@@ -3225,9 +3217,7 @@ function SubmissionControl({
   notice: ChallengeNotice | null;
   onExaminer: () => void;
 }) {
-  const containerClass = submission
-    ? "border-y border-slate-200 py-4"
-    : "quiet-panel rounded-md p-4";
+  const containerClass = "border-y border-slate-200 py-4";
   return (
     <div className={containerClass}>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -3254,32 +3244,40 @@ function SubmissionControl({
           busy={busy}
         />
       ) : (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <button
-            type="button"
-            onClick={onFocus}
-            className="interactive-lift flex h-11 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700"
-          >
-            <ShieldCheck size={16} />
-            Focus mode
-          </button>
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onOpen}
-            className="interactive-lift flex h-11 items-center justify-center gap-2 rounded-md bg-cyan-700 px-5 text-sm font-semibold text-white shadow-sm shadow-cyan-900/15"
+            className="interactive-lift flex h-10 items-center justify-center gap-2 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white shadow-sm shadow-cyan-900/15"
           >
             <FileText size={16} />
             {hasDraft ? "Continue response" : "Respond"}
           </button>
           <button
             type="button"
-            onClick={onSample}
-            className="interactive-lift flex h-11 items-center justify-center rounded-md border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700"
+            onClick={onFocus}
+            className="interactive-lift flex h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700"
           >
-            Load sample answer
+            <ShieldCheck size={16} />
+            Focus mode
+          </button>
+          <button
+            type="button"
+            onClick={onSample}
+            className="interactive-lift flex h-10 items-center justify-center rounded-md px-3 text-sm font-semibold text-slate-600 hover:bg-slate-100"
+          >
+            Load response outline
+          </button>
+          <button
+            type="button"
+            onClick={onExaminer}
+            className="interactive-lift flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold text-cyan-800 hover:bg-cyan-50"
+          >
+            <ShieldCheck size={15} />
+            Ask examiner
           </button>
           {draftSavedAt && (
-            <p className="text-xs text-slate-500">
+            <p className="ml-auto text-xs text-slate-500">
               Autosaved {new Intl.DateTimeFormat("en-ZA", {
                 hour: "2-digit",
                 minute: "2-digit",
@@ -3288,29 +3286,10 @@ function SubmissionControl({
           )}
         </div>
       )}
-      {!submission && (
-        <div className="mt-4 rounded-md border border-slate-200 bg-white/65 p-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-slate-800">Examiner</p>
-              <p className="mt-1 text-sm leading-6 text-slate-600">
-                Ask questions, explain constraints, state delays or excuses, or adjust future challenge behavior.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onExaminer}
-              className="interactive-lift h-10 rounded-md border border-cyan-700/20 bg-cyan-50 px-4 text-sm font-semibold text-cyan-800"
-            >
-              Talk to examiner
-            </button>
-          </div>
-          {notice && (
-            <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600">
-              {notice.reply}
-            </p>
-          )}
-        </div>
+      {!submission && notice && (
+        <p className="mt-3 border-l-2 border-cyan-700 px-3 text-sm leading-6 text-slate-600">
+          {notice.reply}
+        </p>
       )}
       {status && <p className="mt-3 text-sm font-medium text-cyan-800">{status}</p>}
     </div>
@@ -3360,44 +3339,15 @@ function TeachingPanel({
     );
   }
 
-  const parsed = parseSubmissionContent(submission.content);
-  const gaveEvidence = /\b(show|log|trace|output|because|therefore|verify|evidence|screenshot|config)\b/i.test(parsed.body);
-  const gaveRisk = /\b(risk|rollback|avoid|blast radius|do not|contain)\b/i.test(parsed.body);
-  const gaveRecommendation = /\b(recommend|fix|correct|next|validate|verify)\b/i.test(parsed.body);
-
   return wrap(
-      <div className="grid gap-4">
-        <div className="rounded-md border border-cyan-700/15 bg-cyan-50 p-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-800">
+      <div className="grid gap-5">
+        <div className="border-l-2 border-cyan-700 pl-4">
+          <p className="text-xs font-semibold text-cyan-800">
             Worked solution
           </p>
           <p className="mt-2 text-sm leading-6 text-cyan-950">{challenge.solution}</p>
         </div>
-
-        <div className="grid gap-2 text-sm leading-6 text-slate-600">
-          <AssessmentLine
-            label="Correct"
-            complete={gaveEvidence || grade.finalScore >= 13}
-            text={gaveEvidence ? "You anchored at least part of the answer in observable evidence." : "The score indicates some useful reasoning, but the evidence trail needs sharper proof."}
-          />
-          <AssessmentLine
-            label="Vague"
-            complete={!gaveRecommendation || grade.technicalCap !== "NONE"}
-            text="Any claim that is not tied to a command, artifact, measurement, or explicit tradeoff should be rewritten as testable evidence."
-          />
-          <AssessmentLine
-            label="Risk"
-            complete={gaveRisk}
-            text={gaveRisk ? "You included risk or rollback thinking." : "Add rollback, blast radius, and what not to change before validation."}
-          />
-          <AssessmentLine
-            label="Correction"
-            complete={false}
-            text={grade.correction}
-          />
-        </div>
-
-        <p className="rounded-md bg-white/70 px-3 py-2 text-sm font-semibold leading-6 text-cyan-900">
+        <p className="border-t border-slate-200 pt-4 text-sm font-semibold leading-6 text-cyan-900">
           Next assessment focus: {grade.nextImprovementTarget}
         </p>
       </div>
@@ -3523,28 +3473,6 @@ function ChallengeFocusModal({
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function AssessmentLine({
-  complete,
-  label,
-  text,
-}: {
-  complete: boolean;
-  label: string;
-  text: string;
-}) {
-  return (
-    <div className="rounded-md border border-slate-200 bg-white/65 p-3">
-      <div className="flex items-center gap-2">
-        <CheckCircle2 size={15} className={complete ? "text-cyan-700" : "text-amber-600"} />
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-          {label}
-        </p>
-      </div>
-      <p className="mt-1">{text}</p>
-    </div>
   );
 }
 
@@ -4245,7 +4173,10 @@ function SubmittedPanel({
   return (
     <div className="grid gap-4">
       {grade ? (
-        <TeacherMarkedResponse challenge={challenge} grade={grade} submission={submission} />
+        <div className="grid gap-5">
+          <GradeScoreStrip grade={grade} />
+          <TeacherMarkedResponse challenge={challenge} grade={grade} submission={submission} />
+        </div>
       ) : (
         <SubmissionViewer content={submission.content} />
       )}
@@ -4420,10 +4351,18 @@ function RichSubmissionBody({ body }: { body: string }) {
   return <div className="grid gap-2">{nodes}</div>;
 }
 
-function GradeSummary({ grade, plain = false }: { grade: Grade; plain?: boolean }) {
+function GradeSummary({
+  grade,
+  plain = false,
+  showStrip = true,
+}: {
+  grade: Grade;
+  plain?: boolean;
+  showStrip?: boolean;
+}) {
   const content = (
       <div className="grid gap-4">
-        <GradeScoreStrip grade={grade} />
+        {showStrip && <GradeScoreStrip grade={grade} />}
 
         <ScoreMathPanel grade={grade} />
         <p className="rounded-md bg-cyan-50 px-3 py-2 text-sm font-semibold leading-6 text-cyan-900">
@@ -5104,8 +5043,7 @@ function ProgressPanel({ rows }: { rows: ProgressRow[] }) {
   }
   return (
     <div className="grid gap-3">
-        <h2 className="text-sm font-semibold text-slate-900">Progress tracker</h2>
-        <div className="mt-4 overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="border-b border-slate-200 text-slate-500">
               <tr>
@@ -5387,7 +5325,7 @@ function SocialPanel({
   plain?: boolean;
 }) {
   const content = (
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,0.72fr)]">
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(17rem,0.55fr)]">
         <div className="grid gap-4">
           <div className="overflow-x-auto rounded-md border border-slate-200 bg-white/65">
             <table className="w-full min-w-[760px] text-left text-sm">
@@ -5464,7 +5402,7 @@ function SocialPanel({
           </details>
         </div>
 
-        <aside className="rounded-md border border-slate-200 bg-white/60 p-4">
+        <aside className="self-start border-t border-slate-200 pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
           <form onSubmit={onAddFriend} className="grid gap-3">
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Add friend
@@ -5489,10 +5427,7 @@ function SocialPanel({
               Public profiles
             </p>
             {social.profiles.map((profile) => (
-              <div
-                key={profile.id}
-                className="grid grid-cols-[1fr_auto] gap-3 rounded-md border border-slate-200 bg-white/70 p-3"
-              >
+              <div key={profile.id} className="grid grid-cols-[1fr_auto] gap-3 border-t border-slate-200 pt-3 first:border-t-0 first:pt-0">
                 <div className="min-w-0">
                   <p className="truncate font-medium text-slate-900">
                     {profile.name}
@@ -5561,7 +5496,7 @@ function NotebookPanel({
         <div className="mt-4 grid gap-3">
           {localEntries.length === 0 && <p className="text-sm text-slate-600">No notebook entries yet.</p>}
           {localEntries.slice(0, 3).map((entry) => (
-            <div key={entry.id} className="rounded-md border border-slate-200 bg-white/60 p-3">
+            <div key={entry.id} className="border-t border-slate-200 pt-3 first:border-t-0 first:pt-0">
               <p className="font-medium text-slate-800">{entry.title}</p>
               <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600">{entry.summary}</p>
             </div>
