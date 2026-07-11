@@ -479,6 +479,7 @@ export function GurunetApp() {
   const [palette] = useState<ThemePaletteId>(() => initialPalette());
   const [responseOpen, setResponseOpen] = useState(false);
   const [examinerOpen, setExaminerOpen] = useState(false);
+  const [examinerLoading, setExaminerLoading] = useState(false);
   const [examinerMessages, setExaminerMessages] = useState<ExaminerMessage[]>([]);
   const [examinerSessions, setExaminerSessions] = useState<ExaminerSession[]>([]);
   const [examinerSessionId, setExaminerSessionId] = useState("");
@@ -764,15 +765,18 @@ export function GurunetApp() {
   }
 
   const loadExaminerSession = useCallback(async (challengeId: string) => {
+    setExaminerLoading(true);
+    setExaminerSessionId(challengeId);
     try {
       const data = await apiRequest<{ messages: ExaminerMessage[]; sessions: ExaminerSession[] }>(
         `/api/examiner/chat?challengeId=${encodeURIComponent(challengeId)}&activeChallengeId=${encodeURIComponent(today?.id ?? challengeId)}`,
       );
       setExaminerMessages(data.messages);
       setExaminerSessions(data.sessions);
-      setExaminerSessionId(challengeId);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Examiner chat failed");
+    } finally {
+      setExaminerLoading(false);
     }
   }, [today]);
 
@@ -1342,6 +1346,7 @@ export function GurunetApp() {
       <ExaminerChatModal
         activeChallengeId={today.id}
         busy={busy}
+        loading={examinerLoading}
         messages={examinerMessages}
         notice={dashboard.todayNotice}
         open={examinerOpen}
@@ -3479,6 +3484,7 @@ function ChallengeFocusModal({
 function ExaminerChatModal({
   activeChallengeId,
   busy,
+  loading,
   messages,
   notice,
   open,
@@ -3490,6 +3496,7 @@ function ExaminerChatModal({
 }: {
   activeChallengeId: string;
   busy: boolean;
+  loading: boolean;
   messages: ExaminerMessage[];
   notice: ChallengeNotice | null;
   open: boolean;
@@ -3500,110 +3507,196 @@ function ExaminerChatModal({
   onSend: (message: string) => void;
 }) {
   const [message, setMessage] = useState("");
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
   const archived = Boolean(selectedSessionId && selectedSessionId !== activeChallengeId);
   const selectedSession = sessions.find((session) => session.id === selectedSessionId);
 
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      const transcript = transcriptRef.current;
+      if (!transcript) return;
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      transcript.scrollTo({
+        top: transcript.scrollHeight,
+        behavior: reduceMotion ? "auto" : "smooth",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [loading, messages.length, open, selectedSessionId]);
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!message.trim()) return;
-    onSend(message);
+    if (!message.trim() || busy || loading) return;
+    onSend(message.trim());
     setMessage("");
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="grid h-[min(42rem,calc(100dvh-2rem))] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Examiner chat</DialogTitle>
+      <DialogContent className="top-0 right-0 bottom-0 left-auto grid h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded-none p-0 sm:w-[min(42rem,100vw)] sm:max-w-[42rem] sm:rounded-l-xl">
+        <DialogHeader className="border-b border-slate-200 px-4 py-4 pr-12 dark:border-slate-800 sm:px-5 sm:pr-12">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-cyan-50 text-cyan-800 dark:bg-slate-800 dark:text-cyan-300">
+              <ShieldCheck size={18} />
+            </span>
+            <div className="min-w-0">
+              <DialogTitle className="text-base text-slate-950 dark:text-slate-50">Examiner</DialogTitle>
+              <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                Challenge guidance, grading review, and profile adjustments
+              </p>
+            </div>
+          </div>
         </DialogHeader>
 
-        <div className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-3">
-          <div className="flex flex-col gap-2 border-b border-slate-200 pb-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">
-                {archived ? "Archived assessment session" : "Current assessment session"}
-              </p>
-              <p className="mt-0.5 text-xs text-slate-500">
-                {selectedSession?.dateKey ?? "Today"} · {selectedSession?.title ?? "Today's challenge"}
-              </p>
+        <div className="grid min-w-0 gap-3 border-b border-slate-200 bg-slate-50/70 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/75 sm:grid-cols-[minmax(0,1fr)_minmax(13rem,17rem)] sm:items-center sm:px-5">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-semibold ${archived ? "text-slate-500 dark:text-slate-400" : "text-cyan-800 dark:text-cyan-300"}`}>
+                {archived ? "Archived session" : "Current session"}
+              </span>
+              <span className="text-xs text-slate-400 dark:text-slate-600" aria-hidden="true">/</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">{selectedSession?.dateKey ?? "Today"}</span>
             </div>
-            <label className="grid gap-1 text-xs font-semibold text-slate-600">
-              Session
-              <select
-                value={selectedSessionId}
-                onChange={(event) => onSelectSession(event.target.value)}
-                className="h-9 max-w-full rounded-md border border-slate-300 bg-white px-2 text-xs font-normal text-slate-700 sm:max-w-72"
-              >
-                {sessions.map((session) => (
-                  <option key={session.id} value={session.id}>
-                    {session.active ? "Today" : session.dateKey} · {session.title}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <p className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {loading ? "Loading session..." : selectedSession?.title ?? "Today's challenge"}
+            </p>
           </div>
-          {notice && !archived && (
-            <div className="rounded-md border border-cyan-700/15 bg-cyan-50 px-3 py-2 text-sm leading-6 text-cyan-900">
-              {notice.reply}
-            </div>
-          )}
-          <div className="min-h-0 overflow-auto rounded-md border border-slate-200 bg-white/70 p-3">
-            {messages.length === 0 ? (
-              <div className="grid h-full min-h-36 place-items-center text-center text-sm leading-6 text-slate-500">
-                <p>
-                  Ask the examiner about rules, grading expectations, late work,
-                  excuses, or future challenge preferences.
-                </p>
-              </div>
-            ) : (
-              <div className="grid gap-3">
-                {messages.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`max-w-[88%] rounded-md px-3 py-2 text-sm leading-6 ${
-                      item.role === "user"
-                        ? "ml-auto bg-cyan-700 text-white"
-                        : "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {item.content}
-                  </div>
-                ))}
+          <label className="min-w-0">
+            <span className="sr-only">Examiner session</span>
+            <select
+              value={selectedSessionId}
+              onChange={(event) => onSelectSession(event.target.value)}
+              disabled={loading || sessions.length === 0 || busy}
+              className="h-10 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+            >
+              {loading ? (
+                <option value={selectedSessionId}>Loading session...</option>
+              ) : (
+                <>
+                  {sessions.length === 0 && <option value="">No sessions available</option>}
+                  {sessions.map((session) => (
+                    <option key={session.id} value={session.id}>
+                      {session.active ? "Today" : session.dateKey}: {session.title}
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+          </label>
+        </div>
+
+        <div
+          ref={transcriptRef}
+          className="min-h-0 overflow-y-auto overscroll-contain bg-white/55 px-4 py-5 dark:bg-slate-950/55 sm:px-5"
+          aria-live="polite"
+          aria-label="Examiner conversation"
+        >
+          <div className="mx-auto grid w-full max-w-2xl gap-5">
+            {notice && !archived && (
+              <div className="border-l-2 border-cyan-700 bg-cyan-50/70 px-3 py-2 text-sm leading-6 text-cyan-950 dark:bg-cyan-950/25 dark:text-cyan-100">
+                <p className="text-xs font-semibold text-cyan-800 dark:text-cyan-300">Active adjustment</p>
+                <p className="mt-1">{notice.reply}</p>
               </div>
             )}
-          </div>
 
-          {archived ? (
-            <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
-              <p className="text-sm text-slate-600">Archived sessions are read-only and remain attached to their original challenge.</p>
+            {loading ? (
+              <div className="grid gap-4 py-2" aria-label="Loading examiner session">
+                <div className="h-16 w-3/4 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
+                <div className="ml-auto h-12 w-2/3 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
+                <div className="h-24 w-5/6 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="grid min-h-64 place-items-center px-4 text-center">
+                <div className="max-w-sm">
+                  <span className="mx-auto grid size-11 place-items-center rounded-full border border-slate-200 bg-white text-cyan-800 dark:border-slate-700 dark:bg-slate-900 dark:text-cyan-300">
+                    <ShieldCheck size={20} />
+                  </span>
+                  <p className="mt-4 font-semibold text-slate-900 dark:text-slate-100">Start with the challenge in front of you</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                    Ask for clarification, challenge a grading decision with evidence, explain a delay, or adjust future assessments.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <ol className="grid gap-5">
+                {messages.map((item) =>
+                  item.role === "user" ? (
+                    <li key={item.id} className="flex justify-end">
+                      <div className="max-w-[88%] rounded-md bg-cyan-700 px-3.5 py-2.5 text-sm leading-6 text-white shadow-sm">
+                        <p className="whitespace-pre-wrap">{item.content}</p>
+                      </div>
+                    </li>
+                  ) : (
+                    <li key={item.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
+                      <span className="mt-0.5 grid size-8 place-items-center rounded-full border border-slate-200 bg-white text-cyan-800 dark:border-slate-700 dark:bg-slate-900 dark:text-cyan-300">
+                        <ShieldCheck size={15} />
+                      </span>
+                      <article className="min-w-0">
+                        <p className="mb-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">Examiner</p>
+                        <div className="rounded-md border border-slate-200 bg-white/85 px-3.5 py-3 text-sm leading-6 text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                          <RichSubmissionBody body={item.content} />
+                        </div>
+                      </article>
+                    </li>
+                  ),
+                )}
+                {busy && messages.at(-1)?.role === "user" && (
+                  <li className="grid grid-cols-[auto_minmax(0,1fr)] gap-3" aria-label="Examiner is responding">
+                    <span className="grid size-8 place-items-center rounded-full border border-slate-200 bg-white text-cyan-800 dark:border-slate-700 dark:bg-slate-900 dark:text-cyan-300">
+                      <Loader2 className="animate-spin" size={15} />
+                    </span>
+                    <div className="flex h-9 items-center text-sm text-slate-500 dark:text-slate-400">Reviewing your message...</div>
+                  </li>
+                )}
+              </ol>
+            )}
+          </div>
+        </div>
+
+        {archived ? (
+          <div className="flex flex-col gap-3 border-t border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+              <p className="text-sm text-slate-600 dark:text-slate-300">This session is read-only and remains attached to its original challenge.</p>
               <button
                 type="button"
                 onClick={() => onSelectSession(activeChallengeId)}
-                className="h-10 shrink-0 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700"
+                className="h-10 shrink-0 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-cyan-700/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Return to today
               </button>
-            </div>
-          ) : (
-            <form onSubmit={submit} className="grid gap-2 border-t border-slate-200 pt-3">
+          </div>
+        ) : (
+            <form onSubmit={submit} className="border-t border-slate-200 bg-white px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] dark:border-slate-800 dark:bg-slate-950 sm:px-5">
+              <div className="rounded-md border border-slate-300 bg-white shadow-sm transition-colors focus-within:border-cyan-700 focus-within:ring-2 focus-within:ring-cyan-700/15 dark:border-slate-700 dark:bg-slate-900">
+                <label htmlFor="examiner-message" className="sr-only">Message the examiner</label>
               <textarea
+                id="examiner-message"
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
-                className="h-24 resize-none rounded-md border border-slate-300 bg-white p-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
-                placeholder="Ask for clarification, dispute a grade with a concrete reason, set your rest day, or request one guarded challenge reformulation."
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }}
+                rows={3}
+                className="block max-h-36 min-h-20 w-full resize-none bg-transparent px-3 py-2.5 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-500 dark:text-slate-100 dark:placeholder:text-slate-400"
+                placeholder="Ask about this challenge or request a grading review..."
               />
-              <div className="flex justify-end">
+              <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-2 py-2 dark:border-slate-700">
+                <p className="truncate px-1 text-xs text-slate-500 dark:text-slate-400">
+                  {selectedSession?.title ?? "Today's challenge"}
+                </p>
                 <button
-                  disabled={busy || !message.trim()}
-                  className="flex h-10 items-center justify-center gap-2 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                disabled={busy || loading || !message.trim()}
+                  className="flex h-9 shrink-0 items-center justify-center gap-2 rounded-md bg-cyan-700 px-3.5 text-sm font-semibold text-white transition-colors hover:bg-cyan-800 focus-visible:ring-2 focus-visible:ring-cyan-700/30 disabled:opacity-60"
                 >
                   {busy ? <Loader2 className="animate-spin" size={16} /> : <ChevronRight size={16} />}
                   Send
                 </button>
               </div>
+              </div>
             </form>
-          )}
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -4316,21 +4409,21 @@ function RichSubmissionBody({ body }: { body: string }) {
 
     if (/^\s{0,3}#{1,4}\s+\S/.test(line)) {
       nodes.push(
-        <h4 key={`heading-${index}`} className="font-semibold text-slate-950">
+        <h4 key={`heading-${index}`} className="font-semibold text-slate-950 dark:text-slate-50">
           {line.replace(/^\s{0,3}#{1,4}\s+/, "")}
         </h4>,
       );
     } else if (/^\s*(-|\*)\s+\S/.test(line)) {
       nodes.push(
         <div key={`bullet-${index}`} className="flex gap-2">
-          <span className="text-cyan-700">-</span>
+          <span className="text-cyan-700 dark:text-cyan-300">-</span>
           <span>{line.replace(/^\s*(-|\*)\s+/, "")}</span>
         </div>,
       );
     } else if (/^\s*\d+\.\s+\S/.test(line)) {
       nodes.push(
         <div key={`number-${index}`} className="flex gap-2">
-          <span className="font-semibold text-cyan-800">
+          <span className="font-semibold text-cyan-800 dark:text-cyan-300">
             {line.match(/^\s*(\d+\.)/)?.[1]}
           </span>
           <span>{line.replace(/^\s*\d+\.\s+/, "")}</span>
