@@ -5,7 +5,7 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
 } from "openai/resources/chat/completions";
 import type { Response as OpenAIResponse } from "openai/resources/responses/responses";
-import type { Challenge, Difficulty, DisciplineSnapshot, Grade, Submission, User } from "@/lib/domain";
+import type { Challenge, Difficulty, DisciplineSnapshot, Grade, Submission, TechnicalCap, User } from "@/lib/domain";
 import { generateChallenge } from "@/lib/challenges";
 import { requireRuntimeEnv, getRuntimeEnv } from "@/lib/runtime-env";
 import { summarizeSubmissionForAi } from "@/lib/submission-content";
@@ -72,6 +72,65 @@ const critiqueSchema = z.object({
   nextImprovementTarget: z.string().min(20).max(320),
 });
 
+const gradeReviewSchema = z.object({
+  decision: z.enum(["Adjust", "Uphold"]),
+  holisticAssessment: z.string().min(80).max(1800),
+  rationale: z.string().min(40).max(1800),
+  correctedScores: z.object({
+    creativity: z.number().int().min(0).max(7),
+    ingenuity: z.number().int().min(0).max(7),
+    reporting: z.number().int().min(0).max(7),
+    alienness: z.number().int().min(0).max(7),
+    neatness: z.number().int().min(0).max(7),
+  }),
+  correctedTechnicalCap: z.enum(["NONE", "MOSTLY_WRONG", "UNSAFE", "INCOMPLETE"]),
+  correction: z.string().min(180).max(7000),
+  nextImprovementTarget: z.string().min(20).max(320),
+});
+
+const openAiGradeReviewResponseFormat = {
+  type: "json_schema" as const,
+  name: "gurunet_grade_review",
+  description: "An authoritative, evidence-led review of a disputed GURUnet grade.",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "decision",
+      "holisticAssessment",
+      "rationale",
+      "correctedScores",
+      "correctedTechnicalCap",
+      "correction",
+      "nextImprovementTarget",
+    ],
+    properties: {
+      decision: { type: "string", enum: ["Adjust", "Uphold"] },
+      holisticAssessment: { type: "string" },
+      rationale: { type: "string" },
+      correctedScores: {
+        type: "object",
+        additionalProperties: false,
+        required: ["creativity", "ingenuity", "reporting", "alienness", "neatness"],
+        properties: {
+          creativity: { type: "integer", minimum: 0, maximum: 7 },
+          ingenuity: { type: "integer", minimum: 0, maximum: 7 },
+          reporting: { type: "integer", minimum: 0, maximum: 7 },
+          alienness: { type: "integer", minimum: 0, maximum: 7 },
+          neatness: { type: "integer", minimum: 0, maximum: 7 },
+        },
+      },
+      correctedTechnicalCap: {
+        type: "string",
+        enum: ["NONE", "MOSTLY_WRONG", "UNSAFE", "INCOMPLETE"],
+      },
+      correction: { type: "string" },
+      nextImprovementTarget: { type: "string" },
+    },
+  },
+};
+
 const openAiCritiqueResponseFormat = {
   type: "json_schema" as const,
   name: "gurunet_strict_critique",
@@ -111,6 +170,7 @@ type AiTask =
   | "challenge_generation"
   | "verification_question"
   | "strict_critique"
+  | "grade_review"
   | "notebook_summary"
   | "discipline_notice"
   | "examiner_chat";
@@ -295,7 +355,10 @@ async function createOpenAiStructuredCompletion({
   userId,
 }: {
   effort: "minimal" | "low" | "medium" | "high" | "xhigh";
-  format: typeof openAiChallengeResponseFormat | typeof openAiCritiqueResponseFormat;
+  format:
+    | typeof openAiChallengeResponseFormat
+    | typeof openAiCritiqueResponseFormat
+    | typeof openAiGradeReviewResponseFormat;
   input: string;
   instructions: string;
   max_output_tokens: number;
@@ -368,6 +431,7 @@ function openAiChallengeInput(context: ChallengeContext) {
       "Expected answer format must be a numbered outline with section names, not a sentence.",
       "Submission requirements must state exactly what will be graded.",
       "When recoveryRequired is true, include a short recovery component based on recentWeaknesses or a nearby foundational concept. Keep it separate from the main incident.",
+      "When the discipline generation context says scheduledRecovery, the prompt must visibly contain exactly two tasks: Task 1 is the normal full assessment and Task 2 is a shorter retrieval/recovery task. Both must be represented in the expected answer format and submission requirements.",
       "Do not reveal the solution in the prompt-facing fields.",
       "The hidden solution must teach: correct approach, false paths, verification commands/checks, common vague answers, and what a strong submission should contain.",
       "The antiGenericRequirement must force scenario-specific evidence and penalize hand-wavy answers.",
@@ -504,6 +568,8 @@ export async function generateAiCritique(challenge: Challenge, submission: Submi
         "You are grading as the GURUnet examiner after the deterministic score has already been set.",
         "Return only JSON. Do not change numeric scores, final score, PIS, ERT, caps, penalties, or verdict.",
         "Your job is the learning answer: compare the challenge, hidden solution, expected answer format, and user's response.",
+        "First interpret and grade the submission as one connected response. Establish its overall thesis, evidence chain, operational plan, and intended meaning before inspecting individual lines.",
+        "Do not detach a sentence from evidence supplied in a neighboring or later section. Corrective annotations must preserve the meaning of the user's complete argument.",
         "Grade like a teacher marking a sheet of paper. Use direct references to the user's own response, quoting only short snippets when useful.",
         "Be exhaustive but structured. Identify what was correct, what was false, what was missing, what was vague, what was misleading, what was unsafe, and what evidence would have made the answer defensible.",
         "Teach the concept plainly enough that a user who did not know the answer can learn it, but keep the correction tied to this exact scenario.",
@@ -543,7 +609,7 @@ export async function generateAiCritique(challenge: Challenge, submission: Submi
         },
         outputGuidance: {
           correction:
-            "Use these titled sections inside one string: 1. Verdict in plain English; 2. Marked response notes with short snippets from the user labeled Correct, False, Unsupported/Vague, Missing, or Unsafe; 3. Worked solution and concept lesson; 4. Score explanation using the deterministic axes and penalties without changing numbers; 5. What to rewrite next time. Be specific and teacher-like, not generic.",
+            "Use these titled sections inside one string: 1. Holistic assessment of the complete response; 2. Corrective details with short snippets labeled Correct, False, Unsupported/Vague, Missing, or Unsafe; 3. Worked solution and concept lesson; 4. Score explanation using the deterministic axes and penalties without changing numbers; 5. What to rewrite next time. Be specific and teacher-like, not generic.",
           contentionNotes:
             "List the highest-impact disputes: false claims, unsupported jumps, unsafe advice, missing validation, or vague recommendations.",
           nextImprovementTarget:
@@ -563,6 +629,63 @@ export async function generateAiCritique(challenge: Challenge, submission: Submi
     };
   } catch (error) {
     logAiFallback("OpenAI critique failed; using deterministic critique", error, "openai");
+    return null;
+  }
+}
+
+export async function generateGradeReview(input: {
+  challenge: Challenge;
+  submission: Submission;
+  grade: Grade;
+  dispute: string;
+}) {
+  if (!openAiCritiqueEnabled()) return null;
+
+  try {
+    const content = await createOpenAiStructuredCompletion({
+      model: openAiCritiqueModel(),
+      task: "grade_review",
+      userId: input.grade.userId,
+      effort: "high",
+      max_output_tokens: 7000,
+      prompt_cache_key: "gurunet-grade-review-v1",
+      format: openAiGradeReviewResponseFormat,
+      instructions: [
+        lecturerPolicy,
+        "You are the authoritative second examiner reviewing a disputed grade.",
+        "Read the response as one connected argument before judging any sentence or section in isolation.",
+        "Interpret a claim using its surrounding evidence, headings, commands, and later clarification. Do not penalize a point merely because its evidence appears in another nearby section.",
+        "Check the user's dispute directly against the complete submitted response. Do not ask them to quote material that is already present.",
+        "Adjust only when the existing grade or correction materially overlooked, contradicted, or misread submitted evidence. Otherwise uphold it and explain why.",
+        "Do not alter deadline penalties. Corrected axis scores must remain integers from 0 to 7 and must represent the whole response.",
+        "Return a holistic assessment first, followed by precise corrective detail. Never promise future escalation or a delayed update.",
+        "Return only structured JSON and never hidden reasoning.",
+      ].join(" "),
+      input: JSON.stringify({
+        challenge: {
+          title: input.challenge.title,
+          topic: input.challenge.topic,
+          scenario: input.challenge.scenario,
+          objective: input.challenge.objective,
+          constraints: input.challenge.constraints,
+          expectedAnswerFormat: input.challenge.expectedAnswerFormat,
+          submissionRequirements: input.challenge.submissionRequirements,
+          solution: input.challenge.solution,
+          disciplineSnapshot: input.challenge.disciplineSnapshot,
+        },
+        completeSubmission: summarizeSubmissionForAi(input.submission.content),
+        disputedGrade: input.grade,
+        userDispute: input.dispute,
+        outputRule:
+          "Use decision Adjust only if the complete response supports a materially different assessment. For Uphold, repeat the existing scores/cap in correctedScores and correctedTechnicalCap.",
+      }),
+    });
+    if (!content) return null;
+    return gradeReviewSchema.parse(JSON.parse(content)) as z.infer<typeof gradeReviewSchema> & {
+      correctedTechnicalCap: TechnicalCap;
+    };
+  } catch (error) {
+    logAiFallback("OpenAI grade review failed; no grade change applied", error, "openai");
     return null;
   }
 }
@@ -713,7 +836,7 @@ export async function generateExaminerChatReply(input: {
       messages: [
         {
           role: "system",
-          content: `${lecturerPolicy} You are the user's examiner chat. You may answer questions, clarify rules, acknowledge late/excuse/context, and explain applied behavior changes. The backend has already applied any allowed actions; do not claim actions not listed. Return only JSON.`,
+          content: `${lecturerPolicy} You are the authoritative examiner for this user's challenge. You may answer questions, clarify rules, acknowledge late/excuse/context, resolve grading disputes, and explain applied behavior changes. The backend has already applied every allowed action listed in appliedActions. State the concrete outcome now. Never promise escalation, a future update, a 24-hour wait, or a grade change that is not listed. Return only JSON.`,
         },
         {
           role: "user",
@@ -739,6 +862,8 @@ export async function generateExaminerChatReply(input: {
             responseRules: [
               "Be conversational but direct.",
               "If the user asks for rule clarification, explain the active rule.",
+              "For grade disputes, treat grade_adjusted as final confirmation that the database and ledgers changed; treat grade_review_upheld as a completed review with no change; treat grade_review_unavailable as no change.",
+              "Do not ask the user to re-quote evidence that is already present in the submitted response and was checked by the backend review.",
               "Explain continuity credits as limited protection for genuine busy periods, not as a substitute for completing challenges.",
               "If the user states future preferences, mention what changed if an action was applied.",
               "If the active discipline snapshot includes preferred formats or preference notes, treat them as real platform configuration.",

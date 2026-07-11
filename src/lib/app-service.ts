@@ -12,10 +12,16 @@ import type {
   User,
 } from "@/lib/domain";
 import { difficultyForPis } from "@/lib/challenges";
-import { gradeSubmission, createNotebookEntry, needsVerification } from "@/lib/scoring";
+import {
+  gradeSubmission,
+  createNotebookEntry,
+  needsVerification,
+  recalculateGradeFromReview,
+} from "@/lib/scoring";
 import {
   generateDisciplineNoticeReply,
   generateExaminerChatReply,
+  generateGradeReview,
   generateVerificationQuestion,
   templateFallbackChallenge,
 } from "@/lib/openai-service";
@@ -146,6 +152,7 @@ const baseStudyProfileSchema = z.object({
   preferredFormats: z.array(z.string().trim().min(3).max(80)).min(2).max(6),
   evidenceTypes: z.array(z.string().trim().min(3).max(80)).min(2).max(8),
   weeklyTimeBudgetHours: z.coerce.number().int().min(1).max(40),
+  restDay: z.coerce.number().int().min(0).max(6),
   targetDifficulty: z.enum(["Guided", "Normal", "Advanced", "Production", "Expert"]),
   weakAreas: z.array(z.string().trim().min(2).max(80)).min(1).max(8),
   avoidAreas: z.array(z.string().trim().min(2).max(80)).max(8).default([]),
@@ -276,6 +283,7 @@ export async function updateStudyProfile(
       preferredFormats: input.preferredFormats,
       evidenceTypes: input.evidenceTypes,
       weeklyTimeBudgetHours: input.weeklyTimeBudgetHours,
+      restDay: input.restDay,
       targetDifficulty: input.targetDifficulty,
       weakAreas: input.weakAreas,
       avoidAreas: input.avoidAreas,
@@ -294,6 +302,7 @@ export async function updateStudyProfile(
       preferredFormats: input.preferredFormats,
       evidenceTypes: input.evidenceTypes,
       weeklyTimeBudgetHours: input.weeklyTimeBudgetHours,
+      restDay: input.restDay,
       targetDifficulty: input.targetDifficulty,
       weakAreas: input.weakAreas,
       avoidAreas: input.avoidAreas,
@@ -489,6 +498,9 @@ function buildRetentionSnapshot(input: {
   const dayOfWeek = new Date(`${calendarToday}T12:00:00.000Z`).getUTCDay();
   const revealUnlocked = completedDays >= targetDays || (dayOfWeek === 0 && scores.length > 0);
   const nextDateKey = addDaysToDateKey(input.today.dateKey, 1);
+  const restDay = input.discipline.restDay ?? 0;
+  const nextIsRestDay = isScheduledRestDay(nextDateKey, restDay);
+  const nextIsRecoveryDay = isDayAfterScheduledRest(nextDateKey, restDay);
   const previewFocus =
     profileFocusForChallenge(
       input.user.id,
@@ -514,6 +526,7 @@ function buildRetentionSnapshot(input: {
       if (row?.finalScore !== null && row?.finalScore !== undefined) state = "completed";
       else if (row?.status === "Protected") state = "protected";
       else if (row?.status === "Missed") state = "missed";
+      else if (row?.status === "RestDay") state = "rest";
       else if (date === calendarToday) state = "today";
       else if (date > calendarToday) state = "upcoming";
       else state = "open";
@@ -525,12 +538,16 @@ function buildRetentionSnapshot(input: {
       };
     }),
     preview: {
-      available: Boolean(input.todayGrade),
+      available: Boolean(input.todayGrade) || input.today.status === "RestDay",
       unlockAt: nextChallengeUnlockIso(input.today.dateKey, input.timezone),
       discipline: input.discipline.label,
-      focus: previewFocus,
-      format: previewFormat,
-      durationMinutes: input.settings.durationMinutes,
+      focus: nextIsRestDay ? "Scheduled weekly rest day" : previewFocus,
+      format: nextIsRestDay
+        ? "No assessment"
+        : nextIsRecoveryDay
+          ? `${previewFormat} + recovery task`
+          : previewFormat,
+      durationMinutes: nextIsRestDay ? 0 : input.settings.durationMinutes,
       difficulty: higherDifficulty(
         difficultyForPis(input.user.pisScore),
         input.settings.difficultyFloor,
@@ -561,6 +578,18 @@ function addDaysToDateKey(dateKey: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function weekDayForDateKey(dateKey: string) {
+  return new Date(`${dateKey}T12:00:00.000Z`).getUTCDay();
+}
+
+function isScheduledRestDay(dateKey: string, restDay: number) {
+  return weekDayForDateKey(dateKey) === restDay;
+}
+
+function isDayAfterScheduledRest(dateKey: string, restDay: number) {
+  return weekDayForDateKey(addDaysToDateKey(dateKey, -1)) === restDay;
+}
+
 function weeklyRevealMessage(averageScore: number | null, completedDays: number) {
   if (averageScore === null) return `${completedDays} learning days were protected this week.`;
   if (averageScore >= 15) return `Strong week: ${completedDays} completed days with precise, defensible work.`;
@@ -578,11 +607,14 @@ export async function getOrCreateTodayChallenge(user: User) {
   const today = currentChallengeDateKey(currentUser, existingChallenges);
   const settings = await getChallengeSettings(currentUser);
   const profileState = await getStudyProfile(currentUser);
+  const restDay = profileState.studyProfile?.restDay ?? profileState.activeDiscipline.restDay ?? 0;
+  const scheduledRecovery = isDayAfterScheduledRest(today, restDay);
   const discipline = challengeDisciplineSnapshot(
     profileState.activeDiscipline,
     settings,
     currentUser.id,
     today,
+    scheduledRecovery,
   );
 
   const existing = await prisma.challenge.findFirst({
@@ -590,6 +622,59 @@ export async function getOrCreateTodayChallenge(user: User) {
     include: { submissions: true, grades: true },
     orderBy: { createdAt: "desc" },
   });
+  if (isScheduledRestDay(today, restDay)) {
+    const restChallenge = createRestDayChallenge(currentUser, today, discipline);
+    if (existing?.submissions.length || existing?.grades.length) {
+      return fromDbChallenge(existing);
+    }
+    const stored = existing
+      ? await prisma.challenge.update({
+          where: { id: existing.id },
+          data: {
+            title: restChallenge.title,
+            difficulty: restChallenge.difficulty,
+            topic: restChallenge.topic,
+            scenario: restChallenge.scenario,
+            objective: restChallenge.objective,
+            constraints: restChallenge.constraints,
+            allowedTools: restChallenge.allowedTools,
+            expectedAnswerFormat: restChallenge.expectedAnswerFormat,
+            submissionRequirements: restChallenge.submissionRequirements,
+            deadlineAt: new Date(restChallenge.deadlineAt),
+            solution: restChallenge.solution,
+            antiGenericRequirement: restChallenge.antiGenericRequirement,
+            status: "RestDay",
+            isRecovery: false,
+            isPressure: false,
+            disciplineSnapshot: discipline,
+          },
+        })
+      : await prisma.challenge.create({
+          data: {
+            id: restChallenge.id,
+            userId: restChallenge.userId,
+            dateKey: restChallenge.dateKey,
+            title: restChallenge.title,
+            difficulty: restChallenge.difficulty,
+            topic: restChallenge.topic,
+            scenario: restChallenge.scenario,
+            objective: restChallenge.objective,
+            constraints: restChallenge.constraints,
+            allowedTools: restChallenge.allowedTools,
+            expectedAnswerFormat: restChallenge.expectedAnswerFormat,
+            submissionRequirements: restChallenge.submissionRequirements,
+            deadlineAt: new Date(restChallenge.deadlineAt),
+            solution: restChallenge.solution,
+            antiGenericRequirement: restChallenge.antiGenericRequirement,
+            status: "RestDay",
+            isRecovery: false,
+            isPressure: false,
+            disciplineSnapshot: discipline,
+            createdAt: new Date(restChallenge.createdAt),
+          },
+        });
+    return fromDbChallenge(stored);
+  }
   if (existing) {
     const existingDomain = fromDbChallenge(existing);
     const canRefreshForProfile =
@@ -607,7 +692,7 @@ export async function getOrCreateTodayChallenge(user: User) {
       const recentWeaknesses = recentGrades.map((grade) => grade.nextImprovementTarget);
       const refreshed = createDailyChallenge(currentUser, {
         dateKey: today,
-        recovery: existing.isRecovery,
+        recovery: scheduledRecovery || existing.isRecovery || settings.recoveryMode,
         pressure: existing.isPressure,
         recentWeaknesses,
         settings,
@@ -627,6 +712,10 @@ export async function getOrCreateTodayChallenge(user: User) {
           submissionRequirements: refreshed.submissionRequirements,
           solution: refreshed.solution,
           antiGenericRequirement: refreshed.antiGenericRequirement,
+          deadlineAt: new Date(refreshed.deadlineAt),
+          status: toDbStatus(refreshed.status),
+          isRecovery: refreshed.isRecovery,
+          isPressure: refreshed.isPressure,
           disciplineSnapshot: discipline,
         },
       });
@@ -639,7 +728,7 @@ export async function getOrCreateTodayChallenge(user: User) {
           dateKey: today,
           difficulty: difficultyForPis(currentUser.pisScore),
           track: discipline.id,
-        topicFocus: discipline.generationContext?.topicFocus,
+          topicFocus: discipline.generationContext?.topicFocus,
           durationMinutes: settings.durationMinutes,
           disciplineSnapshot: discipline,
           recentWeaknesses,
@@ -663,7 +752,10 @@ export async function getOrCreateTodayChallenge(user: User) {
   ]);
   const challenge = createDailyChallenge(currentUser, {
     dateKey: today,
-    recovery: settings.recoveryMode || needsRecovery(records.map(fromDbDisciplineRecord), currentUser),
+    recovery:
+      scheduledRecovery ||
+      settings.recoveryMode ||
+      needsRecovery(records.map(fromDbDisciplineRecord), currentUser),
     pressure: false,
     recentWeaknesses: recentGrades.map((grade) => grade.nextImprovementTarget),
     settings,
@@ -876,9 +968,11 @@ export async function submitChallenge(
     where: { id: challengeId, userId: user.id },
   });
   if (!challenge) throw new Response("Challenge not found", { status: 404 });
-  if (challenge.status === "Excused" || challenge.status === "Protected") {
+  if (["Excused", "Protected", "RestDay"].includes(challenge.status)) {
     throw new Response(
-      challenge.status === "Protected"
+      challenge.status === "RestDay"
+        ? "No submission is required on the selected weekly rest day."
+        : challenge.status === "Protected"
         ? "This absence was already protected by a continuity credit. Continue with the current challenge."
         : "This challenge has been excused. Generate or wait for the next challenge instead.",
       { status: 409 },
@@ -977,7 +1071,12 @@ export async function recordChallengeNotice(
   });
 
   const notice = await prisma.$transaction(async (tx) => {
-    if (accepted && challenge.status !== "Submitted" && challenge.status !== "Late") {
+    if (
+      accepted &&
+      challenge.status !== "Submitted" &&
+      challenge.status !== "Late" &&
+      challenge.status !== "RestDay"
+    ) {
       if (challenge.status === "Protected") {
         const storedUser = await tx.user.findUniqueOrThrow({ where: { id: user.id } });
         if (storedUser.continuityCredits < 3) {
@@ -1026,41 +1125,50 @@ export async function recordChallengeNotice(
   };
 }
 
-export async function getExaminerMessages(user: User) {
-  const delegate = (prisma as unknown as {
-    examinerMessage?: {
-      findMany: (args: {
-        where: { userId: string };
-        orderBy: { createdAt: "asc" };
-        take: number;
-      }) => Promise<
-        {
-          id: string;
-          role: string;
-          content: string;
-          actions: unknown;
-          createdAt: Date;
-        }[]
-      >;
-    };
-  }).examinerMessage;
-  if (!delegate) return [];
-  try {
-    const rows = await delegate.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: "asc" },
-      take: 40,
-    });
-    return rows.map((message) => ({
-      id: message.id,
-      role: message.role,
-      content: message.content,
-      actions: message.actions,
-      createdAt: message.createdAt.toISOString(),
-    }));
-  } catch {
-    return [];
+export async function getExaminerMessages(user: User, challengeId?: string) {
+  if (challengeId) {
+    const owned = await prisma.challenge.count({ where: { id: challengeId, userId: user.id } });
+    if (!owned) throw new Response("Examiner session not found", { status: 404 });
   }
+  const rows = await prisma.examinerMessage.findMany({
+    where: {
+      userId: user.id,
+      ...(challengeId ? { challengeId } : {}),
+    },
+    orderBy: { createdAt: "asc" },
+    take: 80,
+  });
+  return rows.map((message) => ({
+    id: message.id,
+    challengeId: message.challengeId,
+    role: message.role,
+    content: message.content,
+    actions: message.actions,
+    createdAt: message.createdAt.toISOString(),
+  }));
+}
+
+export async function getExaminerSessions(user: User, activeChallengeId?: string) {
+  const challenges = await prisma.challenge.findMany({
+    where: {
+      userId: user.id,
+      OR: [
+        { examinerMessages: { some: { userId: user.id } } },
+        ...(activeChallengeId ? [{ id: activeChallengeId }] : []),
+      ],
+    },
+    include: { _count: { select: { examinerMessages: true } } },
+    orderBy: [{ dateKey: "desc" }, { createdAt: "desc" }],
+    take: 30,
+  });
+  return challenges.map((challenge) => ({
+    id: challenge.id,
+    dateKey: challenge.dateKey,
+    title: challenge.title,
+    status: fromDbStatus(challenge.status),
+    messageCount: challenge._count.examinerMessages,
+    active: challenge.id === activeChallengeId,
+  }));
 }
 
 export async function sendExaminerMessage(
@@ -1078,11 +1186,17 @@ export async function sendExaminerMessage(
 
   const currentUser = fromDbUser(await prisma.user.findUniqueOrThrow({ where: { id: user.id } }));
   const settings = await getChallengeSettings(currentUser);
-  const recentMessages = await getExaminerMessages(currentUser);
+  const recentMessages = await getExaminerMessages(currentUser, challenge.id);
   const appliedActions = await applyExaminerActions(currentUser, fromDbChallenge(challenge), input.message, settings);
+  const updatedUser = fromDbUser(
+    await prisma.user.findUniqueOrThrow({ where: { id: user.id } }),
+  );
+  const updatedChallenge = fromDbChallenge(
+    await prisma.challenge.findUniqueOrThrow({ where: { id: challenge.id } }),
+  );
   const reply = await generateExaminerChatReply({
-    user: currentUser,
-    challenge: fromDbChallenge(challenge),
+    user: updatedUser,
+    challenge: updatedChallenge,
     message: input.message,
     recentMessages: recentMessages.map((message) => ({
       role: message.role,
@@ -1116,6 +1230,7 @@ export async function sendExaminerMessage(
     return {
       reply: {
         id: createId("xmsg"),
+        challengeId: challenge.id,
         role: "assistant",
         content: reply,
         actions: appliedActions,
@@ -1148,11 +1263,216 @@ export async function sendExaminerMessage(
   return {
     reply: {
       id: assistant.id,
+      challengeId: challenge.id,
       role: assistant.role,
       content: assistant.content,
       actions: assistant.actions,
       createdAt: assistant.createdAt.toISOString(),
     },
+  };
+}
+
+type ExaminerAction = { type: string; summary: string };
+
+async function reviewGradeDispute(
+  user: User,
+  challenge: Challenge,
+  dispute: string,
+): Promise<ExaminerAction> {
+  const submission = await prisma.submission.findFirst({
+    where: { userId: user.id, challengeId: challenge.id },
+    include: { attachments: true, grade: true },
+  });
+  if (!submission?.grade) {
+    return {
+      type: "grade_review_unavailable",
+      summary: "No completed grade exists for this challenge yet, so there is nothing to adjust.",
+    };
+  }
+
+  const reviews = await prisma.gradeReview.findMany({
+    where: { gradeId: submission.grade.id },
+    orderBy: { createdAt: "desc" },
+    take: 3,
+  });
+  if (reviews.some((review) => review.outcome === "Adjusted")) {
+    return {
+      type: "grade_review_already_adjusted",
+      summary: "This grade has already received an examiner adjustment. The recorded adjustment remains authoritative; a further change requires an administrator audit.",
+    };
+  }
+  if (reviews.length >= 2) {
+    return {
+      type: "grade_review_limit",
+      summary: "Two examiner reviews have already been recorded for this grade. The grade is locked for automatic review and now requires an administrator audit.",
+    };
+  }
+
+  const domainSubmission = submissionWithAttachments(submission);
+  const existingGrade = fromDbGrade(submission.grade);
+  const review = await generateGradeReview({
+    challenge,
+    submission: domainSubmission,
+    grade: existingGrade,
+    dispute,
+  });
+  const before = gradeReviewSnapshot(existingGrade);
+
+  if (!review) {
+    await prisma.gradeReview.create({
+      data: {
+        id: createId("grev"),
+        gradeId: existingGrade.id,
+        userId: user.id,
+        dispute,
+        outcome: "Unavailable",
+        rationale: "The authoritative review model was unavailable. No score or account balance was changed.",
+        before: before as Prisma.InputJsonValue,
+      },
+    });
+    return {
+      type: "grade_review_unavailable",
+      summary: "I could not complete an authoritative review in this turn, so I made no grade change. I have recorded the failed review without claiming an escalation or delayed update.",
+    };
+  }
+
+  const reviewed = recalculateGradeFromReview({
+    existing: existingGrade,
+    challenge,
+    submission: domainSubmission,
+    scores: review.correctedScores,
+    technicalCap: review.correctedTechnicalCap,
+  });
+  reviewed.pisChange = Math.max(reviewed.pisChange, existingGrade.pisChange);
+  reviewed.updatedPis = Number(
+    Math.max(0, Math.min(100, existingGrade.previousPis + reviewed.pisChange)).toFixed(1),
+  );
+  reviewed.ertEarned = Math.max(reviewed.ertEarned, existingGrade.ertEarned);
+  reviewed.ertBalance =
+    existingGrade.ertBalance - existingGrade.ertEarned + reviewed.ertEarned;
+  const shouldAdjust =
+    review.decision === "Adjust" && reviewed.finalScore >= existingGrade.finalScore;
+
+  if (!shouldAdjust) {
+    await prisma.gradeReview.create({
+      data: {
+        id: createId("grev"),
+        gradeId: existingGrade.id,
+        userId: user.id,
+        dispute,
+        outcome: "Upheld",
+        rationale: review.rationale,
+        before: before as Prisma.InputJsonValue,
+        after: before as Prisma.InputJsonValue,
+      },
+    });
+    return {
+      type: "grade_review_upheld",
+      summary: `I reviewed the complete response against the challenge and rubric. The grade remains ${existingGrade.finalScore}/20. ${review.rationale}`,
+    };
+  }
+
+  const correction = `${review.holisticAssessment}\n\n${review.correction}`;
+  const after = {
+    ...reviewed,
+    correction,
+    nextImprovementTarget: review.nextImprovementTarget,
+  };
+  const pisDifference = Number((reviewed.pisChange - existingGrade.pisChange).toFixed(1));
+  const ertDifference = reviewed.ertEarned - existingGrade.ertEarned;
+
+  await prisma.$transaction(async (tx) => {
+    const currentUser = await tx.user.findUniqueOrThrow({ where: { id: user.id } });
+    const nextPis = Number(
+      Math.max(0, Math.min(100, currentUser.pisScore + pisDifference)).toFixed(1),
+    );
+    const nextErt = Math.max(0, currentUser.ertBalance + ertDifference);
+
+    await tx.grade.update({
+      where: { id: existingGrade.id },
+      data: {
+        creativity: reviewed.creativity,
+        ingenuity: reviewed.ingenuity,
+        reporting: reviewed.reporting,
+        alienness: reviewed.alienness,
+        neatness: reviewed.neatness,
+        rawScore: reviewed.rawScore,
+        balancePenalty: reviewed.balancePenalty,
+        latePenalty: reviewed.latePenalty,
+        technicalCap: reviewed.technicalCap,
+        finalScore: reviewed.finalScore,
+        verdict: reviewed.verdict,
+        correction,
+        nextImprovementTarget: review.nextImprovementTarget,
+        pisChange: reviewed.pisChange,
+        updatedPis: reviewed.updatedPis,
+        ertEarned: reviewed.ertEarned,
+        ertBalance: reviewed.ertBalance,
+      },
+    });
+    await tx.user.update({
+      where: { id: user.id },
+      data: { pisScore: nextPis, ertBalance: nextErt },
+    });
+    if (pisDifference !== 0) {
+      await tx.ledgerEvent.create({
+        data: {
+          id: createId("pis"),
+          userId: user.id,
+          type: "PIS",
+          amount: pisDifference,
+          reason: `Examiner grade review: ${challenge.title}`,
+          balanceAfter: nextPis,
+        },
+      });
+    }
+    if (ertDifference !== 0) {
+      await tx.ledgerEvent.create({
+        data: {
+          id: createId("ert"),
+          userId: user.id,
+          type: "ERT",
+          amount: ertDifference,
+          reason: `Examiner grade review: ${challenge.title}`,
+          balanceAfter: nextErt,
+        },
+      });
+    }
+    await tx.gradeReview.create({
+      data: {
+        id: createId("grev"),
+        gradeId: existingGrade.id,
+        userId: user.id,
+        dispute,
+        outcome: "Adjusted",
+        rationale: review.rationale,
+        before: before as Prisma.InputJsonValue,
+        after: after as Prisma.InputJsonValue,
+      },
+    });
+  });
+
+  return {
+    type: "grade_adjusted",
+    summary: `I reviewed the complete response and adjusted the grade immediately from ${existingGrade.finalScore}/20 to ${reviewed.finalScore}/20. PIS and ERT were reconciled in the ledger. ${review.rationale}`,
+  };
+}
+
+function gradeReviewSnapshot(grade: Grade) {
+  return {
+    creativity: grade.creativity,
+    ingenuity: grade.ingenuity,
+    reporting: grade.reporting,
+    alienness: grade.alienness,
+    neatness: grade.neatness,
+    rawScore: grade.rawScore,
+    balancePenalty: grade.balancePenalty,
+    latePenalty: grade.latePenalty,
+    technicalCap: grade.technicalCap,
+    finalScore: grade.finalScore,
+    verdict: grade.verdict,
+    pisChange: grade.pisChange,
+    ertEarned: grade.ertEarned,
   };
 }
 
@@ -1162,12 +1482,14 @@ async function applyExaminerActions(
   message: string,
   settings: Awaited<ReturnType<typeof getChallengeSettings>>,
 ) {
-  const actions: { type: string; summary: string }[] = [];
+  const actions: ExaminerAction[] = [];
   const lower = message.toLowerCase();
   const nextSettings = { ...settings };
   let settingsChanged = false;
+  const preferenceIntent =
+    /\b(prefer|set|switch|change|make|future|next challenge|focus my|study|configure)\b/i.test(message);
 
-  const track = inferTrack(lower);
+  const track = preferenceIntent ? inferTrack(lower) : null;
   if (track) {
     nextSettings.track = track;
     settingsChanged = true;
@@ -1193,7 +1515,7 @@ async function applyExaminerActions(
     }
   }
 
-  if (/\b(lab|hands-on|practical exercise|practical lab)\b/i.test(message)) {
+  if (preferenceIntent && /\b(lab|hands-on|practical exercise|practical lab)\b/i.test(message)) {
     const profile = await safeFindStudyProfile(user.id);
     if (profile) {
       const template = getDiscipline(profile.primaryDiscipline);
@@ -1221,7 +1543,7 @@ async function applyExaminerActions(
   }
 
   const difficulty = inferDifficulty(message);
-  if (difficulty) {
+  if (difficulty && preferenceIntent) {
     nextSettings.difficultyFloor = difficulty;
     settingsChanged = true;
     actions.push({ type: "settings.difficultyFloor", summary: `Difficulty floor set to ${difficulty}.` });
@@ -1238,8 +1560,45 @@ async function applyExaminerActions(
     actions.push({ type: "settings.teamMode", summary: "Team/cohort mode enabled." });
   }
 
+  const requestedRestDay = inferRestDay(lower);
+  if (requestedRestDay !== null) {
+    const profile = await safeFindStudyProfile(user.id);
+    if (profile && profile.restDay !== requestedRestDay) {
+      await prisma.userStudyProfile.update({
+        where: { userId: user.id },
+        data: { restDay: requestedRestDay },
+      });
+      actions.push({
+        type: "profile.restDay",
+        summary: `Weekly rest day changed to ${weekDayName(requestedRestDay)}. No assessment will be due that day, and the following day will contain two tasks.`,
+      });
+    }
+  }
+
   if (settingsChanged) {
     await updateChallengeSettings(user, challengeSettingsSchema.parse(nextSettings));
+  }
+
+  if (isGradeDispute(message)) {
+    actions.push(await reviewGradeDispute(user, challenge, message));
+  }
+
+  if (isChallengeReformulationRequest(message)) {
+    try {
+      await regenerateTodayChallengeOnce("examiner", user, message);
+      actions.push({
+        type: "challenge_reformulated",
+        summary: "I replaced today's unsubmitted challenge immediately. This is the one permitted examiner reformulation for the day.",
+      });
+    } catch (error) {
+      actions.push({
+        type: "challenge_reformulation_rejected",
+        summary:
+          error instanceof Response
+            ? await error.text()
+            : "The challenge could not be reformulated under the active safeguards.",
+      });
+    }
   }
 
   if (/\b(late|delay|delayed|after deadline|cannot submit on time|won't submit on time|will submit later)\b/i.test(message)) {
@@ -1270,6 +1629,25 @@ function inferTrack(lower: string) {
   if (/\b(documentation|runbook|postmortem|report|writing)\b/.test(lower)) return "technical_writing";
   if (/\b(network|networking|routing|switching|ospf|bgp|vlan|stp|firewall)\b/.test(lower)) return "networking";
   return null;
+}
+
+function inferRestDay(lower: string) {
+  if (!/\b(rest day|break day|day off|weekly break|weekly rest)\b/.test(lower)) return null;
+  const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const index = days.findIndex((day) => new RegExp(`\\b${day}\\b`).test(lower));
+  return index >= 0 ? index : null;
+}
+
+function weekDayName(day: number) {
+  return ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][day] ?? "the selected day";
+}
+
+function isGradeDispute(message: string) {
+  return /\b(graded? (?:me )?wrong|grading (?:is|was) wrong|misgraded|wrongly graded|review (?:my|the) grade|appeal (?:my|the) grade|fix (?:my|the) grade|adjust (?:my|the) grade|score (?:is|was|seems) (?:wrong|incorrect)|you (?:said|claimed|mentioned).*(?:did not|didn't|missing))\b/i.test(message);
+}
+
+function isChallengeReformulationRequest(message: string) {
+  return /\b(?:regenerate|replace|reformulate|rewrite|rephrase)\b.*\b(?:challenge|question|brief|task)\b/i.test(message);
 }
 
 function inferDifficulty(message: string): Difficulty | null {
@@ -1682,6 +2060,40 @@ function needsRecovery(records: DisciplineRecord[], user: User) {
   );
 }
 
+function createRestDayChallenge(
+  user: User,
+  dateKey: string,
+  discipline: DisciplineSnapshot,
+): Challenge {
+  return {
+    id: createId("chl"),
+    userId: user.id,
+    dateKey,
+    title: "Scheduled weekly rest day",
+    difficulty: difficultyForPis(user.pisScore),
+    topic: "Recovery and consolidation",
+    scenario:
+      "No assessment is scheduled today. Step away from the daily task, recover attention, and let recent corrections settle. Your next assessment will contain two tasks: the normal profile-specific challenge and a shorter retrieval task based on a recent weak area.",
+    objective: "Rest without losing continuity. No response or evidence is required today.",
+    constraints: [
+      "No submission is required.",
+      "No PIS, ERT, streak, or continuity-credit penalty applies.",
+      "The following assessment includes a short recovery task in addition to the main challenge.",
+    ],
+    allowedTools: [],
+    expectedAnswerFormat: "No response required.",
+    submissionRequirements: [],
+    deadlineAt: localDeadlineIso(dateKey, getUserTimezone(user.timezone), 15),
+    solution: "Scheduled rest day completed automatically.",
+    antiGenericRequirement: "No response required.",
+    status: "RestDay",
+    isRecovery: false,
+    isPressure: false,
+    disciplineSnapshot: discipline,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 function createDailyChallenge(
   user: User,
   options: {
@@ -1765,6 +2177,8 @@ function createDisciplineFallbackChallenge(
     discipline.formats[0] ??
     "Practical assessment";
   const packet = fallbackPacketForDiscipline(discipline.id, focus);
+  const recoveryTopic =
+    options.recentWeaknesses[0] ?? discipline.weakAreas?.[0] ?? focus;
   const sections = discipline.responseSections.length
     ? discipline.responseSections
     : ["Observation", "Evidence", "Plan", "Validation", "Risk"];
@@ -1774,6 +2188,7 @@ function createDisciplineFallbackChallenge(
     title: `${discipline.label}: ${packet.title}`,
     topic: focus,
     scenario: [
+      "Task 1 - Main assessment",
       "Scenario / Background",
       packet.background,
       "",
@@ -1783,6 +2198,13 @@ function createDisciplineFallbackChallenge(
       "Optional Lab",
       packet.lab,
       "",
+      ...(options.recovery
+        ? [
+            "Task 2 - Recovery retrieval",
+            `In 3-5 lines, explain one important failure mode or misconception related to ${recoveryTopic}. State the evidence that would expose it and one validation step.`,
+            "",
+          ]
+        : []),
       "Submission Deadline",
       "15:00 local time. Do not reveal the solution until after submission.",
     ].join("\n"),
@@ -1796,16 +2218,20 @@ function createDisciplineFallbackChallenge(
       ...(discipline.preferenceNotes ? [`User preference notes: ${discipline.preferenceNotes}.`] : []),
     ].slice(0, 8),
     allowedTools: packet.allowedTools,
-    expectedAnswerFormat: sections.map((section, index) => `${index + 1}. ${section}`).join("\n"),
+    expectedAnswerFormat: [
+      ...sections.map((section, index) => `${index + 1}. ${section}`),
+      ...(options.recovery ? [`${sections.length + 1}. Recovery task`] : []),
+    ].join("\n"),
     submissionRequirements: [
       "Core answer or root cause.",
       "Evidence tied to the provided artifacts.",
       "Exact checks, commands, code, or work product.",
       "Verification method.",
       "Risk, rollback, limitation, or escalation note.",
+      ...(options.recovery ? ["Recovery retrieval task answer."] : []),
       ...discipline.evidenceTypes.slice(0, 4).map((item) => `Profile evidence expectation: ${item}.`),
     ].slice(0, 10),
-    solution: packet.solution,
+    solution: `${packet.solution}${options.recovery ? ` Recovery task: explain a concrete ${recoveryTopic} failure mode, the evidence that distinguishes it, and a validation step.` : ""}`,
     antiGenericRequirement:
       `Your answer must use ${discipline.label} evidence from the brief and follow the expected sections: ${sections.join(", ")}.`,
   };
@@ -2050,6 +2476,7 @@ function snapshotFromProfile(profile: StudyProfile) {
     evidenceTypes: profile.evidenceTypes,
     targetDifficulty: profile.targetDifficulty,
     weeklyTimeBudgetHours: profile.weeklyTimeBudgetHours,
+    restDay: profile.restDay,
     preferenceNotes: profile.preferenceNotes,
     secondaryInterests: profile.secondaryInterests,
     currentLevel: profile.currentLevel,
@@ -2065,6 +2492,7 @@ function challengeDisciplineSnapshot(
   settings: Awaited<ReturnType<typeof getChallengeSettings>>,
   userId: string,
   dateKey: string,
+  scheduledRecovery = false,
 ): DisciplineSnapshot {
   const topicFocus = profileFocusForChallenge(
     userId,
@@ -2080,6 +2508,7 @@ function challengeDisciplineSnapshot(
       difficultyFloor: settings.difficultyFloor as Difficulty,
       recoveryMode: settings.recoveryMode,
       teamMode: settings.teamMode,
+      scheduledRecovery,
       ...(topicFocus ? { topicFocus } : {}),
       ...(preferredFormat ? { preferredFormat } : {}),
     },
@@ -2356,16 +2785,22 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
     getChallengeSettings(user),
     getStudyProfile(user),
   ]);
+  const restDay = profileState.studyProfile?.restDay ?? profileState.activeDiscipline.restDay ?? 0;
+  const scheduledRecovery = isDayAfterScheduledRest(today, restDay);
   const discipline = challengeDisciplineSnapshot(
     profileState.activeDiscipline,
     settings,
     user.id,
     today,
+    scheduledRecovery,
   );
   const recentWeaknesses = recentGrades.map((grade) => grade.nextImprovementTarget);
   const next = createDailyChallenge(user, {
     dateKey: today,
-    recovery: settings.recoveryMode || needsRecovery(records.map(fromDbDisciplineRecord), user),
+    recovery:
+      scheduledRecovery ||
+      settings.recoveryMode ||
+      needsRecovery(records.map(fromDbDisciplineRecord), user),
     pressure: false,
     recentWeaknesses,
     settings,

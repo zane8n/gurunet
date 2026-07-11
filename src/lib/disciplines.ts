@@ -169,6 +169,7 @@ export function disciplineSnapshot(input: {
   evidenceTypes: string[];
   targetDifficulty: Difficulty;
   weeklyTimeBudgetHours: number;
+  restDay?: number;
   preferenceNotes?: string;
   secondaryInterests?: string[];
   currentLevel?: string;
@@ -192,6 +193,7 @@ export function disciplineSnapshot(input: {
     rubric: template.rubric,
     targetDifficulty: input.targetDifficulty,
     weeklyTimeBudgetHours: input.weeklyTimeBudgetHours,
+    restDay: input.restDay ?? 0,
     secondaryInterests: input.secondaryInterests ?? [],
     weakAreas: input.weakAreas ?? [],
     avoidAreas: input.avoidAreas ?? [],
@@ -211,6 +213,7 @@ export function disciplineProfileKey(snapshot?: DisciplineSnapshot) {
     evidenceTypes: snapshot.evidenceTypes,
     targetDifficulty: snapshot.targetDifficulty,
     weeklyTimeBudgetHours: snapshot.weeklyTimeBudgetHours,
+    restDay: snapshot.restDay ?? 0,
     preferenceNotes: snapshot.preferenceNotes ?? "",
     secondaryInterests: snapshot.secondaryInterests ?? [],
     currentLevel: snapshot.currentLevel ?? "",
@@ -239,5 +242,6 @@ export function defaultDisciplineSnapshot() {
     evidenceTypes: [],
     targetDifficulty: "Normal",
     weeklyTimeBudgetHours: 4,
+    restDay: 0,
   });
 }

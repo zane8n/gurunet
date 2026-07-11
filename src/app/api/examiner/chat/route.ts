@@ -3,14 +3,20 @@ import { requireUser } from "@/lib/auth";
 import {
   examinerChatSchema,
   getExaminerMessages,
+  getExaminerSessions,
   sendExaminerMessage,
 } from "@/lib/app-service";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await requireUser();
-    const messages = await getExaminerMessages(user);
-    return json({ messages });
+    const challengeId = new URL(request.url).searchParams.get("challengeId") ?? undefined;
+    const activeChallengeId = new URL(request.url).searchParams.get("activeChallengeId") ?? challengeId;
+    const [messages, sessions] = await Promise.all([
+      getExaminerMessages(user, challengeId),
+      getExaminerSessions(user, activeChallengeId),
+    ]);
+    return json({ messages, sessions });
   } catch (error) {
     return apiError(error);
   }

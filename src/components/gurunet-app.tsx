@@ -177,6 +177,7 @@ type StudyProfile = {
   preferredFormats: string[];
   evidenceTypes: string[];
   weeklyTimeBudgetHours: number;
+  restDay: number;
   targetDifficulty: string;
   weakAreas: string[];
   avoidAreas: string[];
@@ -199,6 +200,7 @@ type ActiveDiscipline = {
   rubric: Record<string, { label: string; description: string }>;
   targetDifficulty: string;
   weeklyTimeBudgetHours: number;
+  restDay?: number;
   preferenceNotes?: string;
 };
 
@@ -224,10 +226,20 @@ type CohortSummary = {
 
 type ExaminerMessage = {
   id: string;
+  challengeId?: string | null;
   role: string;
   content: string;
   actions?: unknown;
   createdAt: string;
+};
+
+type ExaminerSession = {
+  id: string;
+  dateKey: string;
+  title: string;
+  status: string;
+  messageCount: number;
+  active: boolean;
 };
 
 type Dashboard = {
@@ -302,6 +314,7 @@ function profileFieldLabel(field: string) {
     preferredFormats: "Preferred challenge formats",
     evidenceTypes: "Expected evidence/output",
     weeklyTimeBudgetHours: "Weekly hours",
+    restDay: "Weekly rest day",
     targetDifficulty: "Target difficulty",
     weakAreas: "Weak areas",
     avoidAreas: "Avoid areas",
@@ -436,6 +449,15 @@ const professionalGoalOptions = [
 ];
 
 const difficultyOptions = ["Guided", "Normal", "Advanced", "Production", "Expert"] as const;
+const weekDayOptions = [
+  { value: 0, label: "Sunday" },
+  { value: 1, label: "Monday" },
+  { value: 2, label: "Tuesday" },
+  { value: 3, label: "Wednesday" },
+  { value: 4, label: "Thursday" },
+  { value: 5, label: "Friday" },
+  { value: 6, label: "Saturday" },
+] as const;
 
 export function GurunetApp() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -458,6 +480,8 @@ export function GurunetApp() {
   const [responseOpen, setResponseOpen] = useState(false);
   const [examinerOpen, setExaminerOpen] = useState(false);
   const [examinerMessages, setExaminerMessages] = useState<ExaminerMessage[]>([]);
+  const [examinerSessions, setExaminerSessions] = useState<ExaminerSession[]>([]);
+  const [examinerSessionId, setExaminerSessionId] = useState("");
   const [draftBody, setDraftBody] = useState("");
   const [draftAttachments, setDraftAttachments] = useState<SubmissionAttachment[]>([]);
   const [draftSavedAt, setDraftSavedAt] = useState("");
@@ -705,6 +729,10 @@ export function GurunetApp() {
   }
 
   const openResponseEditor = useCallback(() => {
+    if (today?.status === "RestDay") {
+      setStatus("No response is required on the selected weekly rest day.");
+      return;
+    }
     if (today && !todaySubmission && !draftBody.trim() && draftAttachments.length === 0) {
       setDraftBody(responseStarterForChallenge(today));
       setDraftSavedAt(new Date().toISOString());
@@ -735,15 +763,25 @@ export function GurunetApp() {
     }
   }
 
-  async function openExaminer() {
-    setExaminerOpen(true);
+  const loadExaminerSession = useCallback(async (challengeId: string) => {
     try {
-      const data = await apiRequest<{ messages: ExaminerMessage[] }>("/api/examiner/chat");
+      const data = await apiRequest<{ messages: ExaminerMessage[]; sessions: ExaminerSession[] }>(
+        `/api/examiner/chat?challengeId=${encodeURIComponent(challengeId)}&activeChallengeId=${encodeURIComponent(today?.id ?? challengeId)}`,
+      );
       setExaminerMessages(data.messages);
+      setExaminerSessions(data.sessions);
+      setExaminerSessionId(challengeId);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Examiner chat failed");
     }
-  }
+  }, [today]);
+
+  const openExaminer = useCallback(async () => {
+    if (!today) return;
+    setExaminerOpen(true);
+    setExaminerSessionId(today.id);
+    await loadExaminerSession(today.id);
+  }, [loadExaminerSession, today]);
 
   async function sendExaminerMessage(message: string) {
     if (!today || !message.trim()) return;
@@ -752,6 +790,7 @@ export function GurunetApp() {
     try {
       const optimistic: ExaminerMessage = {
         id: `local-${Date.now()}`,
+        challengeId: today.id,
         role: "user",
         content: message,
         createdAt: new Date().toISOString(),
@@ -762,6 +801,13 @@ export function GurunetApp() {
         body: JSON.stringify({ message, challengeId: today.id }),
       });
       setExaminerMessages((items) => [...items, response.reply]);
+      setExaminerSessions((items) =>
+        items.map((session) =>
+          session.id === today.id
+            ? { ...session, messageCount: session.messageCount + 2 }
+            : session,
+        ),
+      );
       await loadDashboard();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Examiner chat failed");
@@ -1011,83 +1057,89 @@ export function GurunetApp() {
         : "",
     [nextChallengeUnlockAt],
   );
-  const commandActions = useMemo(
-    () =>
-      dashboard && user && today
-        ? [
-            {
-              id: "focus",
-              title: "Open focus mode",
-              description: "Work from a clean challenge workspace with only the assessment and actions.",
-              shortcut: "O",
-              action: () => setFocusOpen(true),
-            },
-            {
-              id: "respond",
-              title: todaySubmission ? "View submitted response" : hasDraft ? "Continue response" : "Respond to challenge",
-              description: "Open the response editor and evidence workspace.",
-              shortcut: "R",
-              action: openResponseEditor,
-            },
-            {
-              id: "examiner",
-              title: "Talk to examiner",
-              description: "Ask about grading, rules, delays, excuses, or future challenge settings.",
-              shortcut: "E",
-              action: () => void openExaminer(),
-            },
-            {
-              id: "challenge",
-              title: "Go to challenge",
-              description: "Jump to today's assessment brief.",
-              shortcut: "1",
-              action: () => scrollToSection("daily-challenge"),
-            },
-            {
-              id: "metrics",
-              title: "Go to metrics",
-              description: "Review PIS, ERT, streaks, distribution, and recent history.",
-              shortcut: "2",
-              action: () => scrollToSection("metrics"),
-            },
-            {
-              id: "social",
-              title: "Go to social and cohorts",
-              description: "Open leaderboards, marketplace, cohorts, notebook, and rewards.",
-              shortcut: "3",
-              action: () => scrollToSection("social"),
-            },
-            {
-              id: "sample",
-              title: "Load sample response",
-              description: "Insert a model response outline into the editor.",
-              shortcut: "S",
-              action: loadSampleAnswer,
-            },
-            {
-              id: "refresh",
-              title: "Refresh dashboard",
-              description: "Reload challenge, metrics, notebook, and social state.",
-              shortcut: "F",
-              action: () => void loadDashboard(),
-            },
-            {
-              id: "export",
-              title: "Export learning record",
-              description: "Download your profile, challenges, grades, notebook, and social learning state.",
-              shortcut: "X",
-              action: () => void exportLearningRecord(),
-            },
-            {
-              id: "account",
-              title: "Account settings",
-              description: "Update profile details, change password, export data, or delete your account.",
-              shortcut: "A",
-              action: () => window.location.assign("/account"),
-            },
-          ]
-        : [],
-    [dashboard, hasDraft, openResponseEditor, today, todaySubmission, user],
+  const commandActions = useMemo(() => {
+    if (!dashboard || !user || !today) return [];
+    const isRestDay = today.status === "RestDay";
+    const assessmentActions = isRestDay
+      ? []
+      : [
+          {
+            id: "focus",
+            title: "Open focus mode",
+            description: "Work from a clean challenge workspace with only the assessment and actions.",
+            shortcut: "O",
+            action: () => setFocusOpen(true),
+          },
+          {
+            id: "respond",
+            title: todaySubmission ? "View submitted response" : hasDraft ? "Continue response" : "Respond to challenge",
+            description: "Open the response editor and evidence workspace.",
+            shortcut: "R",
+            action: openResponseEditor,
+          },
+          {
+            id: "sample",
+            title: "Load sample response",
+            description: "Insert a model response outline into the editor.",
+            shortcut: "S",
+            action: loadSampleAnswer,
+          },
+        ];
+
+    return [
+      ...assessmentActions,
+      {
+        id: "examiner",
+        title: "Talk to examiner",
+        description: "Ask about grading, rules, delays, excuses, or future challenge settings.",
+        shortcut: "E",
+        action: () => void openExaminer(),
+      },
+      {
+        id: "challenge",
+        title: "Go to challenge",
+        description: "Jump to today's assessment brief.",
+        shortcut: "1",
+        action: () => scrollToSection("daily-challenge"),
+      },
+      {
+        id: "metrics",
+        title: "Go to metrics",
+        description: "Review PIS, ERT, streaks, distribution, and recent history.",
+        shortcut: "2",
+        action: () => scrollToSection("metrics"),
+      },
+      {
+        id: "social",
+        title: "Go to social and cohorts",
+        description: "Open leaderboards, marketplace, cohorts, notebook, and rewards.",
+        shortcut: "3",
+        action: () => scrollToSection("social"),
+      },
+      {
+        id: "refresh",
+        title: "Refresh dashboard",
+        description: "Reload challenge, metrics, notebook, and social state.",
+        shortcut: "F",
+        action: () => void loadDashboard(),
+      },
+      {
+        id: "export",
+        title: "Export learning record",
+        description: "Download your profile, challenges, grades, notebook, and social learning state.",
+        shortcut: "X",
+        action: () => void exportLearningRecord(),
+      },
+      {
+        id: "account",
+        title: "Account settings",
+        description: "Update profile details, change password, export data, or delete your account.",
+        shortcut: "A",
+        action: () => window.location.assign("/account"),
+      },
+    ];
+  },
+    [dashboard, hasDraft, openExaminer, openResponseEditor, today, todaySubmission, user],
   );
 
   if (!bootstrapped) {
@@ -1288,11 +1340,15 @@ export function GurunetApp() {
         onRespond={openResponseEditor}
       />
       <ExaminerChatModal
+        activeChallengeId={today.id}
         busy={busy}
         messages={examinerMessages}
         notice={dashboard.todayNotice}
         open={examinerOpen}
+        selectedSessionId={examinerSessionId}
+        sessions={examinerSessions}
         onOpenChange={setExaminerOpen}
+        onSelectSession={(challengeId) => void loadExaminerSession(challengeId)}
         onSend={sendExaminerMessage}
       />
       <CommandPalette
@@ -1454,6 +1510,13 @@ function DashboardWorkspace({
           <div className="grid content-start gap-4">
             {grade ? (
               <GradeSummary grade={grade} plain />
+            ) : dashboard.today.status === "RestDay" ? (
+              <AstroCard title="Scheduled recovery">
+                <EmptyState
+                  title="No assessment today"
+                  text="Your selected weekly rest day is protected. Tomorrow's assessment contains a normal task and a shorter recovery task."
+                />
+              </AstroCard>
             ) : (
               <AstroCard title="Score unlock">
                 <EmptyState
@@ -1468,6 +1531,7 @@ function DashboardWorkspace({
               nextUnlock={nextUnlock}
               onRedeem={onRedeem}
               retention={dashboard.retention}
+              restDay={dashboard.today.status === "RestDay"}
               user={user}
             />
           </div>
@@ -1586,7 +1650,9 @@ function DashboardHero({
   submission: Submission | null;
   user: SafeUser;
 }) {
-  const primaryAction = grade
+  const primaryAction = dashboard.today.status === "RestDay"
+    ? { label: "Review progress", action: () => scrollToSection("metrics") }
+    : grade
     ? { label: "Review teaching", action: () => scrollToSection("learning") }
     : submission
       ? { label: "Grade response", action: onGrade }
@@ -1600,8 +1666,12 @@ function DashboardHero({
             One rigorous challenge. One submitted answer. One serious correction.
           </h1>
           <p className="mt-5 max-w-2xl text-base leading-8 text-slate-600 sm:text-lg">
-            {dashboard.activeDiscipline.label} training for {user.name}. Today&apos;s brief is{" "}
-            <span className="font-semibold text-slate-900">{dashboard.today.title}</span>, due {deadline}.
+            {dashboard.today.status === "RestDay" ? (
+              <>{dashboard.activeDiscipline.label} training for {user.name}. Today is the selected weekly rest day; no assessment is due.</>
+            ) : (
+              <>{dashboard.activeDiscipline.label} training for {user.name}. Today&apos;s brief is{" "}
+                <span className="font-semibold text-slate-900">{dashboard.today.title}</span>, due {deadline}.</>
+            )}
           </p>
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
             <button
@@ -1797,6 +1867,27 @@ function ChallengeWidget({
   submission: Submission | null;
   verification: string;
 }) {
+  if (challenge.status === "RestDay") {
+    return (
+      <div className="grid gap-4 border-y border-slate-200 py-6">
+        <div className="flex items-start gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-sky-50 text-sky-800">
+            <Moon size={19} />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-slate-950">Scheduled weekly rest day</p>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">{challenge.scenario}</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+          <span>No submission required</span>
+          <span aria-hidden="true">·</span>
+          <span>Next unlock {nextUnlock}</span>
+          <button type="button" onClick={onExaminer} className="font-semibold text-cyan-800">Talk to examiner</button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="grid gap-4">
       {submission ? (
@@ -1950,6 +2041,7 @@ function StudyProfileForm({
       preferredFormats: form.getAll("preferredFormats").map(String),
       evidenceTypes: form.getAll("evidenceTypes").map(String),
       weeklyTimeBudgetHours: Number(form.get("weeklyTimeBudgetHours") || 4),
+      restDay: Number(form.get("restDay") || 0),
       targetDifficulty: String(form.get("targetDifficulty") || "Normal"),
       weakAreas: form.getAll("weakAreas").map(String),
       avoidAreas: form.getAll("avoidAreas").map(String),
@@ -2062,7 +2154,7 @@ function StudyProfileForm({
         </div>
 
         <div className="astrowind-card">
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Current level
               <select name="currentLevel" defaultValue={initialProfile?.currentLevel ?? "Intermediate"} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm">
@@ -2084,6 +2176,13 @@ function StudyProfileForm({
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Weekly hours
               <input name="weeklyTimeBudgetHours" type="number" min={1} max={40} defaultValue={initialProfile?.weeklyTimeBudgetHours ?? 4} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" />
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Weekly rest day
+              <select name="restDay" defaultValue={initialProfile?.restDay ?? 0} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm">
+                {weekDayOptions.map((day) => <option key={day.value} value={day.value}>{day.label}</option>)}
+              </select>
+              <span className="text-xs font-normal leading-5 text-slate-500">No assessment is due. The next day contains two recovery tasks.</span>
             </label>
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Custom path request
@@ -2173,6 +2272,7 @@ function validateStudyProfileInput(input: {
   preferredFormats: string[];
   evidenceTypes: string[];
   weeklyTimeBudgetHours: number;
+  restDay: number;
   weakAreas: string[];
   goals: string[];
 }) {
@@ -2189,6 +2289,9 @@ function validateStudyProfileInput(input: {
   if (input.goals.length > 6) errors.push("Professional goals: pick no more than 6 goals.");
   if (!Number.isInteger(input.weeklyTimeBudgetHours) || input.weeklyTimeBudgetHours < 1 || input.weeklyTimeBudgetHours > 40) {
     errors.push("Weekly hours: enter a whole number from 1 to 40.");
+  }
+  if (!Number.isInteger(input.restDay) || input.restDay < 0 || input.restDay > 6) {
+    errors.push("Weekly rest day: select one day of the week.");
   }
   return errors;
 }
@@ -2310,9 +2413,12 @@ function CheckboxGrid({
 }
 
 function StatusPill({ status }: { status: string }) {
+  const label = status === "RestDay" ? "Rest day" : status.replace(/([a-z])([A-Z])/g, "$1 $2");
   const tone = status.includes("Missed")
     ? "border-red-200 bg-red-50 text-red-700"
     : status.includes("Protected")
+      ? "border-sky-200 bg-sky-50 text-sky-800"
+    : status.includes("RestDay")
       ? "border-sky-200 bg-sky-50 text-sky-800"
     : status.includes("Late")
       ? "border-amber-200 bg-amber-50 text-amber-800"
@@ -2322,7 +2428,7 @@ function StatusPill({ status }: { status: string }) {
 
   return (
     <span className={`rounded-md border px-3 py-1 text-xs font-semibold ${tone}`}>
-      {status}
+      {label}
     </span>
   );
 }
@@ -2357,6 +2463,7 @@ function ActivityGrid({ rows }: { rows: ProgressRow[] }) {
 function activityTitle(row?: ProgressRow) {
   if (!row) return "No record";
   if (row.status.includes("Protected")) return `${row.date}: absence protected by a continuity credit`;
+  if (row.status.includes("RestDay")) return `${row.date}: scheduled weekly rest day`;
   const timing = row.submittedAt
     ? `${minutesBeforeDeadline(row)} min before deadline`
     : "not submitted";
@@ -2372,6 +2479,7 @@ function activityStyle(row?: ProgressRow) {
   if (!row) return { backgroundColor: "rgba(203, 213, 225, 0.72)", borderColor: "rgba(148, 163, 184, 0.45)" };
   if (row.status.includes("Missed")) return { backgroundColor: "#b91c1c", borderColor: "#991b1b" };
   if (row.status.includes("Protected")) return { backgroundColor: "#38bdf8", borderColor: "#0284c7" };
+  if (row.status.includes("RestDay")) return { backgroundColor: "#bae6fd", borderColor: "#38bdf8" };
   if (!row.submittedAt) return { backgroundColor: "rgba(148, 163, 184, 0.82)", borderColor: "rgba(100, 116, 139, 0.5)" };
 
   const minutesEarly = minutesBeforeDeadline(row);
@@ -3438,21 +3546,31 @@ function AssessmentLine({
 }
 
 function ExaminerChatModal({
+  activeChallengeId,
   busy,
   messages,
   notice,
   open,
+  selectedSessionId,
+  sessions,
   onOpenChange,
+  onSelectSession,
   onSend,
 }: {
+  activeChallengeId: string;
   busy: boolean;
   messages: ExaminerMessage[];
   notice: ChallengeNotice | null;
   open: boolean;
+  selectedSessionId: string;
+  sessions: ExaminerSession[];
   onOpenChange: (open: boolean) => void;
+  onSelectSession: (challengeId: string) => void;
   onSend: (message: string) => void;
 }) {
   const [message, setMessage] = useState("");
+  const archived = Boolean(selectedSessionId && selectedSessionId !== activeChallengeId);
+  const selectedSession = sessions.find((session) => session.id === selectedSessionId);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -3469,7 +3587,31 @@ function ExaminerChatModal({
         </DialogHeader>
 
         <div className="grid min-h-0 gap-3">
-          {notice && (
+          <div className="flex flex-col gap-2 border-b border-slate-200 pb-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">
+                {archived ? "Archived assessment session" : "Current assessment session"}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {selectedSession?.dateKey ?? "Today"} · {selectedSession?.title ?? "Today's challenge"}
+              </p>
+            </div>
+            <label className="grid gap-1 text-xs font-semibold text-slate-600">
+              Session
+              <select
+                value={selectedSessionId}
+                onChange={(event) => onSelectSession(event.target.value)}
+                className="h-9 max-w-full rounded-md border border-slate-300 bg-white px-2 text-xs font-normal text-slate-700 sm:max-w-72"
+              >
+                {sessions.map((session) => (
+                  <option key={session.id} value={session.id}>
+                    {session.active ? "Today" : session.dateKey} · {session.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {notice && !archived && (
             <div className="rounded-md border border-cyan-700/15 bg-cyan-50 px-3 py-2 text-sm leading-6 text-cyan-900">
               {notice.reply}
             </div>
@@ -3500,12 +3642,24 @@ function ExaminerChatModal({
             )}
           </div>
 
+          {archived ? (
+            <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
+              <p className="text-sm text-slate-600">Archived sessions are read-only and remain attached to their original challenge.</p>
+              <button
+                type="button"
+                onClick={() => onSelectSession(activeChallengeId)}
+                className="h-10 shrink-0 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700"
+              >
+                Return to today
+              </button>
+            </div>
+          ) : (
           <form onSubmit={submit} className="grid gap-2">
             <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}
               className="min-h-24 resize-none rounded-md border border-slate-300 bg-white p-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
-              placeholder="Example: I will be late because of a work outage. Also make my next challenge Linux-focused and 60 minutes."
+              placeholder="Ask for clarification, dispute a grade with a concrete reason, set your rest day, or request one guarded challenge reformulation."
             />
             <div className="flex justify-end">
               <button
@@ -3517,6 +3671,7 @@ function ExaminerChatModal({
               </button>
             </div>
           </form>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -4487,6 +4642,7 @@ function TeacherMarkedResponse({
   const parsed = parseSubmissionContent(submission.content);
   const marks = markResponseSegments(parsed.body, grade);
   const missing = missingSubmissionRequirements(parsed.body, challenge);
+  const holisticAssessment = holisticAssessmentFromCorrection(grade.correction);
 
   return (
     <div className="rounded-md border border-slate-200 bg-white/65 p-3">
@@ -4496,7 +4652,7 @@ function TeacherMarkedResponse({
             Teacher-marked response
           </p>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Examiner marks are attached directly to your submitted answer.
+            The examiner interprets the complete argument first, then attaches corrective detail to individual sections.
           </p>
         </div>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
@@ -4504,38 +4660,61 @@ function TeacherMarkedResponse({
         </span>
       </div>
 
-      <div className="mt-3 grid max-h-[30rem] gap-2 overflow-auto pr-1">
-        {marks.map((mark, index) => (
-          <article
-            key={`${mark.text}-${index}`}
-            className={`rounded-md border-l-4 bg-white p-3 ${markStyle(mark.kind).border}`}
-          >
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${markStyle(mark.kind).pill}`}>
-                {markIcon(mark.kind)}
-                {mark.label}
-              </span>
-              <span className="text-xs text-slate-500">{mark.note}</span>
-            </div>
-            <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{mark.text}</p>
-          </article>
-        ))}
+      <div className="mt-3 border-l-2 border-cyan-700 px-3 py-1">
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-800">Whole-response assessment</p>
+        <div className="mt-2 text-sm leading-6 text-slate-700">
+          <RichSubmissionBody body={holisticAssessment} />
+        </div>
       </div>
 
-      {missing.length > 0 && (
-        <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3">
-          <p className="text-sm font-semibold text-red-950">Missing or weakly addressed requirements</p>
-          <div className="mt-2 grid gap-1">
-            {missing.slice(0, 5).map((item) => (
-              <p key={item} className="text-sm leading-6 text-red-800">
-                - {item}
-              </p>
-            ))}
-          </div>
+      <details className="group mt-3 border-t border-slate-200 pt-3">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-700 marker:hidden">
+          Corrective annotations
+          <ChevronRight size={15} className="text-cyan-700 transition-transform group-open:rotate-90" />
+        </summary>
+        <div className="mt-3 grid max-h-[30rem] gap-2 overflow-auto pr-1">
+          {marks.map((mark, index) => (
+            <article
+              key={`${mark.text}-${index}`}
+              className={`rounded-md border-l-4 bg-white p-3 ${markStyle(mark.kind).border}`}
+            >
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${markStyle(mark.kind).pill}`}>
+                  {markIcon(mark.kind)}
+                  {mark.label}
+                </span>
+                <span className="text-xs text-slate-500">{mark.note}</span>
+              </div>
+              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{mark.text}</p>
+            </article>
+          ))}
         </div>
-      )}
+
+        {missing.length > 0 && (
+          <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3">
+            <p className="text-sm font-semibold text-red-950">Missing or weakly addressed requirements</p>
+            <div className="mt-2 grid gap-1">
+              {missing.slice(0, 5).map((item) => (
+                <p key={item} className="text-sm leading-6 text-red-800">
+                  - {item}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+      </details>
     </div>
   );
+}
+
+function holisticAssessmentFromCorrection(correction: string) {
+  const paragraphs = correction
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  const selected = paragraphs.slice(0, 2).join("\n\n");
+  if (selected.length <= 1200) return selected;
+  return `${selected.slice(0, 1197).trimEnd()}...`;
 }
 
 type MarkKind = "correct" | "evidence" | "vague" | "risk" | "action" | "neutral";
@@ -4727,6 +4906,7 @@ function DailyMomentumPanel({
   nextUnlock,
   onRedeem,
   retention,
+  restDay,
   user,
 }: {
   busy: boolean;
@@ -4734,20 +4914,23 @@ function DailyMomentumPanel({
   nextUnlock: string;
   onRedeem: (event: FormEvent<HTMLFormElement>) => void;
   retention: RetentionSnapshot;
+  restDay: boolean;
   user: SafeUser;
 }) {
   return (
     <section className={`daily-momentum rounded-md border border-slate-200 bg-white/70 p-4 ${grade ? "daily-momentum-complete" : ""}`}>
       <div className="flex items-start gap-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-cyan-50 text-cyan-800">
-          {grade ? <CheckCircle2 className="reward-confirm" size={19} /> : <CircleGauge size={19} />}
+          {restDay ? <Moon size={19} /> : grade ? <CheckCircle2 className="reward-confirm" size={19} /> : <CircleGauge size={19} />}
         </span>
         <div className="min-w-0">
           <p className="text-sm font-semibold text-slate-950">
-            {grade ? "Today is complete" : "Close today's loop"}
+            {restDay ? "Rest day protected" : grade ? "Today is complete" : "Close today's loop"}
           </p>
           <p className="mt-1 text-sm leading-5 text-slate-600">
-            {grade
+            {restDay
+              ? "No assessment is due. Tomorrow returns with one main task and one shorter recovery task."
+              : grade
               ? `${user.currentStreak}-day rhythm held. Your correction and next target are ready.`
               : "Submit, review the correction, and bank the lesson before the next brief."}
           </p>
@@ -4785,7 +4968,10 @@ function DailyMomentumPanel({
           </div>
           <p className="mt-2 text-sm font-semibold text-slate-900">{retention.preview.focus}</p>
           <p className="mt-1 text-xs leading-5 text-slate-600">
-            {retention.preview.discipline} · {retention.preview.format} · {retention.preview.durationMinutes} min · {retention.preview.difficulty}
+            {retention.preview.discipline} · {retention.preview.format}
+            {retention.preview.durationMinutes > 0
+              ? ` · ${retention.preview.durationMinutes} min · ${retention.preview.difficulty}`
+              : ""}
           </p>
         </div>
       ) : (
@@ -4836,6 +5022,7 @@ function MasteryDay({ day }: { day: RetentionSnapshot["days"][number] }) {
     completed: "border-cyan-700 bg-cyan-700 text-white",
     protected: "border-cyan-700/25 bg-cyan-50 text-cyan-800",
     missed: "border-orange-300 bg-orange-50 text-orange-800",
+    rest: "border-sky-200 bg-sky-50 text-sky-800",
     today: "border-slate-950 bg-white text-slate-950",
     open: "border-slate-200 bg-white/60 text-slate-400",
     upcoming: "border-slate-200 bg-slate-50 text-slate-400",
@@ -4844,6 +5031,7 @@ function MasteryDay({ day }: { day: RetentionSnapshot["days"][number] }) {
     completed: `completed${day.score !== null ? ` with ${day.score} out of 20` : ""}`,
     protected: "protected by a continuity credit",
     missed: "missed",
+    rest: "scheduled rest day",
     today: "today",
     open: "flexible day",
     upcoming: "upcoming",
@@ -4859,6 +5047,8 @@ function MasteryDay({ day }: { day: RetentionSnapshot["days"][number] }) {
         <CheckCircle2 size={12} />
       ) : day.state === "protected" ? (
         <ShieldCheck size={12} />
+      ) : day.state === "rest" ? (
+        <Moon size={12} />
       ) : (
         <span className="font-mono text-[9px]">{day.score ?? "·"}</span>
       )}

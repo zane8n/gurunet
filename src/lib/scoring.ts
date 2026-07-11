@@ -295,6 +295,70 @@ export function gradeSubmission({ challenge, submission, user }: GradeInput): Gr
   };
 }
 
+export type ReviewedAxisScores = Pick<
+  Grade,
+  "creativity" | "ingenuity" | "reporting" | "alienness" | "neatness"
+>;
+
+export function recalculateGradeFromReview(input: {
+  existing: Grade;
+  challenge: Challenge;
+  submission: Submission;
+  scores: ReviewedAxisScores;
+  technicalCap: TechnicalCap;
+}) {
+  const scoreValues = [
+    input.scores.creativity,
+    input.scores.ingenuity,
+    input.scores.reporting,
+    input.scores.alienness,
+    input.scores.neatness,
+  ];
+  const rawScore = Number(((scoreValues.reduce((sum, score) => sum + score, 0) / 35) * 20).toFixed(2));
+  const balancePenaltyValue = balancePenalty(scoreValues);
+  const latePenalty = calculateLatePenalty(input.submission.submittedAt, input.challenge.deadlineAt);
+  const capped = Math.min(
+    rawScore - balancePenaltyValue - latePenalty,
+    capValue(input.technicalCap),
+  );
+  const hardCapped = isAfterHardCapWindow(input.submission.submittedAt, input.challenge.deadlineAt)
+    ? Math.min(capped, 12)
+    : capped;
+  const finalScore = Number(Math.max(0, hardCapped).toFixed(2));
+  const pisChange = pisDelta(
+    finalScore,
+    input.technicalCap,
+    input.submission.submittedAt,
+    input.challenge.deadlineAt,
+  );
+  const ertEarnedValue = ertEarned(
+    finalScore,
+    balancePenaltyValue,
+    input.technicalCap,
+    input.submission.submittedAt,
+    input.challenge.deadlineAt,
+    input.challenge.isPressure,
+  );
+  const priorErtBase = input.existing.ertBalance - input.existing.ertEarned;
+
+  return {
+    ...input.scores,
+    rawScore,
+    balancePenalty: balancePenaltyValue,
+    latePenalty,
+    technicalCap: input.technicalCap,
+    finalScore,
+    verdict: verdictFor(finalScore),
+    pisChange,
+    previousPis: input.existing.previousPis,
+    updatedPis: Number(
+      Math.max(0, Math.min(100, input.existing.previousPis + pisChange)).toFixed(1),
+    ),
+    ertEarned: ertEarnedValue,
+    ertBalance: priorErtBase + ertEarnedValue,
+  };
+}
+
 export function createNotebookEntry(challenge: Challenge, grade: Grade): NotebookEntry {
   return {
     id: createId("note"),

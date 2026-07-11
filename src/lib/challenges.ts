@@ -266,6 +266,19 @@ export function buildChallengeFromAi({
     antiGenericRequirement: string;
   };
 }): Challenge {
+  const hasRecoveryTask = /\b(task 2|recovery component|recovery task)\b/i.test(ai.scenario);
+  const scenario =
+    recovery && !hasRecoveryTask
+      ? `${ai.scenario}\n\nTask 2 - Recovery retrieval\nIn 3-5 lines, identify one relevant failure mode from a recent weak area, state the evidence that would expose it, and give one validation step.`
+      : ai.scenario;
+  const expectedAnswerFormat =
+    recovery && !/\brecovery\b/i.test(ai.expectedAnswerFormat)
+      ? `${ai.expectedAnswerFormat}\n\nRecovery task`
+      : ai.expectedAnswerFormat;
+  const submissionRequirements =
+    recovery && !ai.submissionRequirements.some((item) => /\brecovery\b/i.test(item))
+      ? [...ai.submissionRequirements, "Recovery retrieval task answer."].slice(0, 10)
+      : ai.submissionRequirements;
   return {
     id: createId("chl"),
     userId: user.id,
@@ -273,12 +286,12 @@ export function buildChallengeFromAi({
     title: ai.title,
     difficulty: ai.difficulty,
     topic: ai.topic,
-    scenario: ai.scenario,
+    scenario,
     objective: ai.objective,
     constraints: ai.constraints,
     allowedTools: ai.allowedTools,
-    expectedAnswerFormat: ai.expectedAnswerFormat,
-    submissionRequirements: ai.submissionRequirements,
+    expectedAnswerFormat,
+    submissionRequirements,
     deadlineAt,
     solution: ai.solution,
     antiGenericRequirement: ai.antiGenericRequirement,

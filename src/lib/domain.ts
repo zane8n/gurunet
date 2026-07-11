@@ -5,6 +5,7 @@ export type ChallengeStatus =
   | "Missed"
   | "Excused"
   | "Protected"
+  | "RestDay"
   | "Recovery Challenge"
   | "Pressure Challenge";
 
@@ -55,6 +56,7 @@ export type DisciplineSnapshot = {
   avoidAreas?: string[];
   goals?: string[];
   customDiscipline?: string;
+  restDay?: number;
   generationContext?: {
     topicFocus?: string;
     preferredFormat?: string;
@@ -62,6 +64,7 @@ export type DisciplineSnapshot = {
     difficultyFloor: Difficulty;
     recoveryMode: boolean;
     teamMode: boolean;
+    scheduledRecovery?: boolean;
   };
 };
 
@@ -74,6 +77,7 @@ export type StudyProfile = {
   preferredFormats: string[];
   evidenceTypes: string[];
   weeklyTimeBudgetHours: number;
+  restDay: number;
   targetDifficulty: Difficulty;
   weakAreas: string[];
   avoidAreas: string[];
@@ -211,7 +215,7 @@ export type RetentionSnapshot = {
   days: {
     date: string;
     label: string;
-    state: "completed" | "protected" | "missed" | "today" | "open" | "upcoming";
+    state: "completed" | "protected" | "missed" | "rest" | "today" | "open" | "upcoming";
     score: number | null;
   }[];
   preview: {

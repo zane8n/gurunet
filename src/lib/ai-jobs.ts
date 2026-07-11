@@ -134,6 +134,12 @@ async function runStrictCritiqueJob(payload: Record<string, unknown>) {
     include: { attachments: true, challenge: true, grade: true },
   });
   if (!submission.grade) return { fallback: true, output: { skipped: "missing grade" } };
+  const adjustedReview = await prisma.gradeReview.findFirst({
+    where: { gradeId: submission.grade.id, outcome: "Adjusted" },
+  });
+  if (adjustedReview) {
+    return { fallback: false, output: { skipped: "grade already adjusted by examiner review" } };
+  }
   const domainSubmission = {
     ...fromDbSubmission(submission),
     content: contentWithAttachments(submission),

@@ -29,6 +29,7 @@ export async function buildLearningExport(user: User) {
     marketplaceEnrollments,
     cohortEnrollments,
     aiUsage,
+    gradeReviews,
   ] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { id: user.id } }),
     prisma.userStudyProfile.findUnique({ where: { userId: user.id } }),
@@ -97,6 +98,10 @@ export async function buildLearningExport(user: User) {
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
     }),
+    prisma.gradeReview.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+    }),
   ]);
 
   return {
@@ -141,6 +146,16 @@ export async function buildLearningExport(user: User) {
       weekendRecoveryRequired: record.weekendRecoveryRequired,
       completedCount: record.completedCount,
       continuityCreditEarned: record.continuityCreditEarned,
+    })),
+    gradeReviews: gradeReviews.map((review) => ({
+      id: review.id,
+      gradeId: review.gradeId,
+      dispute: review.dispute,
+      outcome: review.outcome,
+      rationale: review.rationale,
+      before: review.before,
+      after: review.after,
+      createdAt: review.createdAt.toISOString(),
     })),
     examinerMessages: examinerMessages.map((message) => ({
       id: message.id,

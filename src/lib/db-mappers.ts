@@ -134,6 +134,7 @@ export function fromDbStudyProfile(profile: DbUserStudyProfile): StudyProfile {
     preferredFormats: profile.preferredFormats,
     evidenceTypes: profile.evidenceTypes,
     weeklyTimeBudgetHours: profile.weeklyTimeBudgetHours,
+    restDay: profile.restDay,
     targetDifficulty: profile.targetDifficulty,
     weakAreas: profile.weakAreas,
     avoidAreas: profile.avoidAreas,

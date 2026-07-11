@@ -60,6 +60,7 @@ async function snapshotCounts() {
     accounts,
     supportActions,
     studyProfiles,
+    gradeReviews,
   ] = await Promise.all([
     prisma.user.count(),
     prisma.challenge.count(),
@@ -82,6 +83,7 @@ async function snapshotCounts() {
     prisma.account.count(),
     prisma.supportAction.count(),
     prisma.userStudyProfile.count(),
+    prisma.gradeReview.count(),
   ]);
 
   return {
@@ -106,5 +108,6 @@ async function snapshotCounts() {
     accounts,
     supportActions,
     studyProfiles,
+    gradeReviews,
   };
 }
