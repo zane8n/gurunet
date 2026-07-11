@@ -1487,7 +1487,7 @@ function DashboardWorkspace({
         title="Today's challenge"
         text="A single evidence-led brief, a response workspace, and the examiner route in one focused section."
       >
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.42fr)]">
+        <div className="grid gap-6">
           <ChallengeWidget
             busy={busy}
             challenge={dashboard.today}
@@ -1507,7 +1507,7 @@ function DashboardWorkspace({
             submission={submission}
             verification={verification}
           />
-          <div className="grid content-start gap-4">
+          <div className="grid content-start gap-4 lg:grid-cols-[minmax(0,0.92fr)_minmax(20rem,0.38fr)]">
             {grade ? (
               <GradeSummary grade={grade} plain />
             ) : dashboard.today.status === "RestDay" ? (
@@ -1891,9 +1891,9 @@ function ChallengeWidget({
   return (
     <div className="grid gap-4">
       {submission ? (
-        <div className="rounded-md border border-cyan-700/15 bg-cyan-50 p-4">
-          <p className="text-sm font-semibold text-cyan-800">Submitted response</p>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
+        <div className="border-y border-slate-200 py-3">
+          <p className="text-sm font-semibold text-slate-950">Submitted response</p>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
             This assessment stays focused on the submitted work until the next challenge unlocks at {nextUnlock}.
           </p>
         </div>
@@ -1916,12 +1916,12 @@ function ChallengeWidget({
       )}
 
       {submission ? (
-        <details className="rounded-md border border-slate-200 bg-white/55">
-          <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-semibold text-slate-900 marker:hidden">
+        <details className="group border-b border-slate-200">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3 text-sm font-semibold text-slate-900 marker:hidden">
             Challenge prompt
-            <ChevronRight size={16} className="text-cyan-700" />
+            <ChevronRight size={16} className="text-cyan-700 transition-transform group-open:rotate-90" />
           </summary>
-          <div className="border-t border-slate-200 px-4 py-4">
+          <div className="border-t border-slate-200 py-4">
             <p className="text-sm font-semibold text-cyan-800">{challenge.topic}</p>
             <p className="mt-2 text-lg font-semibold text-slate-950">{challenge.title}</p>
             <div className="mt-3">
@@ -2451,7 +2451,7 @@ function ActivityGrid({ rows }: { rows: ProgressRow[] }) {
           <span
             key={`${row?.id ?? "empty"}-${index}`}
             title={activityTitle(row)}
-            className="size-3.5 rounded-[2px] border transition-transform hover:scale-125"
+            className="size-3.5 rounded-[2px] border transition-colors"
             style={activityStyle(row)}
           />
         ))}
@@ -3225,12 +3225,15 @@ function SubmissionControl({
   notice: ChallengeNotice | null;
   onExaminer: () => void;
 }) {
+  const containerClass = submission
+    ? "border-y border-slate-200 py-4"
+    : "quiet-panel rounded-md p-4";
   return (
-    <div className="quiet-panel rounded-md p-4">
+    <div className={containerClass}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
           <LockKeyhole size={16} className="text-cyan-700" />
-          Submission
+          {submission ? "Marked submission" : "Submission"}
         </div>
         {!submission && hasDraft && (
           <span className="rounded-md bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-800">
@@ -3581,12 +3584,12 @@ function ExaminerChatModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[88vh] overflow-hidden sm:max-w-3xl">
+      <DialogContent className="grid h-[min(42rem,calc(100dvh-2rem))] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Examiner chat</DialogTitle>
         </DialogHeader>
 
-        <div className="grid min-h-0 gap-3">
+        <div className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-3">
           <div className="flex flex-col gap-2 border-b border-slate-200 pb-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-semibold text-slate-900">
@@ -3616,9 +3619,9 @@ function ExaminerChatModal({
               {notice.reply}
             </div>
           )}
-          <div className="max-h-[26rem] min-h-[16rem] overflow-auto rounded-md border border-slate-200 bg-white/70 p-3">
+          <div className="min-h-0 overflow-auto rounded-md border border-slate-200 bg-white/70 p-3">
             {messages.length === 0 ? (
-              <div className="grid h-44 place-items-center text-center text-sm leading-6 text-slate-500">
+              <div className="grid h-full min-h-36 place-items-center text-center text-sm leading-6 text-slate-500">
                 <p>
                   Ask the examiner about rules, grading expectations, late work,
                   excuses, or future challenge preferences.
@@ -3654,23 +3657,23 @@ function ExaminerChatModal({
               </button>
             </div>
           ) : (
-          <form onSubmit={submit} className="grid gap-2">
-            <textarea
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              className="min-h-24 resize-none rounded-md border border-slate-300 bg-white p-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
-              placeholder="Ask for clarification, dispute a grade with a concrete reason, set your rest day, or request one guarded challenge reformulation."
-            />
-            <div className="flex justify-end">
-              <button
-                disabled={busy || !message.trim()}
-                className="flex h-10 items-center justify-center gap-2 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                {busy ? <Loader2 className="animate-spin" size={16} /> : <ChevronRight size={16} />}
-                Send
-              </button>
-            </div>
-          </form>
+            <form onSubmit={submit} className="grid gap-2 border-t border-slate-200 pt-3">
+              <textarea
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                className="h-24 resize-none rounded-md border border-slate-300 bg-white p-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
+                placeholder="Ask for clarification, dispute a grade with a concrete reason, set your rest day, or request one guarded challenge reformulation."
+              />
+              <div className="flex justify-end">
+                <button
+                  disabled={busy || !message.trim()}
+                  className="flex h-10 items-center justify-center gap-2 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {busy ? <Loader2 className="animate-spin" size={16} /> : <ChevronRight size={16} />}
+                  Send
+                </button>
+              </div>
+            </form>
           )}
         </div>
       </DialogContent>
@@ -4282,7 +4285,7 @@ function SubmittedPanel({
 function SubmissionViewer({ content }: { content: string }) {
   const parsed = parseSubmissionContent(content);
   return (
-    <div className="grid gap-3 rounded-md bg-white p-4 text-sm leading-6 text-slate-600">
+    <div className="grid gap-3 text-sm leading-6 text-slate-600">
       <RichSubmissionBody body={parsed.body} />
       {parsed.attachments.length > 0 && (
         <AttachmentList attachments={parsed.attachments} readonly />
@@ -4645,7 +4648,7 @@ function TeacherMarkedResponse({
   const holisticAssessment = holisticAssessmentFromCorrection(grade.correction);
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white/65 p-3">
+    <div className="grid gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -4660,14 +4663,14 @@ function TeacherMarkedResponse({
         </span>
       </div>
 
-      <div className="mt-3 border-l-2 border-cyan-700 px-3 py-1">
+      <div className="border-l-2 border-cyan-700 px-3 py-1">
         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-800">Whole-response assessment</p>
         <div className="mt-2 text-sm leading-6 text-slate-700">
           <RichSubmissionBody body={holisticAssessment} />
         </div>
       </div>
 
-      <details className="group mt-3 border-t border-slate-200 pt-3">
+      <details className="group border-t border-slate-200 pt-3">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-700 marker:hidden">
           Corrective annotations
           <ChevronRight size={15} className="text-cyan-700 transition-transform group-open:rotate-90" />

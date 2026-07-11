@@ -218,6 +218,7 @@
   }
   html {
     @apply font-sans;
+    scrollbar-gutter: stable;
     font-weight: 300;
   }
   body {
