@@ -105,6 +105,72 @@ export async function getAdminOverview() {
   };
 }
 
+export async function getAdminUserDirectory(input: {
+  query?: string;
+  cursor?: string;
+  limit?: number;
+}) {
+  const limit = Math.max(1, Math.min(100, input.limit ?? 25));
+  const query = input.query?.trim();
+  const users = await prisma.user.findMany({
+    where: query
+      ? {
+          OR: [
+            { name: { contains: query, mode: "insensitive" } },
+            { email: { contains: query, mode: "insensitive" } },
+            { studyProfile: { is: { primaryDiscipline: { contains: query, mode: "insensitive" } } } },
+            { studyProfile: { is: { goals: { has: query } } } },
+          ],
+        }
+      : undefined,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    cursor: input.cursor ? { id: input.cursor } : undefined,
+    skip: input.cursor ? 1 : 0,
+    take: limit + 1,
+    include: {
+      studyProfile: true,
+      socialSettings: true,
+      grades: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
+      challenges: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
+      appSessions: { orderBy: { lastUsedAt: "desc" }, take: 1, select: { lastUsedAt: true } },
+      _count: {
+        select: {
+          challenges: true,
+          submissions: true,
+          grades: true,
+          notebookEntries: true,
+        },
+      },
+    },
+  });
+  const hasMore = users.length > limit;
+  const page = users.slice(0, limit);
+  return {
+    users: page.map((user) => {
+      const activity = [
+        user.updatedAt,
+        user.grades[0]?.createdAt,
+        user.challenges[0]?.createdAt,
+        user.appSessions[0]?.lastUsedAt,
+      ].filter((value): value is Date => Boolean(value));
+      return {
+        id: user.id,
+        name: user.name ?? "Unnamed user",
+        email: user.email ?? "No email",
+        timezone: user.timezone,
+        primaryDiscipline: user.studyProfile?.primaryDiscipline ?? "Not configured",
+        preferredProfession: user.studyProfile?.goals[0] ?? "Not specified",
+        profileCompleted: Boolean(user.studyProfile?.completedAt),
+        discoverable: user.socialSettings?.discoverable ?? false,
+        createdAt: user.createdAt.toISOString(),
+        lastActiveAt: new Date(Math.max(...activity.map((value) => value.getTime()))).toISOString(),
+        counts: user._count,
+      };
+    }),
+    nextCursor: hasMore ? page.at(-1)?.id ?? null : null,
+  };
+}
+
 function readiness(name: string, ok: boolean, detail: string) {
   return {
     name,

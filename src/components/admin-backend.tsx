@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { CheckCircle2, CircleAlert, Database, Home, RefreshCw, Settings } from "lucide-react";
+import { CheckCircle2, CircleAlert, Database, Home, RefreshCw, Search, Settings } from "lucide-react";
 import Link from "next/link";
 
 type AdminSnapshot = {
@@ -88,6 +88,23 @@ type AdminOverview = {
   freshStart: boolean;
 };
 
+type AdminDirectory = {
+  users: Array<{
+    id: string;
+    name: string;
+    email: string;
+    timezone: string;
+    primaryDiscipline: string;
+    preferredProfession: string;
+    profileCompleted: boolean;
+    discoverable: boolean;
+    createdAt: string;
+    lastActiveAt: string;
+    counts: { challenges: number; submissions: number; grades: number; notebookEntries: number };
+  }>;
+  nextCursor: string | null;
+};
+
 async function adminRequest<T>(url: string, password: string, init?: RequestInit) {
   const response = await fetch(url, {
     ...init,
@@ -118,6 +135,8 @@ export function AdminBackend() {
   const [reason, setReason] = useState("");
   const [snapshot, setSnapshot] = useState<AdminSnapshot | null>(null);
   const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [directory, setDirectory] = useState<AdminDirectory | null>(null);
+  const [directoryQuery, setDirectoryQuery] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [newPassword, setNewPassword] = useState("");
@@ -136,12 +155,36 @@ export function AdminBackend() {
     setStatus("");
     try {
       await adminRequest("/api/admin/session", password);
-      const result = await adminRequest<AdminOverview>("/api/admin/overview", password);
+      const [result, users] = await Promise.all([
+        adminRequest<AdminOverview>("/api/admin/overview", password),
+        adminRequest<AdminDirectory>("/api/admin/users?directory=1&limit=25", password),
+      ]);
       setOverview(result);
+      setDirectory(users);
       setAuthenticated(true);
       setStatus("Backend unlocked.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Login failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadDirectory(event?: FormEvent<HTMLFormElement>, cursor?: string) {
+    event?.preventDefault();
+    setBusy(true);
+    setStatus("");
+    try {
+      const params = new URLSearchParams({ directory: "1", limit: "25" });
+      if (directoryQuery.trim()) params.set("query", directoryQuery.trim());
+      if (cursor) params.set("cursor", cursor);
+      const result = await adminRequest<AdminDirectory>(`/api/admin/users?${params}`, password);
+      setDirectory((current) => cursor && current
+        ? { users: [...current.users, ...result.users], nextCursor: result.nextCursor }
+        : result);
+      setStatus("User directory refreshed.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Directory lookup failed");
     } finally {
       setBusy(false);
     }
@@ -172,6 +215,24 @@ export function AdminBackend() {
       setStatus("User loaded.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Lookup failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function selectDirectoryUser(userId: string) {
+    setLookup(userId);
+    setBusy(true);
+    setStatus("");
+    try {
+      const result = await adminRequest<AdminSnapshot>(
+        `/api/admin/users?userId=${encodeURIComponent(userId)}`,
+        password,
+      );
+      setSnapshot(result);
+      setStatus("User loaded.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "User lookup failed");
     } finally {
       setBusy(false);
     }
@@ -254,6 +315,7 @@ export function AdminBackend() {
         body: JSON.stringify({ confirmation: resetConfirmation }),
       });
       setSnapshot(null);
+      setDirectory({ users: [], nextCursor: null });
       setLookup("");
       setReason("");
       setResetConfirmation("");
@@ -323,6 +385,18 @@ export function AdminBackend() {
             busy={busy}
             overview={overview}
             onRefresh={() => void loadOverview()}
+          />
+        )}
+
+        {directory && (
+          <AdminUserDirectory
+            busy={busy}
+            directory={directory}
+            query={directoryQuery}
+            onQueryChange={setDirectoryQuery}
+            onSearch={loadDirectory}
+            onLoadMore={(cursor) => void loadDirectory(undefined, cursor)}
+            onSelect={(userId) => void selectDirectoryUser(userId)}
           />
         )}
 
@@ -436,6 +510,68 @@ export function AdminBackend() {
         )}
       </section>
     </main>
+  );
+}
+
+function AdminUserDirectory({
+  busy,
+  directory,
+  onLoadMore,
+  onQueryChange,
+  onSearch,
+  onSelect,
+  query,
+}: {
+  busy: boolean;
+  directory: AdminDirectory;
+  onLoadMore: (cursor: string) => void;
+  onQueryChange: (value: string) => void;
+  onSearch: (event?: FormEvent<HTMLFormElement>) => void;
+  onSelect: (userId: string) => void;
+  query: string;
+}) {
+  return (
+    <section className="quiet-panel grid gap-4 rounded-md p-4">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-950">User directory</h2>
+        <p className="mt-1 text-sm leading-6 text-slate-600">
+          Admin-only account index. Private responses, notes, credentials, and provider tokens are never returned here.
+        </p>
+      </div>
+      <form onSubmit={onSearch} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <label className="flex h-10 items-center gap-2 rounded-md border border-slate-300 bg-white px-3">
+          <Search size={15} className="text-slate-500" />
+          <span className="sr-only">Search users</span>
+          <input value={query} onChange={(event) => onQueryChange(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm outline-none" placeholder="Name, email, discipline, or exact profession" />
+        </label>
+        <button disabled={busy} className="h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60">Search</button>
+      </form>
+      <div className="max-h-[32rem] overflow-auto overscroll-contain rounded-md border border-slate-200 bg-white/65">
+        <table className="w-full min-w-[920px] text-left text-sm">
+          <thead className="sticky top-0 z-10 border-b border-slate-200 bg-white text-slate-500 shadow-sm">
+            <tr>
+              {['User', 'Discipline', 'Profession', 'Profile', 'Discovery', 'Last active', 'Records', ''].map((heading) => <th key={heading} className="px-3 py-3 font-semibold">{heading}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {directory.users.map((user) => (
+              <tr key={user.id} className="border-b border-slate-100 last:border-0">
+                <td className="px-3 py-3"><p className="font-medium text-slate-900">{user.name}</p><p className="text-xs text-slate-500">{user.email}</p></td>
+                <td className="px-3 py-3 text-slate-600">{user.primaryDiscipline}</td>
+                <td className="px-3 py-3 text-slate-600">{user.preferredProfession}</td>
+                <td className="px-3 py-3">{user.profileCompleted ? "Complete" : "Incomplete"}</td>
+                <td className="px-3 py-3">{user.discoverable ? "Opted in" : "Private"}</td>
+                <td className="px-3 py-3 text-slate-600">{new Date(user.lastActiveAt).toLocaleDateString()}</td>
+                <td className="px-3 py-3 text-slate-600">{user.counts.challenges} C / {user.counts.grades} G / {user.counts.notebookEntries} N</td>
+                <td className="px-3 py-3"><button type="button" onClick={() => onSelect(user.id)} className="h-8 rounded-md border border-slate-300 px-3 text-xs font-semibold text-slate-700">Inspect</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {directory.users.length === 0 && <p className="p-6 text-center text-sm text-slate-500">No matching users.</p>}
+      </div>
+      {directory.nextCursor && <button type="button" disabled={busy} onClick={() => onLoadMore(directory.nextCursor!)} className="h-9 w-fit rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 disabled:opacity-60">Load more</button>}
+    </section>
   );
 }
 

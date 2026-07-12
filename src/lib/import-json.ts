@@ -250,7 +250,9 @@ export async function importJsonData(sourcePath?: string) {
         id: friendship.id,
         userId: friendship.userId,
         friendId: friendship.friendId,
-        status: friendship.status,
+        pairKey: [friendship.userId, friendship.friendId].sort().join(":"),
+        status: "Accepted",
+        respondedAt: new Date(friendship.createdAt),
         createdAt: new Date(friendship.createdAt),
       },
     });

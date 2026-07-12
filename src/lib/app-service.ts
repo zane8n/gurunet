@@ -79,6 +79,22 @@ export const friendSchema = z.object({
   email: z.string().trim().email().max(160).transform((value) => value.toLowerCase()),
 });
 
+export const connectionInvitationSchema = z.object({
+  email: z.string().trim().email().max(160).transform((value) => value.toLowerCase()).optional(),
+  userId: z.string().trim().min(2).max(120).optional(),
+}).refine((value) => Boolean(value.email || value.userId), {
+  message: "Provide an email address or suggested user id",
+});
+
+export const connectionActionSchema = z.object({
+  action: z.enum(["accept", "decline", "cancel", "block"]),
+});
+
+export const socialSettingsSchema = z.object({
+  discoverable: z.boolean().optional(),
+  allowEmailInvites: z.boolean().optional(),
+});
+
 export const enrollmentSchema = z.object({
   challengeId: z.string().trim().min(2).max(120),
 });
@@ -421,7 +437,7 @@ export async function getDashboard(user: User) {
   });
   const retention = buildRetentionSnapshot({
     user: currentUser,
-    today,
+    today: todaySubmission ? today : { ...today, solution: "" },
     todayGrade: todayGradeDb ? fromDbGrade(todayGradeDb) : null,
     progress,
     discipline: profileState.activeDiscipline,
@@ -1911,28 +1927,129 @@ export async function redeemErt(user: User, input: z.infer<typeof redemptionSche
 }
 
 export async function addFriendByEmail(user: User, input: z.infer<typeof friendSchema>) {
-  const friend = await prisma.user.findUnique({ where: { email: input.email } });
-  if (!friend) throw new Response("No GURUnet user found with that email", { status: 404 });
-  if (friend.id === user.id) throw new Response("You cannot add yourself as a friend", { status: 400 });
+  return createConnectionInvitation(user, { email: input.email });
+}
 
-  const existing = await prisma.friendship.findFirst({
-    where: {
-      OR: [
-        { userId: user.id, friendId: friend.id },
-        { userId: friend.id, friendId: user.id },
-      ],
+export async function createConnectionInvitation(
+  user: User,
+  input: z.infer<typeof connectionInvitationSchema>,
+) {
+  const target = input.userId
+    ? await prisma.user.findUnique({ where: { id: input.userId } })
+    : await prisma.user.findUnique({ where: { email: input.email } });
+  const generic = { accepted: true, message: "If this account can receive invitations, the request has been sent." };
+  if (!target || target.id === user.id) return generic;
+
+  const targetSettings = await prisma.userSocialSettings.findUnique({ where: { userId: target.id } });
+  if (input.email && targetSettings?.allowEmailInvites === false) return generic;
+  if (input.userId && targetSettings?.discoverable !== true) return generic;
+
+  const pairKey = connectionPairKey(user.id, target.id);
+  const existing = await prisma.friendship.findUnique({ where: { pairKey } });
+  if (existing) {
+    const coolingOff = new Date(Date.now() - 30 * 86400000);
+    const canRetry =
+      (existing.status === "Declined" || existing.status === "Cancelled") &&
+      existing.updatedAt < coolingOff;
+    if (!canRetry) return generic;
+    await prisma.friendship.update({
+      where: { id: existing.id },
+      data: {
+        userId: user.id,
+        friendId: target.id,
+        status: "Pending",
+        respondedAt: null,
+      },
+    });
+  } else {
+    await prisma.friendship.create({
+      data: {
+        id: createId("frn"),
+        userId: user.id,
+        friendId: target.id,
+        pairKey,
+        status: "Pending",
+      },
+    });
+  }
+
+  await prisma.scheduledNotification.upsert({
+    where: { dedupeKey: `connection-invite:${pairKey}:${new Date().toISOString().slice(0, 10)}` },
+    update: {},
+    create: {
+      id: createId("ntf"),
+      userId: target.id,
+      kind: "ConnectionInvitation",
+      dedupeKey: `connection-invite:${pairKey}:${new Date().toISOString().slice(0, 10)}`,
+      title: "New GURUnet connection request",
+      body: `${user.name || "A learner"} invited you to connect.`,
+      deepLink: "gurunet://network/invitations",
+      scheduledFor: new Date(),
     },
   });
-  if (existing) return existing;
+  return generic;
+}
 
-  return prisma.friendship.create({
-    data: {
-      id: createId("frn"),
+export async function actOnConnectionInvitation(
+  user: User,
+  friendshipId: string,
+  action: z.infer<typeof connectionActionSchema>["action"],
+) {
+  const friendship = await prisma.friendship.findUnique({ where: { id: friendshipId } });
+  if (!friendship || (friendship.userId !== user.id && friendship.friendId !== user.id)) {
+    throw new Response("Connection request not found", { status: 404 });
+  }
+
+  if (action === "accept") {
+    if (friendship.friendId !== user.id || friendship.status !== "Pending") {
+      throw new Response("Only a pending recipient can accept this request", { status: 409 });
+    }
+    return prisma.friendship.update({
+      where: { id: friendship.id },
+      data: { status: "Accepted", respondedAt: new Date() },
+    });
+  }
+  if (action === "decline") {
+    if (friendship.friendId !== user.id || friendship.status !== "Pending") {
+      throw new Response("Only a pending recipient can decline this request", { status: 409 });
+    }
+    return prisma.friendship.update({
+      where: { id: friendship.id },
+      data: { status: "Declined", respondedAt: new Date() },
+    });
+  }
+  if (action === "cancel") {
+    if (friendship.userId !== user.id || friendship.status !== "Pending") {
+      throw new Response("Only the sender can cancel a pending request", { status: 409 });
+    }
+    return prisma.friendship.update({
+      where: { id: friendship.id },
+      data: { status: "Cancelled", respondedAt: new Date() },
+    });
+  }
+  return prisma.friendship.update({
+    where: { id: friendship.id },
+    data: { status: "Blocked", respondedAt: new Date() },
+  });
+}
+
+export async function updateSocialSettings(
+  user: User,
+  input: z.infer<typeof socialSettingsSchema>,
+) {
+  return prisma.userSocialSettings.upsert({
+    where: { userId: user.id },
+    update: input,
+    create: {
       userId: user.id,
-      friendId: friend.id,
-      status: "Accepted",
+      discoverable: input.discoverable ?? false,
+      allowEmailInvites: input.allowEmailInvites ?? true,
     },
   });
+}
+
+function connectionPairKey(first: string, second: string) {
+  return [first, second].sort().join(":");
 }
 
 export async function enrollMarketplaceChallenge(
@@ -2907,7 +3024,7 @@ function isUniqueConstraintError(error: unknown) {
 }
 
 async function getSocialData(userId: string) {
-  const [users, grades, challenges, friendships, marketplaceChallenges, challengeEnrollments, studyProfiles] =
+  const [users, grades, challenges, friendships, marketplaceChallenges, challengeEnrollments, studyProfiles, socialSettings] =
     await Promise.all([
       prisma.user.findMany(),
       prisma.grade.findMany(),
@@ -2918,6 +3035,7 @@ async function getSocialData(userId: string) {
       prisma.marketplaceChallenge.findMany({ orderBy: { createdAt: "asc" } }),
       prisma.challengeEnrollment.findMany(),
       prisma.userStudyProfile.findMany(),
+      prisma.userSocialSettings.findMany(),
     ]);
 
   return {
@@ -2932,8 +3050,9 @@ async function getSocialData(userId: string) {
       id: friendship.id,
       userId: friendship.userId,
       friendId: friendship.friendId,
-      status: "Accepted" as const,
+      status: friendship.status,
       createdAt: friendship.createdAt.toISOString(),
+      updatedAt: friendship.updatedAt.toISOString(),
     })),
     marketplaceChallenges: marketplaceChallenges.map(fromDbMarketplaceChallenge),
     challengeEnrollments: challengeEnrollments.map((enrollment) => ({
@@ -2943,7 +3062,12 @@ async function getSocialData(userId: string) {
       createdAt: enrollment.createdAt.toISOString(),
     })),
     studyProfiles: studyProfiles.map(fromDbStudyProfile),
+    socialSettings,
   };
+}
+
+export async function getSocialSnapshot(user: User) {
+  return buildSocialSnapshot(user, await getSocialData(user.id));
 }
 
 function buildSocialSnapshot(
@@ -2952,15 +3076,27 @@ function buildSocialSnapshot(
     users: User[];
     grades: { userId: string; finalScore: number; createdAt: string }[];
     challenges: { userId: string }[];
-    friendships: { id: string; userId: string; friendId: string; status: "Accepted"; createdAt: string }[];
+    friendships: {
+      id: string;
+      userId: string;
+      friendId: string;
+      status: "Pending" | "Accepted" | "Declined" | "Cancelled" | "Blocked";
+      createdAt: string;
+      updatedAt: string;
+    }[];
     marketplaceChallenges: MarketplaceChallenge[];
     challengeEnrollments: { id: string; userId: string; marketplaceChallengeId: string; createdAt: string }[];
     studyProfiles: StudyProfile[];
+    socialSettings: { userId: string; discoverable: boolean; allowEmailInvites: boolean }[];
   },
 ) {
   const friendIds = new Set(
     data.friendships
-      .filter((item) => item.userId === user.id || item.friendId === user.id)
+      .filter(
+        (item) =>
+          item.status === "Accepted" &&
+          (item.userId === user.id || item.friendId === user.id),
+      )
       .map((item) => (item.userId === user.id ? item.friendId : item.userId)),
   );
   const latestGradeByUser = new Map<string, { finalScore: number; createdAt: string }>();
@@ -2969,10 +3105,12 @@ function buildSocialSnapshot(
     if (!current || grade.createdAt > current.createdAt) latestGradeByUser.set(grade.userId, grade);
   }
 
-  const profiles = data.users.map((item) => ({
+  const allProfiles = data.users.map((item) => ({
     preferredProfession: preferredProfessionFor(
       data.studyProfiles.find((profile) => profile.userId === item.id),
     ),
+    primaryDiscipline:
+      data.studyProfiles.find((profile) => profile.userId === item.id)?.primaryDiscipline ?? "Not configured",
     id: item.id,
     name: item.name,
     handle: `@${item.email.split("@")[0].replace(/[^a-z0-9_]+/gi, "").toLowerCase() || "engineer"}`,
@@ -2985,6 +3123,8 @@ function buildSocialSnapshot(
     isYou: item.id === user.id,
   }));
 
+  const profiles = allProfiles.filter((item) => item.isYou || item.isFriend);
+
   const leaderboard = profiles
     .slice()
     .sort(
@@ -2993,8 +3133,71 @@ function buildSocialSnapshot(
         b.currentStreak - a.currentStreak ||
         (b.latestScore ?? -1) - (a.latestScore ?? -1),
     )
-    .slice(0, 8)
     .map((item, index) => ({ ...item, rank: index + 1 }));
+
+  const connectedPairIds = new Set(
+    data.friendships
+      .filter((item) => {
+        if (item.userId !== user.id && item.friendId !== user.id) return false;
+        if (["Pending", "Accepted", "Blocked"].includes(item.status)) return true;
+        return new Date(item.updatedAt).getTime() > Date.now() - 30 * 86400000;
+      })
+      .map((item) => (item.userId === user.id ? item.friendId : item.userId)),
+  );
+  const currentProfile = data.studyProfiles.find((profile) => profile.userId === user.id);
+  const today = new Date().toISOString().slice(0, 10);
+  const suggestions = allProfiles
+    .filter((candidate) => {
+      const settings = data.socialSettings.find((item) => item.userId === candidate.id);
+      return !candidate.isYou && settings?.discoverable === true && !connectedPairIds.has(candidate.id);
+    })
+    .map((candidate) => {
+      const candidateProfile = data.studyProfiles.find((profile) => profile.userId === candidate.id);
+      const reasons = connectionReasons(currentProfile, candidateProfile);
+      return {
+        id: candidate.id,
+        name: candidate.name,
+        handle: candidate.handle,
+        preferredProfession: candidate.preferredProfession,
+        primaryDiscipline: candidate.primaryDiscipline,
+        reasons,
+        score: reasons.length * 10 + stableDailyScore(`${today}:${user.id}:${candidate.id}`),
+      };
+    })
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .slice(0, 6)
+    .map(({ score: _score, ...candidate }) => candidate);
+
+  const invitationProfile = (id: string) => {
+    const profile = allProfiles.find((item) => item.id === id);
+    return profile
+      ? {
+          id: profile.id,
+          name: profile.name,
+          handle: profile.handle,
+          preferredProfession: profile.preferredProfession,
+          primaryDiscipline: profile.primaryDiscipline,
+        }
+      : null;
+  };
+  const incomingInvitations = data.friendships
+    .filter((item) => item.friendId === user.id && item.status === "Pending")
+    .map((item) => ({
+      id: item.id,
+      direction: "Incoming" as const,
+      createdAt: item.createdAt,
+      profile: invitationProfile(item.userId),
+    }))
+    .filter((item) => item.profile !== null);
+  const outgoingInvitations = data.friendships
+    .filter((item) => item.userId === user.id && item.status === "Pending")
+    .map((item) => ({
+      id: item.id,
+      direction: "Outgoing" as const,
+      createdAt: item.createdAt,
+      profile: invitationProfile(item.friendId),
+    }))
+    .filter((item) => item.profile !== null);
 
   const enrolledIds = new Set(
     data.challengeEnrollments
@@ -3004,8 +3207,15 @@ function buildSocialSnapshot(
 
   return {
     friends: profiles.filter((item) => item.isFriend),
-    profiles: profiles.filter((item) => item.isYou || item.isFriend).slice(0, 8),
+    profiles,
     leaderboard,
+    suggestions,
+    invitations: [...incomingInvitations, ...outgoingInvitations],
+    settings: data.socialSettings.find((item) => item.userId === user.id) ?? {
+      userId: user.id,
+      discoverable: false,
+      allowEmailInvites: true,
+    },
     marketplace: data.marketplaceChallenges.map((challenge) => ({
       ...challenge,
       enrollmentCount: data.challengeEnrollments.filter(
@@ -3015,6 +3225,24 @@ function buildSocialSnapshot(
     })),
     enrollments: data.challengeEnrollments.filter((item) => item.userId === user.id),
   };
+}
+
+function connectionReasons(current?: StudyProfile, candidate?: StudyProfile) {
+  if (!current || !candidate) return ["Active GURUnet learner"];
+  const reasons: string[] = [];
+  if (current.primaryDiscipline === candidate.primaryDiscipline) reasons.push("Same primary discipline");
+  const sharedTopics = current.rankedTopics.filter((topic) => candidate.rankedTopics.includes(topic));
+  if (sharedTopics.length > 0) reasons.push(`Shared focus: ${sharedTopics[0]}`);
+  const sharedGoals = current.goals.filter((goal) => candidate.goals.includes(goal));
+  if (sharedGoals.length > 0) reasons.push(`Shared goal: ${sharedGoals[0]}`);
+  if (current.currentLevel === candidate.currentLevel) reasons.push("Similar experience level");
+  return reasons.slice(0, 2).length > 0 ? reasons.slice(0, 2) : ["Complementary study profile"];
+}
+
+function stableDailyScore(value: string) {
+  let hash = 0;
+  for (const character of value) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return hash % 10;
 }
 
 function preferredProfessionFor(profile?: StudyProfile) {

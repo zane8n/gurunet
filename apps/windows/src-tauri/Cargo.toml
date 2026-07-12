@@ -1,0 +1,22 @@
+[package]
+name = "gurunet-windows"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+name = "gurunet_windows_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-stronghold = "2"
+tauri-plugin-updater = "2"
+keyring = "3"
+rand = "0.9"
+base64 = "0.22"

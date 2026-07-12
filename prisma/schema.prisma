@@ -59,6 +59,33 @@ enum AiJobType {
   NotebookSummary
 }
 
+enum FriendshipStatus {
+  Pending
+  Accepted
+  Declined
+  Cancelled
+  Blocked
+}
+
+enum AppPlatform {
+  Android
+  IOS
+  Windows
+}
+
+enum ScheduledNotificationStatus {
+  Queued
+  Sent
+  Cancelled
+  Failed
+}
+
+enum NotificationDeliveryStatus {
+  Pending
+  Delivered
+  Failed
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String?
@@ -96,6 +123,14 @@ model User {
   challengeEnrollments ChallengeEnrollment[]
   ownedCohortChallenges CohortChallenge[] @relation("OwnedCohortChallenges")
   cohortEnrollments CohortEnrollment[]
+  appSessions        AppSession[]
+  deviceInstallations DeviceInstallation[]
+  socialSettings     UserSocialSettings?
+  notificationPreference NotificationPreference?
+  studySchedules     StudySchedule[]
+  scheduledNotifications ScheduledNotification[]
+  responseDrafts     ResponseDraft[]
+  appAuthCodes       AppAuthCode[]
 }
 
 model Account {
@@ -139,6 +174,70 @@ model LocalSession {
   @@index([expiresAt])
 }
 
+model AppSession {
+  id               String      @id
+  userId           String
+  platform         AppPlatform
+  deviceId         String
+  refreshTokenHash String      @unique
+  previousRefreshTokenHash String? @unique
+  tokenFamily      String
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  lastUsedAt       DateTime    @default(now())
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  user   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device DeviceInstallation @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([deviceId])
+  @@index([expiresAt])
+}
+
+model AppAuthCode {
+  id            String      @id
+  userId        String
+  platform      AppPlatform
+  codeHash      String      @unique
+  codeChallenge String
+  redirectUri   String
+  state         String
+  deviceName    String?
+  appVersion    String
+  timezone      String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime    @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([userId, createdAt])
+}
+
+model DeviceInstallation {
+  id                   String      @id
+  userId               String
+  platform             AppPlatform
+  pushToken            String?     @unique
+  appVersion           String
+  locale               String?
+  timezone             String
+  notificationsEnabled Boolean     @default(false)
+  lastSeenAt           DateTime    @default(now())
+  revokedAt            DateTime?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions   AppSession[]
+  deliveries NotificationDelivery[]
+
+  @@index([userId, revokedAt])
+}
+
 model VerificationToken {
   identifier String
   token      String   @unique
@@ -175,6 +274,7 @@ model Challenge {
   notebookEntries NotebookEntry[]
   notices         ChallengeNotice[]
   examinerMessages ExaminerMessage[]
+  responseDrafts ResponseDraft[]
 
   @@unique([userId, dateKey])
 }
@@ -416,16 +516,126 @@ model WeeklyDisciplineRecord {
 }
 
 model Friendship {
-  id        String   @id
-  userId    String
-  friendId  String
-  status    String   @default("Accepted")
-  createdAt DateTime @default(now())
+  id          String           @id
+  userId      String
+  friendId    String
+  pairKey     String           @unique
+  status      FriendshipStatus @default(Pending)
+  respondedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
   user   User @relation("FriendshipsStarted", fields: [userId], references: [id], onDelete: Cascade)
   friend User @relation("FriendshipsReceived", fields: [friendId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, friendId])
+  @@index([userId, status])
+  @@index([friendId, status])
+}
+
+model UserSocialSettings {
+  userId            String   @id
+  discoverable      Boolean  @default(false)
+  allowEmailInvites Boolean  @default(true)
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model NotificationPreference {
+  userId                String   @id
+  challengeAvailable    Boolean  @default(true)
+  studyWindowReminder   Boolean  @default(true)
+  deadlineWarning       Boolean  @default(true)
+  correctionReady       Boolean  @default(true)
+  recoveryPreview       Boolean  @default(true)
+  socialInvitations     Boolean  @default(false)
+  studyWindowLocalTime  String   @default("10:00")
+  deadlineOffsetMinutes Int      @default(60)
+  quietStartLocalTime   String   @default("21:00")
+  quietEndLocalTime     String   @default("07:00")
+  updatedAt             DateTime @updatedAt
+  createdAt             DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model StudySchedule {
+  id               String   @id
+  userId           String
+  title            String
+  daysOfWeek       Int[]
+  localTime        String
+  durationMinutes  Int
+  timezone         String
+  oneOffAt         DateTime?
+  enabled          Boolean  @default(true)
+  calendarExported Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, enabled])
+}
+
+model ScheduledNotification {
+  id           String                      @id
+  userId       String
+  kind         String
+  dedupeKey    String                      @unique
+  title        String
+  body         String
+  deepLink     String?
+  payload      Json?
+  scheduledFor DateTime
+  status       ScheduledNotificationStatus @default(Queued)
+  attempts     Int                         @default(0)
+  sentAt       DateTime?
+  error        String?
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+
+  user       User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@index([status, scheduledFor])
+  @@index([userId, createdAt])
+}
+
+model NotificationDelivery {
+  id                      String                     @id
+  scheduledNotificationId String
+  deviceInstallationId    String
+  status                  NotificationDeliveryStatus @default(Pending)
+  providerMessageId       String?
+  error                   String?
+  attemptedAt             DateTime                   @default(now())
+  deliveredAt             DateTime?
+
+  scheduledNotification ScheduledNotification @relation(fields: [scheduledNotificationId], references: [id], onDelete: Cascade)
+  deviceInstallation DeviceInstallation @relation(fields: [deviceInstallationId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduledNotificationId, deviceInstallationId])
+  @@index([deviceInstallationId, attemptedAt])
+}
+
+model ResponseDraft {
+  id          String   @id
+  userId      String
+  challengeId String
+  body        String   @db.Text
+  attachmentIds String[]
+  revision    Int      @default(1)
+  deviceId    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, challengeId])
+  @@index([challengeId])
 }
 
 model MarketplaceChallenge {

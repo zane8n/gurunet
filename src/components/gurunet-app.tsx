@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, FormEvent, ReactNode } from "react";
 import {
+  Apple,
   BookOpenText,
   Bold,
   CalendarClock,
@@ -14,6 +15,7 @@ import {
   Command,
   Download,
   FileText,
+  Github,
   Heading2,
   ImagePlus,
   Italic,
@@ -113,6 +115,31 @@ type SocialSnapshot = {
   friends: PublicProfile[];
   profiles: PublicProfile[];
   leaderboard: LeaderboardRow[];
+  suggestions: Array<{
+    id: string;
+    name: string;
+    handle: string;
+    preferredProfession: string;
+    primaryDiscipline: string;
+    reasons: string[];
+  }>;
+  invitations: Array<{
+    id: string;
+    direction: "Incoming" | "Outgoing";
+    createdAt: string;
+    profile: {
+      id: string;
+      name: string;
+      handle: string;
+      preferredProfession: string;
+      primaryDiscipline: string;
+    };
+  }>;
+  settings: {
+    userId: string;
+    discoverable: boolean;
+    allowEmailInvites: boolean;
+  };
   marketplace: MarketplaceItem[];
   enrollments: { id: string; marketplaceChallengeId: string; createdAt: string }[];
 };
@@ -950,9 +977,57 @@ export function GurunetApp() {
       });
       event.currentTarget.reset();
       await loadDashboard();
-      setStatus("Friend added to your public profile graph.");
+      setStatus("Connection request processed. The recipient must accept before profile details are shared.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Friend lookup failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function inviteSuggestedUser(userId: string) {
+    setBusy(true);
+    setStatus("");
+    try {
+      await apiRequest("/api/v1/social/invitations", {
+        method: "POST",
+        body: JSON.stringify({ userId }),
+      });
+      await loadDashboard();
+      setStatus("Connection request sent.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Connection request failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function actOnInvitation(id: string, action: "accept" | "decline" | "cancel" | "block") {
+    setBusy(true);
+    setStatus("");
+    try {
+      await apiRequest(`/api/v1/social/invitations/${id}/${action}`, { method: "POST" });
+      await loadDashboard();
+      setStatus(action === "accept" ? "Connection accepted." : "Connection request updated.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Connection update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveSocialSettings(settings: { discoverable: boolean; allowEmailInvites: boolean }) {
+    setBusy(true);
+    setStatus("");
+    try {
+      await apiRequest("/api/v1/social/settings", {
+        method: "PATCH",
+        body: JSON.stringify(settings),
+      });
+      await loadDashboard();
+      setStatus("Connection privacy settings saved.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Privacy settings failed");
     } finally {
       setBusy(false);
     }
@@ -1246,16 +1321,13 @@ export function GurunetApp() {
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                window.location.assign("/api/auth/google");
-              }}
-              className="interactive-lift mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm"
-            >
-              <GoogleMark />
-              Continue with Google
-            </button>
+            <div className="mt-5 grid gap-2">
+              <ProviderButton provider="google" label="Continue with Google" icon={<GoogleMark />} />
+              <div className="grid gap-2 sm:grid-cols-2">
+                <ProviderButton provider="github" label="GitHub" icon={<Github size={16} />} />
+                <ProviderButton provider="apple" label="Apple" icon={<Apple size={16} />} />
+              </div>
+            </div>
 
             {authError && (
               <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -1300,6 +1372,8 @@ export function GurunetApp() {
         onAddFriend={addFriend}
         onCreateCohort={createCohort}
         onEnrollMarketplace={enrollMarketplace}
+        onInviteSuggestion={inviteSuggestedUser}
+        onInvitationAction={actOnInvitation}
         onExaminer={openExaminer}
         onFocus={() => setFocusOpen(true)}
         onGrade={gradeSubmission}
@@ -1308,6 +1382,7 @@ export function GurunetApp() {
         onRedeem={redeem}
         onSample={loadSampleAnswer}
         onSaveProfile={saveStudyProfile}
+        onSaveSocialSettings={saveSocialSettings}
         onSaveSettings={saveChallengeSettings}
         onVerify={answerVerification}
         profileErrors={profileErrors}
@@ -1378,6 +1453,29 @@ function GoogleMark() {
   );
 }
 
+function ProviderButton({
+  provider,
+  label,
+  icon,
+}: {
+  provider: "google" | "github" | "apple";
+  label: string;
+  icon: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        window.location.assign(`/api/auth/signin/${provider}`);
+      }}
+      className="interactive-lift flex h-11 w-full items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm"
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -1426,6 +1524,8 @@ function DashboardWorkspace({
   onAddFriend,
   onCreateCohort,
   onEnrollMarketplace,
+  onInviteSuggestion,
+  onInvitationAction,
   onExaminer,
   onFocus,
   onGrade,
@@ -1434,6 +1534,7 @@ function DashboardWorkspace({
   onRedeem,
   onSample,
   onSaveProfile,
+  onSaveSocialSettings,
   onSaveSettings,
   onVerify,
   profileErrors,
@@ -1454,6 +1555,8 @@ function DashboardWorkspace({
   onAddFriend: (event: FormEvent<HTMLFormElement>) => void;
   onCreateCohort: (event: FormEvent<HTMLFormElement>) => void;
   onEnrollMarketplace: (challengeId: string) => void;
+  onInviteSuggestion: (userId: string) => void;
+  onInvitationAction: (id: string, action: "accept" | "decline" | "cancel" | "block") => void;
   onExaminer: () => void;
   onFocus: () => void;
   onGrade: () => void;
@@ -1462,6 +1565,7 @@ function DashboardWorkspace({
   onRedeem: (event: FormEvent<HTMLFormElement>) => void;
   onSample: () => void;
   onSaveProfile: (input: unknown) => void;
+  onSaveSocialSettings: (settings: { discoverable: boolean; allowEmailInvites: boolean }) => void;
   onSaveSettings: (settings: ChallengeSettings) => void;
   onVerify: () => void;
   profileErrors: string[];
@@ -1602,6 +1706,9 @@ function DashboardWorkspace({
             busy={busy}
             onAddFriend={onAddFriend}
             onEnroll={onEnrollMarketplace}
+            onInviteSuggestion={onInviteSuggestion}
+            onInvitationAction={onInvitationAction}
+            onSaveSocialSettings={onSaveSocialSettings}
             plain
           />
           <details className="dashboard-management group">
@@ -5409,22 +5516,36 @@ function SocialPanel({
   busy,
   onAddFriend,
   onEnroll,
+  onInviteSuggestion,
+  onInvitationAction,
+  onSaveSocialSettings,
   plain = false,
 }: {
   social: SocialSnapshot;
   busy: boolean;
   onAddFriend: (event: FormEvent<HTMLFormElement>) => void;
   onEnroll: (challengeId: string) => void;
+  onInviteSuggestion: (userId: string) => void;
+  onInvitationAction: (id: string, action: "accept" | "decline" | "cancel" | "block") => void;
+  onSaveSocialSettings: (settings: { discoverable: boolean; allowEmailInvites: boolean }) => void;
   plain?: boolean;
 }) {
   const content = (
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(17rem,0.55fr)]">
         <div className="grid gap-4">
-          <div className="overflow-x-auto rounded-md border border-slate-200 bg-white/65">
+          <div>
+            <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h3 className="font-semibold text-slate-950">Your network ranking</h3>
+                <p className="mt-1 text-sm text-slate-500">Only you and accepted connections appear here.</p>
+              </div>
+              <span className="text-xs font-semibold text-slate-500">{social.leaderboard.length} members</span>
+            </div>
+          <div className="h-[22rem] max-w-full overflow-auto overscroll-contain rounded-md border border-slate-200 bg-white/65 sm:h-[28rem]">
             <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="border-b border-slate-200 text-slate-500">
+              <thead className="sticky top-0 z-10 border-b border-slate-200 bg-white text-slate-500 shadow-sm">
                 <tr>
-                {["Rank", "Profile", "Preferred profession", "PIS", "Streak", "Latest"].map((head) => (
+                  {["Rank", "Profile", "Preferred profession", "PIS", "Streak", "Latest"].map((head) => (
                     <th key={head} className="px-3 py-3 font-semibold">
                       {head}
                     </th>
@@ -5436,8 +5557,8 @@ function SocialPanel({
                   <tr>
                     <td colSpan={6} className="px-3 py-8">
                       <EmptyState
-                        title="No leaderboard yet"
-                        text="Leaderboard rows appear after users complete graded challenges."
+                        title="Your network is private"
+                        text="Accepted connections appear here after they accept an invitation."
                       />
                     </td>
                   </tr>
@@ -5459,6 +5580,7 @@ function SocialPanel({
                 ))}
               </tbody>
             </table>
+          </div>
           </div>
 
           <details className="rounded-md border border-slate-200 bg-white/55 p-3">
@@ -5495,10 +5617,79 @@ function SocialPanel({
           </details>
         </div>
 
-        <aside className="self-start border-t border-slate-200 pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
-          <form onSubmit={onAddFriend} className="grid gap-3">
+        <aside className="grid self-start gap-6 border-t border-slate-200 pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
+          {social.invitations.length > 0 && (
+            <section>
+              <h3 className="text-sm font-semibold text-slate-950">Connection requests</h3>
+              <div className="mt-3 grid gap-3">
+                {social.invitations.map((invitation) => (
+                  <article key={invitation.id} className="border-t border-slate-200 pt-3 first:border-t-0 first:pt-0">
+                    <p className="text-sm font-semibold text-slate-900">{invitation.profile.name}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {invitation.profile.preferredProfession} · {invitation.profile.primaryDiscipline}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {invitation.direction === "Incoming" ? (
+                        <>
+                          <button type="button" onClick={() => onInvitationAction(invitation.id, "accept")} disabled={busy} className="h-8 rounded-md bg-cyan-700 px-3 text-xs font-semibold text-white disabled:opacity-60">Accept</button>
+                          <button type="button" onClick={() => onInvitationAction(invitation.id, "decline")} disabled={busy} className="h-8 rounded-md border border-slate-300 px-3 text-xs font-semibold text-slate-600 disabled:opacity-60">Decline</button>
+                          <button type="button" onClick={() => onInvitationAction(invitation.id, "block")} disabled={busy} className="h-8 rounded-md px-2 text-xs font-semibold text-orange-700 disabled:opacity-60">Block</button>
+                        </>
+                      ) : (
+                        <button type="button" onClick={() => onInvitationAction(invitation.id, "cancel")} disabled={busy} className="h-8 rounded-md border border-slate-300 px-3 text-xs font-semibold text-slate-600 disabled:opacity-60">Cancel request</button>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-slate-950">Suggested connections</h3>
+              <span className="text-xs text-slate-500">Private preview</span>
+            </div>
+            <div className="mt-3 grid gap-3">
+              {social.suggestions.map((suggestion) => (
+                <article key={suggestion.id} className="border-t border-slate-200 pt-3 first:border-t-0 first:pt-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900">{suggestion.name}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{suggestion.preferredProfession}</p>
+                    </div>
+                    <button type="button" onClick={() => onInviteSuggestion(suggestion.id)} disabled={busy} className="h-8 shrink-0 rounded-md border border-cyan-700/20 bg-cyan-50 px-3 text-xs font-semibold text-cyan-800 disabled:opacity-60">Connect</button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {suggestion.reasons.map((reason) => <span key={reason} className="rounded-sm bg-slate-100 px-2 py-1 text-[11px] text-slate-600">{reason}</span>)}
+                  </div>
+                </article>
+              ))}
+              {social.suggestions.length === 0 && (
+                <p className="text-sm leading-6 text-slate-600">No relevant discoverable learners are available right now.</p>
+              )}
+            </div>
+          </section>
+
+          <section>
+            <h3 className="text-sm font-semibold text-slate-950">Connections</h3>
+            <div className="mt-3 grid max-h-56 gap-3 overflow-y-auto overscroll-contain pr-1">
+              {social.friends.map((profile) => (
+                <div key={profile.id} className="grid grid-cols-[1fr_auto] gap-3 border-t border-slate-200 pt-3 first:border-t-0 first:pt-0">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900">{profile.name}</p>
+                    <p className="truncate text-xs text-slate-500">{profile.preferredProfession}</p>
+                  </div>
+                  <p className="text-xs font-semibold text-cyan-800">{profile.pisScore.toFixed(1)} PIS</p>
+                </div>
+              ))}
+              {social.friends.length === 0 && <p className="text-sm leading-6 text-slate-600">No accepted connections yet.</p>}
+            </div>
+          </section>
+
+          <form onSubmit={onAddFriend} className="grid gap-3 border-t border-slate-200 pt-4">
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-              Add friend
+              Invite by exact email
               <input
                 name="email"
                 type="email"
@@ -5511,35 +5702,28 @@ function SocialPanel({
               disabled={busy}
               className="h-10 rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
             >
-              Add friend
+              Send request
             </button>
           </form>
 
-          <div className="mt-5 grid gap-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Public profiles
-            </p>
-            {social.profiles.map((profile) => (
-              <div key={profile.id} className="grid grid-cols-[1fr_auto] gap-3 border-t border-slate-200 pt-3 first:border-t-0 first:pt-0">
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-slate-900">
-                    {profile.name}
-                    {profile.isYou ? " (you)" : ""}
-                  </p>
-                  <p className="truncate text-xs text-slate-500">{profile.handle}</p>
-                </div>
-                <div className="text-right text-sm">
-                  <p className="font-semibold text-cyan-800">{profile.pisScore.toFixed(1)} PIS</p>
-                  <p className="text-xs text-slate-500">{profile.challengeCount} challenges</p>
-                </div>
-              </div>
-            ))}
-            {social.friends.length === 0 && (
-              <p className="text-sm leading-6 text-slate-600">
-                Add a friend by email to compare public profiles and shared challenge progress.
-              </p>
-            )}
-          </div>
+          <details className="border-t border-slate-200 pt-4">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-800">Connection privacy</summary>
+            <form
+              className="mt-3 grid gap-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                onSaveSocialSettings({
+                  discoverable: form.get("discoverable") === "on",
+                  allowEmailInvites: form.get("allowEmailInvites") === "on",
+                });
+              }}
+            >
+              <label className="flex items-start gap-2 text-sm leading-5 text-slate-600"><input name="discoverable" type="checkbox" defaultChecked={social.settings.discoverable} className="mt-1" /><span>Suggest my limited profile to compatible learners.</span></label>
+              <label className="flex items-start gap-2 text-sm leading-5 text-slate-600"><input name="allowEmailInvites" type="checkbox" defaultChecked={social.settings.allowEmailInvites} className="mt-1" /><span>Allow invitations from people who know my exact email.</span></label>
+              <button disabled={busy} className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 disabled:opacity-60">Save privacy</button>
+            </form>
+          </details>
         </aside>
       </div>
   );

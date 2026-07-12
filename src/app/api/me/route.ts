@@ -4,6 +4,7 @@ import { apiError, json } from "@/lib/api";
 import { clearSessionCookie, hashPassword, publicUser, requireUser, SESSION_COOKIE, verifyPassword } from "@/lib/auth";
 import { fromDbUser } from "@/lib/db-mappers";
 import { prisma } from "@/lib/prisma";
+import { revokeLinkedProviderTokens } from "@/lib/provider-revocation";
 import { clearUserUploadStorage } from "@/lib/storage";
 
 const AUTH_SESSION_COOKIES = [
@@ -76,8 +77,9 @@ export async function DELETE(request: NextRequest) {
       throw new Response("Password is required to delete this account.", { status: 400 });
     }
 
-    await prisma.user.delete({ where: { id: user.id } });
+    await revokeLinkedProviderTokens(user.id);
     await clearUserUploadStorage(user.id);
+    await prisma.user.delete({ where: { id: user.id } });
 
     const response = NextResponse.json({ ok: true });
     clearSessionCookie(response);

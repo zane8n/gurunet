@@ -1,0 +1,7 @@
+{
+  "$schema":"https://schema.tauri.app/config/2","productName":"GURUnet","version":"1.0.0","identifier":"uk.gurunet.windows",
+  "build":{"beforeDevCommand":"pnpm dev","devUrl":"http://localhost:1420","beforeBuildCommand":"pnpm build","frontendDist":"../dist"},
+  "app":{"windows":[{"title":"GURUnet","width":1220,"height":780,"minWidth":820,"minHeight":620}],"security":{"csp":"default-src 'self'; connect-src 'self' https://gurunet.uk; img-src 'self' data: blob:"}},
+  "bundle":{"active":true,"targets":["msi","nsis"],"publisher":"Kikandi"},
+  "plugins":{"deep-link":{"desktop":{"schemes":["gurunet-windows"]}},"updater":{"endpoints":["https://gurunet.uk/app/windows/{{target}}/{{arch}}/{{current_version}}"]}}
+}

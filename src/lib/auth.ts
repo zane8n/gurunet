@@ -8,6 +8,7 @@ import { fromDbSession, fromDbUser } from "@/lib/db-mappers";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/store";
 import { nowIso } from "@/lib/time";
+import { getBearerIdentity } from "@/lib/app-auth";
 
 export const SESSION_COOKIE = "gurunet_session";
 const SESSION_DAYS = 30;
@@ -85,6 +86,9 @@ export function clearSessionCookie(response: NextResponse) {
 }
 
 export async function getCurrentUser() {
+  const bearer = await getBearerIdentity();
+  if (bearer) return bearer.user;
+
   const cookieStore = await cookies();
   const sessionId = cookieStore.get(SESSION_COOKIE)?.value;
   if (sessionId) {

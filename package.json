@@ -13,12 +13,18 @@
     "postinstall": "prisma generate",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "check:contracts": "pnpm --filter @gurunet/contracts typecheck && pnpm --filter @gurunet/domain typecheck && pnpm --filter @gurunet/api-client typecheck && pnpm --filter @gurunet/sync typecheck",
+    "test:platform": "node scripts/verify-platform.mjs",
+    "dev:android": "pnpm --filter @gurunet/android start",
+    "dev:ios": "pnpm --filter @gurunet/ios start",
+    "dev:windows": "pnpm --filter @gurunet/windows tauri dev"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@vercel/blob": "^2.3.0",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

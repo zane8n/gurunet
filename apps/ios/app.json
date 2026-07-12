@@ -1,0 +1,6 @@
+{
+  "expo":{"name":"GURUnet","slug":"gurunet-ios","version":"1.0.0","scheme":"gurunet-ios",
+  "ios":{"bundleIdentifier":"uk.gurunet.ios","supportsTablet":true,"usesAppleSignIn":true},
+  "plugins":["expo-router","expo-secure-store","expo-notifications","expo-camera","expo-apple-authentication"],
+  "experiments":{"typedRoutes":true},"extra":{"apiUrl":"https://gurunet.uk"}}
+}

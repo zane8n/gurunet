@@ -6,11 +6,11 @@ GURUnet is a personal development web app for daily network engineering,
 cybersecurity, Linux, scripting, troubleshooting, automation, and documentation
 challenges.
 
-The current build is a functional Next.js MVP that reformats the daily challenge
-rules from `context.txt` into a web-app experience: signup/login, protected
-sessions, daily challenge creation, submissions, verification checks, grading,
-penalties, PIS, ERT, recovery restrictions, redemption ledger, progress tracker,
-and notebook flow.
+The current build is a functional Next.js web app plus a modular app-platform
+foundation: signup/login, protected sessions, personalized daily challenge
+creation, submissions, verification checks, grading, penalties, PIS, ERT,
+recovery restrictions, redemption ledger, progress tracker, notebook flow,
+private social invitations, app tokens, secure uploads, and native app shells.
 
 ## Stack
 
@@ -23,7 +23,7 @@ and notebook flow.
 | Database | PostgreSQL | Recommended production database. |
 | ORM | Prisma | Installed for schema and migration work. |
 | AI | DeepSeek through OpenAI-compatible SDK | Used for adaptive challenge generation, examiner chat, verification questions, grading critique, and notebook language. Deterministic code still owns score math, caps, PIS, ERT, streaks, and redemptions. |
-| Hosting | Vercel | Good fit for the Next.js app; defer deployment until the app behavior is approved. |
+| Hosting | Vercel | Production web/API host with cron and Blob storage support. |
 
 Runtime data is stored in PostgreSQL through Prisma. Local `.data` files are
 only used for development backup/import sources and local upload storage.
@@ -77,6 +77,12 @@ Validate the Prisma 7 schema/config:
 
 ```bash
 pnpm prisma validate
+```
+
+Run platform structure checks:
+
+```bash
+pnpm test:platform
 ```
 
 Apply the schema directly to a local database:
@@ -148,6 +154,14 @@ AI_STRICT_CRITIQUE_ALWAYS="false"
 JOB_SECRET="..."
 IMPORT_SECRET="..."
 GURUNET_UPLOAD_DIR=".data/uploads"
+BLOB_STORE_ID="..."
+BLOB_READ_WRITE_TOKEN="..."
+APP_TOKEN_SECRET="..."
+CRON_SECRET="..."
+AUTH_APPLE_ID="..."
+AUTH_APPLE_SECRET="..."
+AUTH_GITHUB_ID="..."
+AUTH_GITHUB_SECRET="..."
 ```
 
 For local development, place them in `.env.local`.
@@ -164,6 +178,8 @@ The app should treat the daily task rules as deterministic product logic:
   mutate PIS or ERT balances.
 - Generate a notebook entry after grading from the challenge, submission, and
   correction.
+- Keep social rankings private to accepted connections only.
+- Keep the complete user directory inside the admin surface.
 
 DeepSeek usage:
 
@@ -262,9 +278,9 @@ When ready:
 
 1. Push the repository to GitHub.
 2. Import it into Vercel.
-3. Set `DATABASE_URL`, `AUTH_SECRET`, `AUTH_URL`, Google OAuth env vars,
-   `DEEPSEEK_API_KEY`, `JOB_SECRET`, and `IMPORT_SECRET` in Vercel project
-   settings.
+3. Set `DATABASE_URL`, `AUTH_SECRET`, `AUTH_URL`, OAuth env vars,
+   `APP_TOKEN_SECRET`, `CRON_SECRET`, Blob env vars, `DEEPSEEK_API_KEY`,
+   `JOB_SECRET`, and `IMPORT_SECRET` in Vercel project settings.
 4. Attach a production PostgreSQL database.
 5. Use build command `pnpm vercel-build` if you want Vercel to run
    `prisma migrate deploy` during deployment. Otherwise run
@@ -287,11 +303,12 @@ Deployment caveats:
   URI.
 - If your Postgres provider requires SSL, include the provider-specific SSL
   option in `DATABASE_URL`, for example `?sslmode=require`.
-- Local upload storage is suitable for development. Vercel serverless storage is
-  ephemeral, so production evidence uploads should move to Vercel Blob or
-  S3-compatible storage before relying on long-term file retention.
-- `POST /api/ai/jobs/run` should be triggered by a cron job or protected manual
-  call using `JOB_SECRET`.
+- Local upload storage is suitable for development. Production evidence files
+  use Vercel Blob when Blob env vars are present, including direct client upload
+  support through `/api/v1/uploads/direct`.
+- `/api/cron/platform` is the Vercel Cron entry point for AI jobs,
+  notifications, session cleanup, and retry cleanup. Set `CRON_SECRET` to guard
+  manual calls.
 
 Vercel Hobby is suitable for personal/non-commercial use. Payment features,
 paid users, or commercial workflows should move to a paid deployment plan.

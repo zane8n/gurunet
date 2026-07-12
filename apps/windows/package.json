@@ -1,0 +1,9 @@
+{
+  "name":"@gurunet/windows","version":"1.0.0","private":true,"type":"module",
+  "scripts":{"dev":"vite","build":"tsc && vite build","typecheck":"tsc --noEmit","tauri":"tauri"},
+  "dependencies":{
+    "@gurunet/api-client":"workspace:*","@gurunet/contracts":"workspace:*","@gurunet/design-tokens":"workspace:*","@gurunet/domain":"workspace:*","@gurunet/sync":"workspace:*",
+    "@tauri-apps/api":"2.11.1","@tauri-apps/plugin-deep-link":"^2.4.6","@tauri-apps/plugin-notification":"^2.3.2","@tauri-apps/plugin-stronghold":"^2.3.1","@tauri-apps/plugin-updater":"^2.9.0","react":"19.2.4","react-dom":"19.2.4"
+  },
+  "devDependencies":{"@tauri-apps/cli":"2.11.4","@types/react":"^19","@types/react-dom":"^19","@vitejs/plugin-react":"latest","typescript":"^5","vite":"latest"}
+}

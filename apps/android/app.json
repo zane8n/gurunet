@@ -1,0 +1,8 @@
+{
+  "expo": {
+    "name":"GURUnet","slug":"gurunet-android","version":"1.0.0","scheme":"gurunet-android",
+    "android":{"package":"uk.gurunet.android","permissions":["CAMERA","POST_NOTIFICATIONS"]},
+    "plugins":["expo-router","expo-secure-store","expo-notifications","expo-camera"],
+    "experiments":{"typedRoutes":true},"extra":{"apiUrl":"https://gurunet.uk"}
+  }
+}
