@@ -19,7 +19,10 @@ export async function GET() {
     orderBy: { lastSeenAt: "desc" },
   });
   return Response.json({
-    devices: devices.map(({ pushToken: _private, ...device }) => device),
+    devices: devices.map(({ pushToken, ...device }) => {
+      void pushToken;
+      return device;
+    }),
   });
 }
 

@@ -1,0 +1,3 @@
+ALTER TABLE "StudySchedule"
+ADD COLUMN "reminderMinutesBefore" INTEGER NOT NULL DEFAULT 10,
+ADD COLUMN "flexWindowMinutes" INTEGER NOT NULL DEFAULT 30;

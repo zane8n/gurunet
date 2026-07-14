@@ -16,6 +16,7 @@
     "prisma:migrate": "prisma migrate dev",
     "check:contracts": "pnpm --filter @gurunet/contracts typecheck && pnpm --filter @gurunet/domain typecheck && pnpm --filter @gurunet/api-client typecheck && pnpm --filter @gurunet/sync typecheck",
     "test:platform": "node scripts/verify-platform.mjs",
+    "test:challenges": "node --no-warnings --experimental-strip-types scripts/verify-challenge-generation.mjs",
     "dev:android": "pnpm --filter @gurunet/android start",
     "dev:ios": "pnpm --filter @gurunet/ios start",
     "dev:windows": "pnpm --filter @gurunet/windows tauri dev"

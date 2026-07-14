@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/store";
+import { notificationKinds } from "@/lib/notification-scheduler";
 
 function localClock(timezone: string) {
   return new Intl.DateTimeFormat("en-GB", {
@@ -17,9 +18,9 @@ function isQuiet(clock: string, start: string, end: string) {
     : clock >= start || clock < end;
 }
 
-export async function processDueNotifications(limit = 50) {
+export async function processDueNotifications(limit = 50, userId?: string) {
   const notifications = await prisma.scheduledNotification.findMany({
-    where: { status: "Queued", scheduledFor: { lte: new Date() } },
+    where: { status: "Queued", scheduledFor: { lte: new Date() }, ...(userId ? { userId } : {}) },
     include: {
       user: {
         include: {
@@ -38,25 +39,56 @@ export async function processDueNotifications(limit = 50) {
   for (const notification of notifications) {
     const preference = notification.user.notificationPreference;
     const timezone = notification.user.timezone;
+    const transientKinds = [
+      notificationKinds.challengeAvailable,
+      notificationKinds.studyWindow,
+      notificationKinds.studyBlock,
+    ];
+    if (
+      transientKinds.includes(notification.kind as (typeof transientKinds)[number]) &&
+      Date.now() - notification.scheduledFor.getTime() > 2 * 60 * 60_000
+    ) {
+      await prisma.scheduledNotification.update({
+        where: { id: notification.id }, data: { status: "Cancelled", error: "Reminder expired during quiet/offline hours" },
+      });
+      continue;
+    }
     if (
       preference &&
       isQuiet(localClock(timezone), preference.quietStartLocalTime, preference.quietEndLocalTime)
     ) {
       continue;
     }
-    if (notification.kind === "connection_invitation" && !preference?.socialInvitations) {
+    const preferenceEnabled =
+      notification.kind === notificationKinds.challengeAvailable ? preference?.challengeAvailable !== false
+      : notification.kind === notificationKinds.studyWindow || notification.kind === notificationKinds.studyBlock ? preference?.studyWindowReminder !== false
+      : notification.kind === notificationKinds.deadlineWarning ? preference?.deadlineWarning !== false
+      : notification.kind === notificationKinds.correctionReady ? preference?.correctionReady !== false
+      : notification.kind === notificationKinds.recoveryPreview ? preference?.recoveryPreview !== false
+      : notification.kind === notificationKinds.connectionInvitation ? preference?.socialInvitations === true
+      : true;
+    if (!preferenceEnabled) {
       await prisma.scheduledNotification.update({
         where: { id: notification.id }, data: { status: "Cancelled" },
       });
       continue;
     }
     const payload = (notification.payload ?? {}) as { challengeId?: string };
-    if (payload.challengeId) {
+    const openChallengeKinds: string[] = [
+      notificationKinds.challengeAvailable,
+      notificationKinds.studyWindow,
+      notificationKinds.deadlineWarning,
+    ];
+    const requiresOpenChallenge = openChallengeKinds.includes(notification.kind);
+    if (payload.challengeId && requiresOpenChallenge) {
       const challenge = await prisma.challenge.findFirst({
         where: { id: payload.challengeId, userId: notification.userId },
         select: { status: true },
       });
-      if (challenge && challenge.status !== "Active" && challenge.status !== "Late") {
+      if (
+        challenge &&
+        !["Active", "Late", "RecoveryChallenge", "PressureChallenge"].includes(challenge.status)
+      ) {
         await prisma.scheduledNotification.update({
           where: { id: notification.id }, data: { status: "Cancelled" },
         });
@@ -79,12 +111,15 @@ export async function processDueNotifications(limit = 50) {
             body: notification.body,
             data: { ...payload, deepLink: notification.deepLink },
             sound: "default",
+            channelId: "learning",
           }),
         });
         const result = (await response.json().catch(() => ({}))) as {
           data?: { id?: string; message?: string };
         };
-        if (!response.ok) throw new Error(result.data?.message ?? "Push provider rejected delivery");
+        if (!response.ok || result.data?.message) {
+          throw new Error(result.data?.message ?? "Push provider rejected delivery");
+        }
         await prisma.notificationDelivery.upsert({
           where: {
             scheduledNotificationId_deviceInstallationId: {

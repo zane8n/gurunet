@@ -123,6 +123,7 @@ export async function issueAppSession(userId: string, input: AppDeviceInput) {
         timezone: input.timezone,
         locale: input.locale,
         pushToken: input.pushToken,
+        notificationsEnabled: Boolean(input.pushToken),
         revokedAt: null,
         lastSeenAt: new Date(),
       },
@@ -134,6 +135,7 @@ export async function issueAppSession(userId: string, input: AppDeviceInput) {
         timezone: input.timezone,
         locale: input.locale,
         pushToken: input.pushToken,
+        notificationsEnabled: Boolean(input.pushToken),
       },
     });
     await tx.appSession.create({

@@ -267,6 +267,8 @@ model Challenge {
   isPressure           Boolean         @default(false)
   disciplineSnapshot   Json?
   recoveryContext      Json?
+  generationSignature  String?
+  contentFingerprint   String?         @unique
   createdAt            DateTime        @default(now())
 
   user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -278,6 +280,8 @@ model Challenge {
   responseDrafts ResponseDraft[]
 
   @@unique([userId, dateKey])
+  @@unique([userId, generationSignature])
+  @@index([dateKey, generationSignature])
 }
 
 model ExaminerMessage {
@@ -569,6 +573,8 @@ model StudySchedule {
   daysOfWeek       Int[]
   localTime        String
   durationMinutes  Int
+  reminderMinutesBefore Int  @default(10)
+  flexWindowMinutes Int      @default(30)
   timezone         String
   oneOffAt         DateTime?
   enabled          Boolean  @default(true)

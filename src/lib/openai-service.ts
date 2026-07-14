@@ -6,11 +6,14 @@ import type {
 } from "openai/resources/chat/completions";
 import type { Response as OpenAIResponse } from "openai/resources/responses/responses";
 import type { Challenge, Difficulty, DisciplineSnapshot, Grade, RecoveryContext, Submission, TechnicalCap, User } from "@/lib/domain";
-import { generateChallenge } from "@/lib/challenges";
 import { requireRuntimeEnv, getRuntimeEnv } from "@/lib/runtime-env";
 import { summarizeSubmissionForAi } from "@/lib/submission-content";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/store";
+import {
+  challengeNoveltyIssues,
+  type ChallengeHistorySignal,
+} from "@/lib/challenge-blueprints";
 
 const challengeSchema = z.object({
   title: z.string().min(8).max(120),
@@ -187,6 +190,8 @@ type ChallengeContext = {
   durationMinutes?: number;
   disciplineSnapshot?: DisciplineSnapshot;
   recoveryContext?: RecoveryContext;
+  recentChallenges?: ChallengeHistorySignal[];
+  sameDayChallenges?: ChallengeHistorySignal[];
 };
 
 let deepSeekClient: OpenAI | null = null;
@@ -323,24 +328,28 @@ async function createJsonCompletion({
   return response;
 }
 
-async function createOpenAiChallengeCompletion(context: ChallengeContext) {
+async function createOpenAiChallengeCompletion(
+  context: ChallengeContext,
+  rejectionFeedback: string[] = [],
+) {
   return createOpenAiStructuredCompletion({
     model: openAiChallengeModel(),
     task: "challenge_generation",
     userId: context.user.id,
     instructions: [
       lecturerPolicy,
-      "You create strict, adaptive, practical GURUnet challenges as a lecturer preparing an operational assessment packet.",
-      "The prompt-facing challenge must feel like a real incident brief: concrete symptoms, scoped objective, hard constraints, realistic evidence, allowed commands/tools, expected answer sections, and proof requirements.",
-      "Do not write trivia, generic textbook questions, or vague reflection prompts. Evidence must be specific enough that a strong learner can infer the most likely answer without inventing packet captures, logs, users, devices, or facts.",
-      "The hidden solution must be a teaching-grade answer key: root cause, evidence interpretation, safe immediate response, exact checks or commands, verification, rollback, long-term prevention, rejected alternatives, and common wrong/vague answers.",
+      "You create strict, adaptive, practical GURUnet challenges as a lecturer preparing a professional daily assessment.",
+      "The supplied generation blueprint is binding. Vary the intellectual activity and packet structure to match its mode; do not turn every task into incident troubleshooting or a hands-on lab.",
+      "Use concrete evidence, inputs, claims, code, configurations, measurements, constraints, or source artifacts appropriate to the selected mode. A strong learner must be able to answer without inventing facts.",
+      "Do not write generic textbook questions, recycled certification prompts, or cosmetic variants of recent challenges. Never reuse a recent title, root cause, artifact arrangement, or scenario framing.",
+      "The hidden solution must be a teaching-grade answer key for the selected task: exact conclusions or work product, evidence mapping, validation, important trade-offs, false paths, and common wrong or vague answers.",
       "Return only the structured JSON object matching the schema. Do not include markdown.",
     ].join(" "),
-    input: JSON.stringify(openAiChallengeInput(context)),
+    input: JSON.stringify(openAiChallengeInput(context, rejectionFeedback)),
     format: openAiChallengeResponseFormat,
     effort: openAiChallengeReasoningEffort(),
     max_output_tokens: 6200,
-    prompt_cache_key: "gurunet-challenge-v4",
+    prompt_cache_key: "gurunet-challenge-v5",
   });
 }
 
@@ -391,51 +400,62 @@ async function createOpenAiStructuredCompletion({
   return response.output_text;
 }
 
-function openAiChallengeInput(context: ChallengeContext) {
+function openAiChallengeInput(context: ChallengeContext, rejectionFeedback: string[] = []) {
   const discipline = context.disciplineSnapshot;
+  const blueprint = discipline?.generationContext?.blueprint;
+  const baseSections = blueprint?.responseSections?.length
+    ? blueprint.responseSections
+    : discipline?.responseSections?.length
+      ? discipline.responseSections
+      : ["Position", "Evidence", "Work product", "Validation", "Limits"];
   const expectedSections = context.recovery
-    ? [
-        "1. Most Likely Root Cause / Core Answer",
-        "2. Evidence - list the specific observations that support it",
-        "3. Immediate Containment or First Response",
-        "4. Exact Commands / Calculations / Checks / Work Product",
-        "5. Verification Steps",
-        "6. Long-Term Prevention or Follow-up",
-        "7. Why I Reject Other Causes",
-        "8. Risk / Rollback / Limits",
-        "9. Recovery Component",
-      ]
-    : [
-        "1. Most Likely Root Cause / Core Answer",
-        "2. Evidence - list the specific observations that support it",
-        "3. Immediate Containment or First Response",
-        "4. Exact Commands / Calculations / Checks / Work Product",
-        "5. Verification Steps",
-        "6. Long-Term Prevention or Follow-up",
-        "7. Why I Reject Other Causes",
-        "8. Risk / Rollback / Limits",
-      ];
+    ? [...baseSections, "Targeted reinforcement"]
+    : baseSections;
+  const recentAvoidance = (context.recentChallenges ?? []).slice(0, 30).map((item) => ({
+    dateKey: item.dateKey,
+    title: item.title,
+    topic: item.topic,
+    mode: item.blueprint?.modeLabel,
+    scenarioFamily: item.blueprint?.scenarioFamily,
+  }));
+  const sameDayAvoidance = (context.sameDayChallenges ?? []).slice(0, 30).map((item) => ({
+    title: item.title,
+    topic: item.topic,
+    mode: item.blueprint?.modeLabel,
+    signature: item.blueprint?.signature,
+  }));
   return {
     purpose:
-      "Generate exactly one daily challenge. It must build real technical capacity, not merely test recall. The task should be answerable without internet access unless external research is explicitly part of the expected format.",
+      "Generate exactly one bespoke daily challenge that builds professional capacity through varied forms of thinking and work, not merely recall or repeated incident diagnosis.",
     costControl:
       "Spend reasoning where it improves challenge quality, but keep output concise enough for a daily assessment.",
+    generationBlueprint: blueprint ?? {
+      focus: context.topicFocus,
+      modeLabel: discipline?.generationContext?.preferredFormat,
+      responseSections: expectedSections,
+    },
     generationRules: [
       "Respect the user's active discipline template, selected topics, preferred formats, evidence types, weak areas, avoid areas, and preference notes.",
-      "If lab, hands-on, practical, exercise, troubleshooting, analysis, or design review formats are selected, make the challenge concretely match that shape.",
-      "Use realistic partial information: symptoms, logs, config fragments, command output, constraints, ambiguity, and one plausible misleading clue where useful.",
-      "The scenario field must be a multi-section packet with plain-text headings. Use this order where applicable: Scenario / Background, Topology / Context, Evidence Provided, Recovery Component, Optional Lab, Submission Deadline.",
-      "Evidence Provided must contain at least three concrete evidence artifacts. For networking, use IOS-like command outputs or logs. For Linux, cloud, software, documentation, or data work, use the equivalent logs, snippets, failing tests, metrics, tickets, excerpts, traces, or artifacts.",
-      "Allowed tools must be a narrow allowlist, not a generic permission list. If a command is not allowed, the learner should not need it.",
-      "Constraints must force operational judgment: production impact, safety, scope limits, no invented evidence, rollback, user impact, or access limitations.",
-      "Require assumptions, verification, evidence, trade-offs, risk, rollback, and a defensible recommendation when relevant.",
-      "Expected answer format must be a numbered outline with section names, not a sentence.",
+      "Implement every material blueprint dimension: exact focus, assessment mode, setting, practitioner role, evidence style, constraint twist, deliverable, interaction style, and response sections.",
+      `The topic field must be exactly: ${blueprint?.focus ?? context.topicFocus ?? discipline?.topics[0] ?? "Applied technical judgment"}.`,
+      "The title and scenario must be semantically distinct from every recent and same-day avoidance item. Changing hostnames, numbers, or vendor names does not make a repeated problem new.",
+      "Shape the scenario around the selected mode. Troubleshooting may use symptoms and logs; configuration work needs an initial and target state; critique needs a realistic artifact; true/false defense needs 5-7 claims; evidence ranking needs mixed-strength evidence; selection needs requirements and viable options; an oral defense needs a position worth challenging.",
+      "Use at least three concrete artifacts appropriate to the mode: logs, configurations, command output, code, test failures, metrics, timelines, claims, requirements, diagrams described in text, tickets, excerpts, or measured observations.",
+      "Use plain-text headings that fit this task. Do not mechanically reuse Scenario / Evidence / Optional Lab when another structure would be clearer.",
+      "Allowed tools must be a narrow allowlist of commands, references, standards, calculators, runtimes, or evidence sources actually needed by this task.",
+      "Constraints must create useful professional judgment while keeping the task solvable. Include the supplied constraint twist faithfully.",
+      "Require assumptions, verification, evidence, trade-offs, risk, rollback, or defensible limits only where relevant. Do not force incident-response sections into essays, claim defenses, code critique, or technology selection.",
+      "For coding or scripting tasks, provide deterministic inputs, expected behavior, edge cases, and test vectors. Ask for code plus tests, but do not claim the platform executed code unless execution results are explicitly supplied.",
+      "For command-only tasks, set a command budget and require expected observations, abort conditions, and rollback without long prose.",
+      "For oral-defense tasks, require a short initial position that can feed a later examiner follow-up question.",
+      "Expected answer format must be a numbered outline using the blueprint response sections.",
       "Submission requirements must state exactly what will be graded.",
       "When recoveryRequired is true, reproduce the supplied recoveryContext.task faithfully as a separate short task. Do not substitute a generic or previously used recovery question.",
-      "When the discipline generation context says scheduledRecovery, the prompt must visibly contain exactly two tasks: Task 1 is the normal full assessment and Task 2 is a shorter retrieval/recovery task. Both must be represented in the expected answer format and submission requirements.",
-      "Do not reveal the solution in the prompt-facing fields.",
-      "The hidden solution must teach: correct approach, false paths, verification commands/checks, common vague answers, and what a strong submission should contain.",
-      "When recoveryRequired is true, the hidden solution must include a separate, direct teaching answer to recoveryContext.task and explain the evidence that establishes it.",
+      "When recoveryRequired is true, the main assessment must still be a fresh blueprint-driven task. Recovery is a short second task, never the theme or recycled main challenge.",
+      "When scheduledRecovery is true, the prompt must visibly contain exactly two tasks: Task 1 is the normal full assessment and Task 2 is the shorter targeted retrieval task.",
+      "Do not reveal the solution in prompt-facing fields.",
+      "The hidden solution must teach the selected mode comprehensively: correct work product or conclusion, evidence-to-claim mapping, false paths, verification, important limits, and what a strong submission should contain.",
+      "When recoveryRequired is true, the hidden solution must include a separate direct teaching answer to recoveryContext.task and explain the evidence that establishes it.",
       "The antiGenericRequirement must force scenario-specific evidence and penalize hand-wavy answers.",
       "Deadline is 15:00 local time and handled by the app; do not say noon.",
     ],
@@ -454,27 +474,23 @@ function openAiChallengeInput(context: ChallengeContext) {
       discipline,
       privateMemory: privateChallengeMemoryForUser(context.user),
     },
-    packetStyleReference: {
-      challengeTitle: "A concrete incident title, not 'Daily Challenge'.",
-      difficulty: "Use the requested difficulty and mention recovery/pressure context through normal fields, not score math.",
-      objective:
-        "Ask for the safest immediate response and the long-term solution, or the discipline-equivalent practical deliverable.",
-      expectedAnswerSections: expectedSections,
-      noSolutionBeforeSubmission:
-        "Prompt-facing fields may say not to reveal the solution until after submission, but must not contain the answer.",
-      exampleTone:
-        "High CPU on Core Switch During Broadcast Storm: symptoms, recent unmanaged switch, CPU/STP evidence, MAC flap evidence, interface facts, allowed commands, containment decision, verification, prevention, rejected causes.",
+    noveltyGuard: {
+      recentChallengesToAvoid: recentAvoidance,
+      sameDayChallengesToAvoidAcrossUsers: sameDayAvoidance,
+      retryCorrections: rejectionFeedback,
+      rule:
+        "Do not reproduce these concepts, titles, root causes, evidence arrangements, or packet structures. If retryCorrections is non-empty, correct every listed defect in a newly conceived challenge.",
     },
     outputContract: {
       difficulty: context.difficulty,
+      topic: blueprint?.focus ?? context.topicFocus,
       scenario:
-        "420-4200 characters; multi-section packet with evidence artifacts and 15:00 local deadline statement",
+        "420-4200 characters; a mode-appropriate, self-contained packet with concrete artifacts and a 15:00 local deadline statement",
       constraints: "4-8 concrete constraints",
-      allowedTools: "4-10 allowed commands, tools, or evidence sources",
-      expectedAnswerFormat: `numbered outline with these sections: ${expectedSections.join("; ")}`,
+      allowedTools: "4-10 allowed commands, tools, references, runtimes, or evidence sources",
+      expectedAnswerFormat: `numbered outline using these sections in order: ${expectedSections.join("; ")}`,
       submissionRequirements: "5-10 proof requirements matching the expected answer outline",
-      solution:
-        "hidden, lecturer-grade answer key and correction guide with exact answer, evidence mapping, false paths, verification, rollback, and prevention",
+      solution: "hidden lecturer-grade answer key and correction guide tailored to the selected assessment mode",
     },
   };
 }
@@ -505,18 +521,36 @@ export async function generateAiChallenge(context: ChallengeContext) {
   if (!openAiChallengeEnabled()) return null;
 
   try {
-    const content = await createOpenAiChallengeCompletion(context);
-    if (!content) return null;
-    return challengeSchema.parse(JSON.parse(content));
+    const blueprint = context.disciplineSnapshot?.generationContext?.blueprint;
+    let rejectionFeedback: string[] = [];
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const content = await createOpenAiChallengeCompletion(context, rejectionFeedback);
+      if (!content) return null;
+      const challenge = challengeSchema.parse(JSON.parse(content));
+      if (!blueprint) return challenge;
+      const issues = challengeNoveltyIssues({
+        title: challenge.title,
+        topic: challenge.topic,
+        scenario: challenge.scenario,
+        blueprint,
+        history: [
+          ...(context.recentChallenges ?? []),
+          ...(context.sameDayChallenges ?? []),
+        ],
+      });
+      if (issues.length === 0) return challenge;
+      rejectionFeedback = issues;
+    }
+    throw new Error(`Challenge novelty validation failed: ${rejectionFeedback.join(" ")}`);
   } catch (error) {
-    logAiFallback("OpenAI challenge generation failed; using template fallback", error, "openai");
+    logAiFallback("OpenAI challenge generation failed; using profile-aware fallback", error, "openai");
     return null;
   }
 }
 
 export async function generateVerificationQuestion(challenge: Challenge, submission: string) {
   if (!aiEnabled()) {
-    return "Name the one command or observation that would most directly disprove your main hypothesis.";
+    return fallbackVerificationQuestion(challenge);
   }
 
   try {
@@ -550,8 +584,22 @@ export async function generateVerificationQuestion(challenge: Challenge, submiss
     return verificationSchema.parse(JSON.parse(content)).question;
   } catch (error) {
     logAiFallback("DeepSeek verification question failed; using fallback", error);
-    return "Name the one command or observation that would most directly disprove your main hypothesis.";
+    return fallbackVerificationQuestion(challenge);
   }
+}
+
+function fallbackVerificationQuestion(challenge: Challenge) {
+  const interaction = challenge.disciplineSnapshot?.generationContext?.blueprint?.interaction;
+  if (interaction === "code") {
+    return "Name the single test case most likely to expose a defect in your implementation, and state its expected result.";
+  }
+  if (interaction === "commands") {
+    return "Name the first command result that would make you stop or change your sequence.";
+  }
+  if (interaction === "oral") {
+    return "State the strongest objection to your position and defend your answer with one supplied artifact.";
+  }
+  return "Which supplied artifact most strongly supports your conclusion, and what can it not prove?";
 }
 
 export async function generateAiCritique(challenge: Challenge, submission: Submission, grade: Grade) {
@@ -572,6 +620,7 @@ export async function generateAiCritique(challenge: Challenge, submission: Submi
         "Return only JSON. Do not change numeric scores, final score, PIS, ERT, caps, penalties, or verdict.",
         "Your job is the learning answer: compare the challenge, hidden solution, expected answer format, and user's response.",
         "First interpret and grade the submission as one connected response. Establish its overall thesis, evidence chain, operational plan, and intended meaning before inspecting individual lines.",
+        "Judge against the challenge blueprint's selected mode, interaction style, deliverable, and response sections. Do not demand incident-response commands, risk, or rollback from a claim defense, technical brief, evidence-ranking task, or another mode where those elements are not required.",
         "Do not detach a sentence from evidence supplied in a neighboring or later section. Corrective annotations must preserve the meaning of the user's complete argument.",
         "Grade like a teacher marking a sheet of paper. Use direct references to the user's own response, quoting only short snippets when useful.",
         "Be exhaustive but structured. Identify what was correct, what was false, what was missing, what was vague, what was misleading, what was unsafe, and what evidence would have made the answer defensible.",
@@ -921,16 +970,6 @@ function fallbackDisciplineReply(input: {
     return "Excuse accepted. This challenge is marked Excused: no ERT is earned, but PIS is not reduced and the missed-day penalty is not applied.";
   }
   return "Excuse not accepted from the information provided. State a concrete unavoidable reason such as real work, travel, sickness, emergency, or duty if this should be excused.";
-}
-
-export function templateFallbackChallenge(
-  user: User,
-  recovery: boolean,
-  pressure: boolean,
-  dateKey?: string,
-  recoveryContext?: RecoveryContext,
-) {
-  return generateChallenge(user, { recovery, pressure, dateKey, recoveryContext });
 }
 
 function logAiFallback(message: string, error: unknown, provider: "deepseek" | "openai" = "deepseek") {

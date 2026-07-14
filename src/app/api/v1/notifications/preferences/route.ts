@@ -2,6 +2,7 @@ import { z } from "zod";
 import { appApiError } from "@/lib/app-api";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { syncUserNotificationSchedule } from "@/lib/notification-scheduler";
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const schema = z.object({
@@ -36,6 +37,7 @@ export async function PATCH(request: Request) {
       update: input,
       create: { userId: user.id, ...input },
     });
+    await syncUserNotificationSchedule(user.id, 14, true);
     return Response.json({ preferences });
   } catch (error) {
     if (error instanceof z.ZodError) {

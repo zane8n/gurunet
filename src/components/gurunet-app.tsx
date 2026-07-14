@@ -87,6 +87,7 @@ type PublicProfile = {
   name: string;
   handle: string;
   preferredProfession: string;
+  primaryDiscipline: string;
   pisScore: number;
   ertBalance: number;
   currentStreak: number;
@@ -96,8 +97,12 @@ type PublicProfile = {
   isYou: boolean;
 };
 
-type LeaderboardRow = PublicProfile & {
+type LeaderboardRow = {
+  id: string;
+  name: string;
   rank: number;
+  isYou: boolean;
+  connectionState: "You" | "Available" | "Incoming" | "Outgoing" | "Connected";
 };
 
 type MarketplaceItem = {
@@ -118,10 +123,8 @@ type SocialSnapshot = {
   suggestions: Array<{
     id: string;
     name: string;
-    handle: string;
-    preferredProfession: string;
-    primaryDiscipline: string;
-    reasons: string[];
+    rank: number | null;
+    reason: string;
   }>;
   invitations: Array<{
     id: string;
@@ -130,9 +133,6 @@ type SocialSnapshot = {
     profile: {
       id: string;
       name: string;
-      handle: string;
-      preferredProfession: string;
-      primaryDiscipline: string;
     };
   }>;
   settings: {
@@ -267,6 +267,15 @@ type ExaminerSession = {
   status: string;
   messageCount: number;
   active: boolean;
+};
+
+type AppNotification = {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  deepLink: string | null;
+  scheduledFor: string;
 };
 
 type Dashboard = {
@@ -687,6 +696,46 @@ export function GurunetApp() {
       }),
     );
   }, [draftAttachments, draftBody, draftKey, draftSavedAt, todaySubmission]);
+
+  useEffect(() => {
+    if (!dashboard?.user) return;
+    let active = true;
+    const seenKey = `gurunet.notifications.seen:${dashboard.user.id}`;
+
+    async function pollNotifications() {
+      try {
+        const result = await apiRequest<{ notifications: AppNotification[] }>("/api/v1/notifications/inbox");
+        if (!active) return;
+        const stored = localStorage.getItem(seenKey);
+        const seen = new Set<string>(stored ? JSON.parse(stored) as string[] : []);
+        const unseen = result.notifications.filter((item) => !seen.has(item.id));
+        localStorage.setItem(
+          seenKey,
+          JSON.stringify(result.notifications.slice(0, 60).map((item) => item.id)),
+        );
+        if (!stored || unseen.length === 0) return;
+        const latest = unseen[0];
+        setStatus(`${latest.title}: ${latest.body}`);
+        if ("Notification" in window && Notification.permission === "granted") {
+          const alert = new Notification(latest.title, { body: latest.body, tag: latest.id });
+          alert.onclick = () => {
+            window.focus();
+            if (latest.deepLink) window.location.assign(latest.deepLink);
+            alert.close();
+          };
+        }
+      } catch {
+        // Notification polling must never interrupt the learning workflow.
+      }
+    }
+
+    void pollNotifications();
+    const timer = window.setInterval(() => void pollNotifications(), 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [dashboard?.user]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -1884,6 +1933,14 @@ function AstroCard({
 }
 
 const packetHeadings = new Set([
+  "Assessment mode",
+  "Role and setting",
+  "Context",
+  "Available artifacts",
+  "Required deliverable",
+  "Reproducible exercise",
+  "Task 1 - Main assessment",
+  "Task 2 - Targeted reinforcement",
   "Scenario / Background",
   "Topology / Context",
   "Evidence Provided",
@@ -1977,6 +2034,8 @@ function ChallengeWidget({
   submission: Submission | null;
   verification: string;
 }) {
+  const challengeMode = challenge.disciplineSnapshot?.generationContext?.blueprint?.modeLabel ??
+    challenge.disciplineSnapshot?.generationContext?.preferredFormat;
   if (challenge.status === "RestDay") {
     return (
       <div className="grid gap-4 border-y border-slate-200 py-6">
@@ -2009,7 +2068,10 @@ function ChallengeWidget({
         </div>
       ) : (
         <div>
-          <p className="text-sm font-semibold text-cyan-800">{challenge.topic}</p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold text-cyan-800">
+            <span>{challenge.topic}</span>
+            {challengeMode && <span className="font-normal text-slate-500">{challengeMode}</span>}
+          </div>
           <h2 className="mt-1 text-2xl font-semibold tracking-normal text-slate-950">
             {challenge.title}
           </h2>
@@ -2032,7 +2094,10 @@ function ChallengeWidget({
             <ChevronRight size={16} className="text-cyan-700 transition-transform group-open:rotate-90" />
           </summary>
           <div className="border-t border-slate-200 py-4">
-            <p className="text-sm font-semibold text-cyan-800">{challenge.topic}</p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold text-cyan-800">
+              <span>{challenge.topic}</span>
+              {challengeMode && <span className="font-normal text-slate-500">{challengeMode}</span>}
+            </div>
             <p className="mt-2 text-lg font-semibold text-slate-950">{challenge.title}</p>
             <div className="mt-3">
               <PacketText compact text={challenge.scenario} />
@@ -2763,26 +2828,24 @@ function AppHeader({
 }) {
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/78 backdrop-blur-xl">
-      <div className="mx-auto flex w-full max-w-[1280px] items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      <div className="flex w-full items-center justify-between gap-3 px-4 py-2.5 sm:px-5 lg:px-7">
         <div className="flex items-center gap-3">
           <Image
             src="/gurunet.svg"
             alt="GURUnet"
-            width={40}
-            height={40}
-            className="size-10 rounded-md"
+            width={36}
+            height={36}
+            className="size-9 rounded"
             priority
           />
           <div>
-            <p className="font-mono text-xs uppercase tracking-[0.18em] text-stone-500">
-              GURUnet
-            </p>
-            <h2 className="text-base font-semibold text-stone-950 sm:text-lg">Capacity builder</h2>
+            <h2 className="text-base font-semibold text-stone-950">GURUnet</h2>
+            <p className="hidden text-[11px] text-stone-500 sm:block">Daily capacity practice</p>
           </div>
         </div>
         {user && (
           <div className="flex min-w-0 items-center gap-3">
-            <nav className="hidden rounded-full border border-slate-200 bg-white/65 p-1 text-sm font-medium text-slate-600 lg:flex">
+            <nav className="hidden items-center border-r border-slate-200 pr-3 text-sm font-medium text-slate-600 lg:flex">
               <button type="button" onClick={() => scrollToSection("daily-challenge")} className="nav-link">
                 Today
               </button>
@@ -2796,7 +2859,7 @@ function AppHeader({
                 Network
               </button>
             </nav>
-            <div className="hidden items-center rounded-full border border-slate-200 bg-white/65 p-1 sm:flex">
+            <div className="hidden items-center gap-0.5 sm:flex">
               <HeaderIconButton label="Open command palette" onClick={onCommand}>
                 <Command size={15} />
               </HeaderIconButton>
@@ -2815,11 +2878,11 @@ function AppHeader({
             </div>
             <button
               onClick={onAccount}
-              className="group flex h-10 shrink-0 items-center gap-2 rounded-full border border-slate-200 bg-slate-950 py-1 pl-1 pr-1 text-white transition hover:border-cyan-700/25 hover:bg-cyan-800 sm:pr-3"
+              className="group flex h-10 shrink-0 items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-1 text-slate-900 transition-colors hover:border-slate-300 hover:bg-slate-50 sm:pr-3"
               aria-label="Account settings"
               type="button"
             >
-              <span className="grid size-8 place-items-center rounded-full bg-white text-xs font-semibold uppercase text-slate-950 shadow-sm">
+              <span className="grid size-8 place-items-center rounded-full bg-slate-950 text-xs font-semibold uppercase text-white shadow-sm">
                 {user.name?.trim()?.[0] ?? <UserRound size={15} />}
               </span>
               <span className="hidden max-w-32 truncate text-sm font-medium sm:inline">
@@ -2830,7 +2893,7 @@ function AppHeader({
         )}
       </div>
       {user && (
-        <nav className="mx-auto flex w-full max-w-[1280px] gap-2 overflow-x-auto px-4 pb-3 text-xs font-semibold text-slate-600 sm:px-6 lg:hidden">
+        <nav className="flex w-full gap-1 overflow-x-auto border-t border-slate-100 px-4 py-1.5 text-xs font-semibold text-slate-600 sm:px-5 lg:hidden">
           {[
             ["Today", "daily-challenge"],
             ["Metrics", "metrics"],
@@ -2841,7 +2904,7 @@ function AppHeader({
               key={id}
               type="button"
               onClick={() => scrollToSection(id)}
-              className="rounded-full border border-slate-200 bg-white/72 px-3 py-1.5"
+              className="rounded px-3 py-1.5 transition-colors hover:bg-slate-100 hover:text-slate-950"
             >
               {label}
             </button>
@@ -3495,6 +3558,8 @@ function ChallengeFocusModal({
   open: boolean;
   submission: Submission | null;
 }) {
+  const challengeMode = challenge.disciplineSnapshot?.generationContext?.blueprint?.modeLabel ??
+    challenge.disciplineSnapshot?.generationContext?.preferredFormat;
   function respond() {
     onOpenChange(false);
     onRespond();
@@ -3522,6 +3587,11 @@ function ChallengeFocusModal({
               <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
                 Due {deadline}
               </span>
+              {challengeMode && (
+                <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600">
+                  {challengeMode}
+                </span>
+              )}
             </div>
             <p className="mt-4 text-sm font-semibold text-cyan-800">{challenge.topic}</p>
             <h2 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
@@ -4143,6 +4213,22 @@ function ResponseEditorModal({
   );
 }
 
+const readinessRiskModes = new Set([
+  "troubleshooting",
+  "configuration_build",
+  "configuration_review",
+  "pressure_triage",
+  "time_boxed_diagnostic",
+  "hardening_review",
+  "environment_admin",
+  "command_only",
+  "minimum_safe_fix",
+  "operational_decision",
+  "failure_prediction",
+  "migration_plan",
+  "post_incident_reconstruction",
+]);
+
 function responseReadiness(
   body: string,
   attachments: SubmissionAttachment[],
@@ -4150,6 +4236,18 @@ function responseReadiness(
 ) {
   const text = body.trim();
   const lower = text.toLowerCase();
+  const blueprint = challenge.disciplineSnapshot?.generationContext?.blueprint;
+  const interaction = blueprint?.interaction ?? "written";
+  const minWords = blueprint?.modeId === "command_only"
+    ? 35
+    : interaction === "code"
+      ? 70
+      : interaction === "oral"
+        ? 75
+        : blueprint?.modeId === "true_false_defense"
+          ? 100
+          : 80;
+  const requiresRisk = !blueprint || readinessRiskModes.has(blueprint.modeId);
   const words = text.split(/\s+/).filter(Boolean);
   const lines = text.split(/\r?\n/);
   const headings = lines.filter((line) => /^#{1,3}\s+\S/.test(line)).length;
@@ -4165,11 +4263,22 @@ function responseReadiness(
     inlineCode +
     commandLikeLines +
     attachments.length +
-    lines.filter((line) => /\b(error|log|trace|output|config|screenshot|packet|metric|status|diff|json|csv|pcap)\b/i.test(line)).length;
+    lines.filter((line) => /\b(error|log|trace|output|config|screenshot|packet|metric|status|diff|json|csv|pcap|claim|requirement|option|calculation|timeline|test case|expected|actual|counterexample)\b/i.test(line)).length;
   const reasoningConnectors = (lower.match(/\b(because|therefore|so that|which means|this implies|however|given that|assumption|trade[- ]off)\b/g) ?? []).length;
   const validationSignals = (lower.match(/\b(verify|validate|confirm|test|check|measure|compare|disprove|reproduce|baseline|control)\b/g) ?? []).length;
   const riskSignals = (lower.match(/\b(risk|rollback|blast radius|contain|avoid|do not|impact|fallback|backout|safe|change window)\b/g) ?? []).length;
   const actionSignals = (lower.match(/\b(recommend|fix|change|next step|plan|correct|mitigate|resolve|document|monitor)\b/g) ?? []).length;
+  const counterSignals = (lower.match(/\b(cannot prove|does not prove|disprove|counterexample|alternative|exception|limitation|unless|confidence|uncertain)\b/g) ?? []).length;
+  const requiredWorkProduct = interaction === "code"
+    ? codeBlocks > 0 || /\b(function|script|pseudocode|test case|expected output)\b/i.test(text)
+    : interaction === "commands"
+      ? commandLikeLines >= 2 || codeBlocks > 0
+      : interaction === "oral"
+        ? words.length >= minWords && reasoningConnectors >= 1
+        : actionSignals >= 1 || reasoningConnectors >= 2;
+  const hasConclusion = actionSignals >= 1 ||
+    (interaction === "oral" && /\b(position|conclude|maintain|recommend)\b/i.test(text)) ||
+    (blueprint?.modeId === "true_false_defense" && /\b(true|false|conditionally true|verdict)\b/i.test(text));
   const expectedTouchCount = challenge.submissionRequirements.filter((requirement) =>
     requirement
       .toLowerCase()
@@ -4180,7 +4289,7 @@ function responseReadiness(
   const checks = [
     {
       label: "Enough substance",
-      complete: words.length >= 90 || attachments.length > 0,
+      complete: words.length >= minWords || attachments.length > 0,
       guidance: "Add enough explanation for the examiner to follow your reasoning, not just the final answer.",
     },
     {
@@ -4189,9 +4298,18 @@ function responseReadiness(
       guidance: `Use the expected format as scaffolding: ${challenge.expectedAnswerFormat}`,
     },
     {
-      label: "Observable evidence",
-      complete: artifactSignals >= 2,
-      guidance: "Include command output, logs, screenshots, config snippets, metrics, code, or attached artifacts.",
+      label: blueprint?.deliverable ?? "Required work product",
+      complete: requiredWorkProduct,
+      guidance: interaction === "code"
+        ? "Provide the implementation or precise pseudocode and the tests that establish its behavior."
+        : interaction === "commands"
+          ? "Provide an ordered command sequence and the observations expected from it."
+          : `Complete the requested deliverable: ${blueprint?.deliverable ?? "a defensible conclusion"}.`,
+    },
+    {
+      label: "Evidence or justification",
+      complete: artifactSignals >= 2 || reasoningConnectors >= 2,
+      guidance: "Tie the supplied artifacts, claims, measurements, code, or constraints directly to your conclusion.",
     },
     {
       label: "Reasoning chain",
@@ -4199,19 +4317,25 @@ function responseReadiness(
       guidance: "Show why the evidence supports your conclusion and state any assumptions.",
     },
     {
-      label: "Validation plan",
-      complete: validationSignals >= 2,
-      guidance: "State how you would prove the fix or disprove your main hypothesis.",
+      label: "Validation and limits",
+      complete: validationSignals >= 1 && (counterSignals >= 1 || validationSignals >= 2),
+      guidance: "State how the work is tested and what the available evidence cannot establish.",
     },
-    {
-      label: "Risk and rollback",
-      complete: riskSignals >= 1,
-      guidance: "Mention what could go wrong, blast radius, and how you would back out safely.",
-    },
+    ...(requiresRisk
+      ? [{
+          label: "Risk and rollback",
+          complete: riskSignals >= 1,
+          guidance: "Mention what could go wrong, blast radius, and how you would back out safely.",
+        }]
+      : [{
+          label: "Counterpoint or boundary",
+          complete: counterSignals >= 1,
+          guidance: "Name an exception, counterargument, uncertainty, or boundary that qualifies your answer.",
+        }]),
     {
       label: "Actionable conclusion",
-      complete: actionSignals >= 1,
-      guidance: "Finish with a specific recommendation, next step, or decision.",
+      complete: hasConclusion,
+      guidance: "Finish with the verdict, position, recommendation, next step, or decision this task asks for.",
     },
     {
       label: "Challenge requirements",
@@ -5569,16 +5693,16 @@ function SocialPanel({
           <div>
             <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
               <div>
-                <h3 className="font-semibold text-slate-950">Your network ranking</h3>
-                <p className="mt-1 text-sm text-slate-500">Only you and accepted connections appear here.</p>
+                <h3 className="font-semibold text-slate-950">Learner ranking</h3>
+                <p className="mt-1 text-sm text-slate-500">Rank and identity only. Learning details unlock after connection.</p>
               </div>
-              <span className="text-xs font-semibold text-slate-500">{social.leaderboard.length} members</span>
+              <span className="text-xs font-semibold text-slate-500">{social.leaderboard.length} visible</span>
             </div>
-          <div className="h-[22rem] max-w-full overflow-auto overscroll-contain rounded-md border border-slate-200 bg-white/65 sm:h-[28rem]">
-            <table className="w-full min-w-[760px] text-left text-sm">
+          <div className="max-h-[22rem] max-w-full overflow-auto overscroll-contain rounded-md border border-slate-200 bg-white/65 sm:max-h-[28rem]">
+            <table className="w-full min-w-[31rem] text-left text-sm">
               <thead className="sticky top-0 z-10 border-b border-slate-200 bg-white text-slate-500 shadow-sm">
                 <tr>
-                  {["Rank", "Profile", "Preferred profession", "PIS", "Streak", "Latest"].map((head) => (
+                  {["Rank", "Learner", "Connection"].map((head) => (
                     <th key={head} className="px-3 py-3 font-semibold">
                       {head}
                     </th>
@@ -5588,27 +5712,47 @@ function SocialPanel({
               <tbody>
                 {social.leaderboard.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-3 py-8">
+                    <td colSpan={3} className="px-3 py-8">
                       <EmptyState
-                        title="Your network is private"
-                        text="Accepted connections appear here after they accept an invitation."
+                        title="No discoverable learners yet"
+                        text="Your own rank appears here once the learning profile is ready."
                       />
                     </td>
                   </tr>
                 ) : social.leaderboard.map((row) => (
                   <tr key={row.id} className="border-b border-slate-100 last:border-0">
-                    <td className="px-3 py-3 font-semibold text-cyan-800">#{row.rank}</td>
+                    <td className="w-24 px-3 py-3 font-mono font-semibold text-cyan-800">#{row.rank}</td>
                     <td className="px-3 py-3">
                       <p className="font-medium text-slate-900">
                         {row.name}
                         {row.isYou ? " (you)" : ""}
                       </p>
-                      <p className="text-xs text-slate-500">{row.handle}</p>
                     </td>
-                    <td className="px-3 py-3 text-slate-600">{row.preferredProfession}</td>
-                    <td className="px-3 py-3">{row.pisScore.toFixed(1)}</td>
-                    <td className="px-3 py-3">{row.currentStreak}</td>
-                    <td className="px-3 py-3">{row.latestScore ?? "-"}</td>
+                    <td className="w-40 px-3 py-3 text-right">
+                      {row.connectionState === "Available" ? (
+                        <button
+                          type="button"
+                          onClick={() => onInviteSuggestion(row.id)}
+                          disabled={busy}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-cyan-700/20 bg-cyan-50 px-3 text-xs font-semibold text-cyan-800 disabled:opacity-60"
+                        >
+                          <UserPlus size={13} /> Connect
+                        </button>
+                      ) : row.connectionState === "Incoming" ? (
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById("connection-requests")?.scrollIntoView({ behavior: "smooth", block: "nearest" })}
+                          className="h-8 rounded-md border border-slate-300 px-3 text-xs font-semibold text-slate-700"
+                        >
+                          Review request
+                        </button>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                          {row.connectionState === "Connected" && <CheckCircle2 size={13} className="text-emerald-600" />}
+                          {row.connectionState === "Outgoing" ? "Requested" : row.connectionState}
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -5652,15 +5796,13 @@ function SocialPanel({
 
         <aside className="grid self-start gap-6 border-t border-slate-200 pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
           {social.invitations.length > 0 && (
-            <section>
+            <section id="connection-requests">
               <h3 className="text-sm font-semibold text-slate-950">Connection requests</h3>
               <div className="mt-3 grid gap-3">
                 {social.invitations.map((invitation) => (
                   <article key={invitation.id} className="border-t border-slate-200 pt-3 first:border-t-0 first:pt-0">
                     <p className="text-sm font-semibold text-slate-900">{invitation.profile.name}</p>
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      {invitation.profile.preferredProfession} · {invitation.profile.primaryDiscipline}
-                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">Profile details remain private until accepted.</p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {invitation.direction === "Incoming" ? (
                         <>
@@ -5679,41 +5821,19 @@ function SocialPanel({
           )}
 
           <section>
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-950">Suggested connections</h3>
-              <span className="text-xs text-slate-500">Private preview</span>
-            </div>
-            <div className="mt-3 grid gap-3">
-              {social.suggestions.map((suggestion) => (
-                <article key={suggestion.id} className="border-t border-slate-200 pt-3 first:border-t-0 first:pt-0">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-900">{suggestion.name}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">{suggestion.preferredProfession}</p>
-                    </div>
-                    <button type="button" onClick={() => onInviteSuggestion(suggestion.id)} disabled={busy} className="h-8 shrink-0 rounded-md border border-cyan-700/20 bg-cyan-50 px-3 text-xs font-semibold text-cyan-800 disabled:opacity-60">Connect</button>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {suggestion.reasons.map((reason) => <span key={reason} className="rounded-sm bg-slate-100 px-2 py-1 text-[11px] text-slate-600">{reason}</span>)}
-                  </div>
-                </article>
-              ))}
-              {social.suggestions.length === 0 && (
-                <p className="text-sm leading-6 text-slate-600">No relevant discoverable learners are available right now.</p>
-              )}
-            </div>
-          </section>
-
-          <section>
             <h3 className="text-sm font-semibold text-slate-950">Connections</h3>
             <div className="mt-3 grid max-h-56 gap-3 overflow-y-auto overscroll-contain pr-1">
               {social.friends.map((profile) => (
-                <div key={profile.id} className="grid grid-cols-[1fr_auto] gap-3 border-t border-slate-200 pt-3 first:border-t-0 first:pt-0">
+                <div key={profile.id} className="border-t border-slate-200 pt-3 first:border-t-0 first:pt-0">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-slate-900">{profile.name}</p>
-                    <p className="truncate text-xs text-slate-500">{profile.preferredProfession}</p>
+                    <p className="truncate text-xs text-slate-500">{profile.preferredProfession} · {profile.primaryDiscipline}</p>
                   </div>
-                  <p className="text-xs font-semibold text-cyan-800">{profile.pisScore.toFixed(1)} PIS</p>
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                    <span><strong className="font-semibold text-cyan-800">{profile.pisScore.toFixed(1)}</strong> PIS</span>
+                    <span><strong className="font-semibold text-slate-800">{profile.currentStreak}</strong> streak</span>
+                    <span><strong className="font-semibold text-slate-800">{profile.latestScore ?? "-"}</strong> latest</span>
+                  </div>
                 </div>
               ))}
               {social.friends.length === 0 && <p className="text-sm leading-6 text-slate-600">No accepted connections yet.</p>}
@@ -5752,7 +5872,7 @@ function SocialPanel({
                 });
               }}
             >
-              <label className="flex items-start gap-2 text-sm leading-5 text-slate-600"><input name="discoverable" type="checkbox" defaultChecked={social.settings.discoverable} className="mt-1" /><span>Suggest my limited profile to compatible learners.</span></label>
+              <label className="flex items-start gap-2 text-sm leading-5 text-slate-600"><input name="discoverable" type="checkbox" defaultChecked={social.settings.discoverable} className="mt-1" /><span>Show only my name and rank to other learners so they can request a connection.</span></label>
               <label className="flex items-start gap-2 text-sm leading-5 text-slate-600"><input name="allowEmailInvites" type="checkbox" defaultChecked={social.settings.allowEmailInvites} className="mt-1" /><span>Allow invitations from people who know my exact email.</span></label>
               <button disabled={busy} className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 disabled:opacity-60">Save privacy</button>
             </form>

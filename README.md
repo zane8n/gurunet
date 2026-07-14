@@ -22,7 +22,7 @@ private social invitations, app tokens, secure uploads, and native app shells.
 | Auth | Auth.js + custom credentials routes | Google SSO uses Auth.js with the Prisma adapter. The existing email/password flow still uses app route handlers and bcrypt. |
 | Database | PostgreSQL | Recommended production database. |
 | ORM | Prisma | Installed for schema and migration work. |
-| AI | DeepSeek through OpenAI-compatible SDK | Used for adaptive challenge generation, examiner chat, verification questions, grading critique, and notebook language. Deterministic code still owns score math, caps, PIS, ERT, streaks, and redemptions. |
+| AI | OpenAI + DeepSeek | OpenAI generates daily challenges and teaching-grade corrections. DeepSeek handles examiner chat, verification, and notebook summaries. Deterministic code still owns score math, caps, PIS, ERT, streaks, and redemptions. |
 | Hosting | Vercel | Production web/API host with cron and Blob storage support. |
 
 Runtime data is stored in PostgreSQL through Prisma. Local `.data` files are
@@ -147,10 +147,14 @@ DEEPSEEK_ENABLED="true"
 DEEPSEEK_FALLBACK_ONLY="false"
 DEEPSEEK_FAST_MODEL="deepseek-v4-flash"
 DEEPSEEK_REASONING_MODEL="deepseek-v4-pro"
+OPENAI_API_KEY="..."
+OPENAI_CHALLENGE_ENABLED="true"
+OPENAI_CHALLENGE_MODEL="gpt-5.4-mini"
+OPENAI_CRITIQUE_ENABLED="true"
+OPENAI_CRITIQUE_MODEL="gpt-5.4-mini"
 AI_DAILY_CALL_LIMIT="100"
 AI_USER_DAILY_CALL_LIMIT="20"
 AI_DAILY_SPEND_CAP_USD="5"
-AI_STRICT_CRITIQUE_ALWAYS="false"
 JOB_SECRET="..."
 IMPORT_SECRET="..."
 GURUNET_UPLOAD_DIR=".data/uploads"
@@ -162,6 +166,7 @@ AUTH_APPLE_ID="..."
 AUTH_APPLE_SECRET="..."
 AUTH_GITHUB_ID="..."
 AUTH_GITHUB_SECRET="..."
+EXPO_PUBLIC_EAS_PROJECT_ID="your-expo-eas-project-id"
 ```
 
 For local development, place them in `.env.local`.
@@ -171,6 +176,11 @@ For local development, place them in `.env.local`.
 The app should treat the daily task rules as deterministic product logic:
 
 - Unlock one challenge at 08:00 local time.
+- Select a user-specific generation blueprint from profile topics, preferred
+  formats, recent history, and same-day platform history.
+- Rotate topic focus, assessment mode, setting, practitioner role, evidence
+  style, and constraints; reject repeated titles, semantic blueprints, and
+  identical challenge content.
 - Hide solutions until the user submits.
 - Record the exact submission timestamp.
 - Apply late, missed, unsafe-answer, and technical-correctness caps in code.
@@ -181,15 +191,17 @@ The app should treat the daily task rules as deterministic product logic:
 - Keep social rankings private to accepted connections only.
 - Keep the complete user directory inside the admin surface.
 
-DeepSeek usage:
+AI usage:
 
-- Challenge generation and notebook summaries use `DEEPSEEK_FAST_MODEL`.
-- Strict verification and correction use `DEEPSEEK_REASONING_MODEL` with
-  thinking enabled only when the deterministic backend marks the case as
-  uncertain, weak, late, capped, or contentious.
+- Challenge generation and post-submission teaching corrections use OpenAI.
+  They run once per challenge through idempotent Prisma jobs.
+- Examiner chat and notebook summaries use `DEEPSEEK_FAST_MODEL`.
+- Verification uses `DEEPSEEK_REASONING_MODEL` with thinking enabled.
 - The app reads only final JSON content from DeepSeek responses. It does not
   display or persist `reasoning_content`.
-- The app falls back to local templates if the API is disabled or unavailable.
+- The app falls back to the same profile-aware blueprint and procedural packet
+  if OpenAI is disabled or unavailable; it does not return the former fixed
+  ACL/STP templates.
 - Keep `DEEPSEEK_ENABLED="false"` for offline/dev-only testing.
 - Use `DEEPSEEK_FALLBACK_ONLY="true"` or `AI_FALLBACK_ONLY="true"` to force
   deterministic fallback behavior while keeping the rest of the app online.
@@ -307,8 +319,16 @@ Deployment caveats:
   use Vercel Blob when Blob env vars are present, including direct client upload
   support through `/api/v1/uploads/direct`.
 - `/api/cron/platform` is the Vercel Cron entry point for AI jobs,
-  notifications, session cleanup, and retry cleanup. Set `CRON_SECRET` to guard
-  manual calls.
+  notification materialization/delivery, session cleanup, and retry cleanup.
+  Set `CRON_SECRET` to guard manual calls. The repository keeps a once-daily
+  schedule so deployments remain compatible with Vercel Hobby.
+- Android and iOS push delivery uses Expo Push. Set `EXPO_PUBLIC_EAS_PROJECT_ID`
+  in each EAS build environment and configure APNs/FCM credentials in the Expo
+  project. Time-sensitive challenge, study-block, recovery, and deadline cues are
+  also scheduled on-device so they do not depend on Vercel cron precision.
+  Windows schedules the same cues through Tauri and consumes the authenticated
+  notification inbox; the web client shows in-app alerts and, with browser
+  permission, system alerts while GURUnet is open.
 
 Vercel Hobby is suitable for personal/non-commercial use. Payment features,
 paid users, or commercial workflows should move to a paid deployment plan.

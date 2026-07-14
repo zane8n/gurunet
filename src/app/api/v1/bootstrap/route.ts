@@ -12,9 +12,11 @@ export async function GET() {
       prisma.notificationPreference.findUnique({ where: { userId: user.id } }),
       prisma.studySchedule.findMany({ where: { userId: user.id, enabled: true } }),
     ]);
+    const challenge = publicChallenge(dashboard.today);
     return Response.json({
       ...dashboard,
-      today: publicChallenge(dashboard.today),
+      today: challenge,
+      challenge,
       user: publicUser(dashboard.user),
       preferences,
       schedules,

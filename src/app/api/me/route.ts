@@ -6,6 +6,7 @@ import { fromDbUser } from "@/lib/db-mappers";
 import { prisma } from "@/lib/prisma";
 import { revokeLinkedProviderTokens } from "@/lib/provider-revocation";
 import { clearUserUploadStorage } from "@/lib/storage";
+import { syncUserNotificationSchedule } from "@/lib/notification-scheduler";
 
 const AUTH_SESSION_COOKIES = [
   "authjs.session-token",
@@ -55,10 +56,17 @@ export async function PATCH(request: Request) {
       data.passwordHash = await hashPassword(input.newPassword);
     }
 
-    const updated = await prisma.user.update({
-      where: { id: user.id },
-      data,
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.user.update({ where: { id: user.id }, data });
+      if (input.timezone !== undefined) {
+        await tx.studySchedule.updateMany({
+          where: { userId: user.id },
+          data: { timezone: input.timezone },
+        });
+      }
+      return result;
     });
+    if (input.timezone !== undefined) await syncUserNotificationSchedule(user.id, 14, true);
     return json({ user: publicUser(fromDbUser(updated)) });
   } catch (error) {
     return apiError(error);

@@ -15,9 +15,14 @@ const requiredPaths = [
   "src/app/api/v1/openapi/route.ts",
   "src/app/api/v1/social/network/route.ts",
   "src/app/api/v1/social/suggestions/route.ts",
+  "src/app/api/v1/notifications/inbox/route.ts",
   "src/app/api/v1/uploads/direct/route.ts",
   "src/app/api/admin/users/route.ts",
   "vercel.json",
+  "apps/android/src/lib/notifications.ts",
+  "apps/ios/src/lib/notifications.ts",
+  "apps/windows/src/lib/notifications.ts",
+  "src/lib/notification-scheduler.ts",
 ];
 
 const missing = requiredPaths.filter((file) => !existsSync(join(root, file)));
@@ -39,6 +44,10 @@ for (const expected of [
   if (!schema.includes(expected)) throw new Error(`Prisma schema missing ${expected}`);
 }
 
+for (const expected of ["reminderMinutesBefore", "flexWindowMinutes"]) {
+  if (!schema.includes(expected)) throw new Error(`Study rhythm schema missing ${expected}`);
+}
+
 const migration = readFileSync(
   join(root, "prisma/migrations/20260712120000_platform_expansion/migration.sql"),
   "utf8",
@@ -54,7 +63,22 @@ if (!todayRoute.includes("publicChallenge")) {
 
 const socialRoute = readFileSync(join(root, "src/app/api/v1/social/network/route.ts"), "utf8");
 if (!socialRoute.includes("leaderboard") || !socialRoute.includes("friends")) {
-  throw new Error("v1 social network route must expose accepted network ranking only.");
+  throw new Error("v1 social network route must expose the privacy-safe ranking and accepted connections.");
+}
+
+const socialService = readFileSync(join(root, "src/lib/app-service.ts"), "utf8");
+if (!socialService.includes('connectionState: item.isYou') || !socialService.includes('stableLearnerAlias')) {
+  throw new Error("Public ranking must expose governed connection state and a non-email learner alias.");
+}
+
+const notificationScheduler = readFileSync(join(root, "src/lib/notification-scheduler.ts"), "utf8");
+for (const kind of ["challenge_available", "study_window", "deadline_warning", "correction_ready", "connection_invitation", "study_block"]) {
+  if (!notificationScheduler.includes(kind)) throw new Error(`Notification scheduler missing ${kind}`);
+}
+
+const vercel = readFileSync(join(root, "vercel.json"), "utf8");
+if (!vercel.includes("0 6 * * *")) {
+  throw new Error("The Vercel Hobby-safe daily maintenance cron is missing.");
 }
 
 console.log("Platform structure verified.");

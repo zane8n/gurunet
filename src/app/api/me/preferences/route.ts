@@ -3,6 +3,7 @@ import { apiError, json } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { difficultyForPis } from "@/lib/challenges";
 import { prisma } from "@/lib/prisma";
+import { syncUserNotificationSchedule } from "@/lib/notification-scheduler";
 
 const localTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 
@@ -96,6 +97,10 @@ export async function PATCH(request: Request) {
         });
       }
     });
+
+    if (input.notifications || input.restDay !== undefined) {
+      await syncUserNotificationSchedule(user.id, 14, true);
+    }
 
     return json(await readLearnerPreferences(user.id, user.pisScore));
   } catch (error) {

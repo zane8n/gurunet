@@ -18,6 +18,8 @@ import {
 } from "@/lib/db-mappers";
 import { buildSubmissionContent } from "@/lib/submission-content";
 import { disciplineProfileKey } from "@/lib/disciplines";
+import { blueprintFromSnapshot, type ChallengeHistorySignal } from "@/lib/challenge-blueprints";
+import { challengeContentFingerprint } from "@/lib/challenge-fingerprint";
 
 type AiJobType =
   | "ChallengeGeneration"
@@ -72,36 +74,45 @@ export async function runDueAiJobs(limit = 3) {
   const results = [];
 
   for (const job of jobs) {
-    await prisma.aiJob.update({
-      where: { id: job.id },
-      data: { status: "Running", startedAt: new Date(), attempts: { increment: 1 } },
-    });
-    try {
-      const result = await runJob(job.type, job.payload as Record<string, unknown>);
-      await prisma.aiJob.update({
-        where: { id: job.id },
-        data: {
-          status: result.fallback ? "FallbackUsed" : "Succeeded",
-          result: result.output as Prisma.InputJsonValue,
-          completedAt: new Date(),
-          error: null,
-        },
-      });
-      results.push({ id: job.id, status: result.fallback ? "FallbackUsed" : "Succeeded" });
-    } catch (error) {
-      await prisma.aiJob.update({
-        where: { id: job.id },
-        data: {
-          status: "Failed",
-          error: error instanceof Error ? error.message : "AI job failed",
-          completedAt: new Date(),
-        },
-      });
-      results.push({ id: job.id, status: "Failed" });
-    }
+    const result = await runAiJobNow(job.id);
+    if (result) results.push(result);
   }
 
   return results;
+}
+
+export async function runAiJobNow(jobId: string) {
+  const claimed = await prisma.aiJob.updateMany({
+    where: { id: jobId, status: "Queued" },
+    data: { status: "Running", startedAt: new Date(), attempts: { increment: 1 } },
+  });
+  if (claimed.count === 0) return null;
+
+  const job = await prisma.aiJob.findUniqueOrThrow({ where: { id: jobId } });
+  try {
+    const result = await runJob(job.type, job.payload as Record<string, unknown>);
+    const status = result.fallback ? "FallbackUsed" : "Succeeded";
+    await prisma.aiJob.update({
+      where: { id: job.id },
+      data: {
+        status,
+        result: result.output as Prisma.InputJsonValue,
+        completedAt: new Date(),
+        error: null,
+      },
+    });
+    return { id: job.id, status };
+  } catch (error) {
+    await prisma.aiJob.update({
+      where: { id: job.id },
+      data: {
+        status: "Failed",
+        error: error instanceof Error ? error.message : "AI job failed",
+        completedAt: new Date(),
+      },
+    });
+    return { id: job.id, status: "Failed" };
+  }
 }
 
 async function runJob(type: AiJobType, payload: Record<string, unknown>) {
@@ -201,6 +212,23 @@ async function runChallengeGenerationJob(payload: Record<string, unknown>) {
     return { fallback: false, output: { skipped: "stale personalization context" } };
   }
   const user = fromDbUser(challenge.user);
+  const [recentChallenges, sameDayChallenges] = await Promise.all([
+    prisma.challenge.findMany({
+      where: { userId: challenge.userId, id: { not: challenge.id } },
+      orderBy: { createdAt: "desc" },
+      take: 60,
+      select: { dateKey: true, title: true, topic: true, scenario: true, status: true, disciplineSnapshot: true },
+    }),
+    prisma.challenge.findMany({
+      where: {
+        dateKey: challenge.dateKey,
+        userId: { not: challenge.userId },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+      select: { dateKey: true, title: true, topic: true, scenario: true, status: true, disciplineSnapshot: true },
+    }),
+  ]);
   const ai = await generateAiChallenge({
     user,
     difficulty: difficultyForPis(user.pisScore),
@@ -215,6 +243,8 @@ async function runChallengeGenerationJob(payload: Record<string, unknown>) {
     durationMinutes: typeof payload.durationMinutes === "number" ? payload.durationMinutes : undefined,
     disciplineSnapshot: requestedSnapshot ?? currentSnapshot,
     recoveryContext: fromDbChallenge(challenge).recoveryContext,
+    recentChallenges: recentChallenges.map(generationHistorySignal),
+    sameDayChallenges: sameDayChallenges.map(generationHistorySignal),
   });
   if (!ai) return { fallback: true, output: { skipped: "no generated challenge" } };
 
@@ -241,9 +271,33 @@ async function runChallengeGenerationJob(payload: Record<string, unknown>) {
       submissionRequirements: updated.submissionRequirements,
       solution: updated.solution,
       antiGenericRequirement: updated.antiGenericRequirement,
+      contentFingerprint: challengeContentFingerprint(updated),
     },
   });
   return { fallback: false, output: { challengeId: challenge.id } };
+}
+
+function generationHistorySignal(challenge: {
+  dateKey: string;
+  title: string;
+  topic: string;
+  scenario: string;
+  status: string;
+  disciplineSnapshot: unknown;
+}): ChallengeHistorySignal {
+  const snapshot = challenge.disciplineSnapshot && typeof challenge.disciplineSnapshot === "object"
+    ? challenge.disciplineSnapshot as { id?: unknown }
+    : undefined;
+  return {
+    dateKey: challenge.dateKey,
+    title: challenge.title,
+    topic: challenge.topic,
+    scenario: challenge.scenario,
+    disciplineId: typeof snapshot?.id === "string" ? snapshot.id : undefined,
+    blueprint: challenge.status === "RestDay"
+      ? undefined
+      : blueprintFromSnapshot(challenge.disciplineSnapshot),
+  };
 }
 
 async function runNotebookSummaryJob(payload: Record<string, unknown>) {

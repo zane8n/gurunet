@@ -66,6 +66,8 @@ type LearnerPreferences = {
     daysOfWeek: number[];
     localTime: string;
     durationMinutes: number;
+    reminderMinutesBefore: number;
+    flexWindowMinutes: number;
     timezone: string;
     enabled: boolean;
   }>;
@@ -109,10 +111,14 @@ export function AccountSettingsPage() {
   const [preferences, setPreferences] = useState<LearnerPreferences | null>(null);
   const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState("");
+  const [browserNotificationState, setBrowserNotificationState] = useState<
+    "unsupported" | NotificationPermission
+  >("unsupported");
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       setThemeMode(localStorage.getItem("gurunet.theme.v1") === "dark" ? "dark" : "light");
+      setBrowserNotificationState("Notification" in window ? Notification.permission : "unsupported");
     });
     return () => cancelAnimationFrame(frame);
   }, []);
@@ -232,6 +238,8 @@ export function AccountSettingsPage() {
           daysOfWeek: form.getAll("daysOfWeek").map(Number),
           localTime: String(form.get("localTime")),
           durationMinutes: Number(form.get("durationMinutes")),
+          reminderMinutesBefore: Number(form.get("reminderMinutesBefore")),
+          flexWindowMinutes: Number(form.get("flexWindowMinutes")),
           timezone,
           enabled: true,
         }),
@@ -260,6 +268,41 @@ export function AccountSettingsPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function toggleStudySchedule(id: string, enabled: boolean) {
+    setBusy(true);
+    try {
+      await accountRequest(`/api/v1/schedules/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      });
+      setPreferences((current) => current
+        ? {
+            ...current,
+            schedules: current.schedules.map((schedule) =>
+              schedule.id === id ? { ...schedule, enabled } : schedule,
+            ),
+          }
+        : current);
+      setMessage(enabled ? "Study block resumed." : "Study block paused. Its reminders are off.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update the study block.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function enableBrowserNotifications() {
+    if (!("Notification" in window)) {
+      setMessage("This browser does not support system notifications.");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setBrowserNotificationState(permission);
+    setMessage(permission === "granted"
+      ? "Browser alerts enabled while GURUnet is open."
+      : "Browser alerts remain off; in-app reminders still appear.");
   }
 
   async function saveDetails(event: FormEvent<HTMLFormElement>) {
@@ -344,6 +387,12 @@ export function AccountSettingsPage() {
   }
 
   const initial = user?.name?.trim()?.[0];
+  const activeStudyBlocks = preferences?.schedules.filter((schedule) => schedule.enabled) ?? [];
+  const plannedWeeklyMinutes = activeStudyBlocks.reduce(
+    (total, schedule) => total + schedule.durationMinutes * schedule.daysOfWeek.length,
+    0,
+  );
+  const restDayLabel = weekDays[preferences?.studyProfile?.restDay ?? 0];
 
   return (
     <main className="app-background min-h-screen text-slate-950">
@@ -429,7 +478,7 @@ export function AccountSettingsPage() {
             </section>
 
             {preferences && (
-              <section className="rounded-md border border-slate-200 bg-white/72 p-5">
+              <section id="learning-rhythm" className="rounded-md border border-slate-200 bg-white/72 p-5">
                 <div className="flex items-start gap-3">
                   <CalendarDays className="mt-0.5 text-cyan-700" size={18} />
                   <div>
@@ -437,6 +486,20 @@ export function AccountSettingsPage() {
                     <p className="mt-1 text-sm leading-6 text-slate-600">
                       Set the weekly break and defaults used when the next personal challenge is generated.
                     </p>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-3 divide-x divide-slate-200 border-y border-slate-200 py-3 text-center">
+                  <div className="px-2">
+                    <p className="font-mono text-lg font-semibold text-slate-950">{Math.round(plannedWeeklyMinutes / 6) / 10}h</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">protected weekly</p>
+                  </div>
+                  <div className="px-2">
+                    <p className="font-mono text-lg font-semibold text-slate-950">{activeStudyBlocks.length}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">active blocks</p>
+                  </div>
+                  <div className="px-2">
+                    <p className="truncate text-sm font-semibold text-slate-950">{restDayLabel}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">weekly reset</p>
                   </div>
                 </div>
                 <form onSubmit={saveLearningPreferences} className="mt-4 grid gap-4">
@@ -522,6 +585,17 @@ export function AccountSettingsPage() {
                     <TimeField name="quietStartLocalTime" label="Quiet hours start" value={preferences.notifications.quietStartLocalTime} />
                     <TimeField name="quietEndLocalTime" label="Quiet hours end" value={preferences.notifications.quietEndLocalTime} />
                   </div>
+                  <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => void enableBrowserNotifications()}
+                      disabled={browserNotificationState === "granted"}
+                      className="h-9 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 disabled:border-emerald-200 disabled:bg-emerald-50 disabled:text-emerald-700"
+                    >
+                      {browserNotificationState === "granted" ? "Browser alerts enabled" : "Enable browser alerts"}
+                    </button>
+                    <p className="text-xs text-slate-500">Native apps receive background alerts; web alerts appear while GURUnet is open.</p>
+                  </div>
                   <button disabled={busy} className="h-10 w-fit rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60">Save notifications</button>
                 </form>
               </section>
@@ -533,21 +607,23 @@ export function AccountSettingsPage() {
                   <Clock3 className="mt-0.5 text-cyan-700" size={18} />
                   <div>
                     <p className="text-sm font-semibold text-slate-950">Study blocks</p>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">Schedule recurring working windows. These guide reminders; they do not create additional assessments.</p>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">Protect realistic working windows. Each block can start flexibly and can be paused without deleting it.</p>
                   </div>
                 </div>
                 <form onSubmit={addStudySchedule} className="mt-4 grid gap-3">
-                  <div className="grid gap-3 sm:grid-cols-[1fr_0.55fr_0.55fr]">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                     <label className="grid gap-1.5 text-sm font-medium text-slate-700">Label<input name="title" required minLength={2} maxLength={80} placeholder="Evening practice" className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" /></label>
                     <TimeField name="localTime" label="Start time" value="18:00" />
                     <label className="grid gap-1.5 text-sm font-medium text-slate-700">Minutes<input name="durationMinutes" type="number" min={10} max={240} defaultValue={45} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" /></label>
+                    <label className="grid gap-1.5 text-sm font-medium text-slate-700">Remind before<select name="reminderMinutesBefore" defaultValue={10} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"><option value={0}>At start</option><option value={5}>5 minutes</option><option value={10}>10 minutes</option><option value={15}>15 minutes</option><option value={30}>30 minutes</option></select></label>
+                    <label className="grid gap-1.5 text-sm font-medium text-slate-700">Flexible start<select name="flexWindowMinutes" defaultValue={30} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"><option value={0}>Exact time</option><option value={15}>15-minute window</option><option value={30}>30-minute window</option><option value={60}>1-hour window</option></select></label>
                   </div>
                   <fieldset>
                     <legend className="text-sm font-medium text-slate-700">Recurring days</legend>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {weekDays.map((day, index) => (
                         <label key={day} className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700">
-                          <input type="checkbox" name="daysOfWeek" value={index} /> {day.slice(0, 3)}
+                          <input type="checkbox" name="daysOfWeek" value={index} defaultChecked={index >= 1 && index <= 5} /> {day.slice(0, 3)}
                         </label>
                       ))}
                     </div>
@@ -557,12 +633,15 @@ export function AccountSettingsPage() {
                 {preferences.schedules.length > 0 && (
                   <div className="mt-5 divide-y divide-slate-200 border-y border-slate-200">
                     {preferences.schedules.map((schedule) => (
-                      <div key={schedule.id} className="flex items-center justify-between gap-4 py-3">
+                      <div key={schedule.id} className={`flex items-center justify-between gap-4 py-3 ${schedule.enabled ? "" : "opacity-55"}`}>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-slate-950">{schedule.title}</p>
-                          <p className="mt-0.5 text-xs text-slate-500">{schedule.daysOfWeek.map((day) => weekDays[day]?.slice(0, 3)).join(", ")} at {schedule.localTime} for {schedule.durationMinutes} minutes</p>
+                          <p className="mt-0.5 text-xs text-slate-500">{schedule.daysOfWeek.map((day) => weekDays[day]?.slice(0, 3)).join(", ")} at {schedule.localTime} · {schedule.durationMinutes} min · {schedule.flexWindowMinutes} min flex</p>
                         </div>
-                        <button type="button" onClick={() => void deleteStudySchedule(schedule.id)} aria-label={`Remove ${schedule.title}`} className="grid size-9 shrink-0 place-items-center rounded-md text-slate-500 hover:bg-red-50 hover:text-red-700"><Trash2 size={15} /></button>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button type="button" onClick={() => void toggleStudySchedule(schedule.id, !schedule.enabled)} className="h-9 rounded-md px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100">{schedule.enabled ? "Pause" : "Resume"}</button>
+                          <button type="button" onClick={() => void deleteStudySchedule(schedule.id)} aria-label={`Remove ${schedule.title}`} className="grid size-9 place-items-center rounded-md text-slate-500 hover:bg-red-50 hover:text-red-700"><Trash2 size={15} /></button>
+                        </div>
                       </div>
                     ))}
                   </div>

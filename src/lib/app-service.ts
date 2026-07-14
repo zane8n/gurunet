@@ -23,7 +23,6 @@ import {
   generateExaminerChatReply,
   generateGradeReview,
   generateVerificationQuestion,
-  templateFallbackChallenge,
 } from "@/lib/openai-service";
 import { createId } from "@/lib/store";
 import { prisma } from "@/lib/prisma";
@@ -47,9 +46,21 @@ import {
   disciplineSnapshot,
   getDiscipline,
 } from "@/lib/disciplines";
-import { enqueueAiJob } from "@/lib/ai-jobs";
+import { enqueueAiJob, runAiJobNow } from "@/lib/ai-jobs";
 import { buildSubmissionContent, type SubmissionAttachment } from "@/lib/submission-content";
 import { assessRecoveryOutcome, selectRecoveryContext } from "@/lib/recovery";
+import {
+  blueprintFromSnapshot,
+  selectChallengeBlueprint,
+  type ChallengeHistorySignal,
+} from "@/lib/challenge-blueprints";
+import { challengeContentFingerprint } from "@/lib/challenge-fingerprint";
+import { processDueNotifications } from "@/lib/notification-jobs";
+import {
+  notificationKinds,
+  queueUserNotification,
+  syncUserNotificationSchedule,
+} from "@/lib/notification-scheduler";
 import {
   challengeDateKeyFor,
   dateKeyFor,
@@ -349,7 +360,10 @@ export async function updateStudyProfile(
 export async function getDashboard(user: User) {
   await ensureMissedPreviousChallenge(user);
   const today = await getOrCreateTodayChallenge(user);
-  await ensureMarketplaceCatalog();
+  await Promise.all([
+    ensureMarketplaceCatalog(),
+    syncUserNotificationSchedule(user.id),
+  ]);
 
   const dbUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
   const currentUser = fromDbUser(dbUser);
@@ -616,13 +630,32 @@ function weeklyRevealMessage(averageScore: number | null, completedDays: number)
 export async function getOrCreateTodayChallenge(user: User) {
   const dbUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
   const currentUser = fromDbUser(dbUser);
-  const existingChallenges = await prisma.challenge.findMany({
-    where: { userId: user.id },
-    select: { userId: true, dateKey: true, createdAt: true },
-  });
+  const [existingChallenges, settings, profileState] = await Promise.all([
+    prisma.challenge.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      take: 180,
+      select: {
+        userId: true,
+        dateKey: true,
+        createdAt: true,
+        title: true,
+        topic: true,
+        scenario: true,
+        status: true,
+        disciplineSnapshot: true,
+      },
+    }),
+    getChallengeSettings(currentUser),
+    getStudyProfile(currentUser),
+  ]);
   const today = currentChallengeDateKey(currentUser, existingChallenges);
-  const settings = await getChallengeSettings(currentUser);
-  const profileState = await getStudyProfile(currentUser);
+  const sameDayChallenges = await prisma.challenge.findMany({
+    where: { dateKey: today, userId: { not: user.id } },
+    orderBy: { createdAt: "desc" },
+    take: 500,
+    select: { dateKey: true, title: true, topic: true, scenario: true, status: true, disciplineSnapshot: true },
+  });
   const restDay = profileState.studyProfile?.restDay ?? profileState.activeDiscipline.restDay ?? 0;
   const scheduledRecovery = isDayAfterScheduledRest(today, restDay);
   const discipline = challengeDisciplineSnapshot(
@@ -631,6 +664,10 @@ export async function getOrCreateTodayChallenge(user: User) {
     currentUser.id,
     today,
     scheduledRecovery,
+    {
+      recent: existingChallenges.map(challengeHistorySignal),
+      sameDayGlobal: sameDayChallenges.map(challengeHistorySignal),
+    },
   );
   const recoveryContext = await recoveryContextForUser({
     userId: user.id,
@@ -671,6 +708,8 @@ export async function getOrCreateTodayChallenge(user: User) {
             isRecovery: false,
             isPressure: false,
             recoveryContext: Prisma.DbNull,
+            generationSignature: null,
+            contentFingerprint: null,
             disciplineSnapshot: discipline,
           },
         })
@@ -740,6 +779,8 @@ export async function getOrCreateTodayChallenge(user: User) {
           submissionRequirements: refreshed.submissionRequirements,
           solution: refreshed.solution,
           antiGenericRequirement: refreshed.antiGenericRequirement,
+          generationSignature: discipline.generationContext?.blueprint?.signature,
+          contentFingerprint: challengeContentFingerprint(refreshed),
           deadlineAt: new Date(refreshed.deadlineAt),
           status: toDbStatus(refreshed.status),
           isRecovery: refreshed.isRecovery,
@@ -750,9 +791,9 @@ export async function getOrCreateTodayChallenge(user: User) {
           disciplineSnapshot: discipline,
         },
       });
-      await enqueueAiJob(
+      const job = await enqueueAiJob(
         "ChallengeGeneration",
-        `challenge-profile:${user.id}:${today}:${disciplineProfileFingerprint(discipline)}`,
+        `challenge-profile:v2:${user.id}:${today}:${disciplineProfileFingerprint(discipline)}`,
         {
           userId: user.id,
           challengeId: updated.id,
@@ -766,8 +807,11 @@ export async function getOrCreateTodayChallenge(user: User) {
           recoveryContext,
         },
       );
+      await runAiJobNow(job.id);
       await consumeManualRecoveryRequest(user.id, settings.recoveryMode, recoveryRequired);
-      return fromDbChallenge(updated);
+      return fromDbChallenge(
+        await prisma.challenge.findUniqueOrThrow({ where: { id: updated.id } }),
+      );
     }
 
     const normalized = await normalizeActiveChallengeDeadline(currentUser, existing);
@@ -814,11 +858,13 @@ export async function getOrCreateTodayChallenge(user: User) {
       recoveryContext: recoveryContext
         ? (recoveryContext as unknown as Prisma.InputJsonValue)
         : undefined,
+      generationSignature: discipline.generationContext?.blueprint?.signature,
+      contentFingerprint: challengeContentFingerprint(challenge),
       createdAt: new Date(challenge.createdAt),
     },
   });
 
-  await enqueueAiJob("ChallengeGeneration", `challenge:${user.id}:${today}`, {
+  const job = await enqueueAiJob("ChallengeGeneration", `challenge:v2:${user.id}:${today}:${discipline.generationContext?.blueprint?.blueprintId ?? "base"}`, {
     userId: user.id,
     challengeId: created.id,
     dateKey: today,
@@ -830,10 +876,13 @@ export async function getOrCreateTodayChallenge(user: User) {
     recentWeaknesses: recentGrades.map((grade) => grade.nextImprovementTarget),
     recoveryContext,
   });
+  await runAiJobNow(job.id);
 
   await consumeManualRecoveryRequest(user.id, settings.recoveryMode, recoveryRequired);
 
-  return fromDbChallenge(created);
+  return fromDbChallenge(
+    await prisma.challenge.findUniqueOrThrow({ where: { id: created.id } }),
+  );
 }
 
 export async function forceGenerateChallenge(user: User) {
@@ -1034,9 +1083,16 @@ export async function submitChallenge(
       kind: attachment.kind,
     })),
   });
-  const requiresVerification = needsVerification(contentForScoring);
-  const fallbackQuestion =
-    "Name the one command or observation that would most directly disprove your main hypothesis.";
+  const domainChallenge = fromDbChallenge(challenge);
+  const requiresVerification = needsVerification(contentForScoring, domainChallenge);
+  const interaction = domainChallenge.disciplineSnapshot?.generationContext?.blueprint?.interaction;
+  const fallbackQuestion = interaction === "code"
+    ? "Name the single test case most likely to expose a defect in your implementation, and state its expected result."
+    : interaction === "commands"
+      ? "Name the first command result that would make you stop or change your sequence."
+      : interaction === "oral"
+        ? "State the strongest objection to your position and defend your answer with one supplied artifact."
+        : "Which supplied artifact most strongly supports your conclusion, and what can it not prove?";
 
   const submittedAt = new Date();
   const submission = await prisma.$transaction(async (tx) => {
@@ -1072,7 +1128,7 @@ export async function submitChallenge(
       challengeId,
       userId: user.id,
     });
-    void generateVerificationQuestion(fromDbChallenge(challenge), contentForScoring)
+    void generateVerificationQuestion(domainChallenge, contentForScoring)
       .then((question) =>
         prisma.submission.update({
           where: { id: submission.id },
@@ -2131,16 +2187,29 @@ export async function gradeExistingSubmission(user: User, submissionId: string) 
     userId: user.id,
   });
 
-  if (shouldEscalateToStrictCritique(grade, domainSubmission.content)) {
-    await enqueueAiJob("StrictCritique", `critique:${submission.id}`, {
-      submissionId: submission.id,
-      challengeId: challenge.id,
-      gradeId: created.id,
-      userId: user.id,
-    });
-  }
+  const critiqueJob = await enqueueAiJob("StrictCritique", `critique:${submission.id}`, {
+    submissionId: submission.id,
+    challengeId: challenge.id,
+    gradeId: created.id,
+    userId: user.id,
+  });
+  await runAiJobNow(critiqueJob.id);
 
-  return fromDbGrade(created);
+  const finalGrade = fromDbGrade(
+    await prisma.grade.findUniqueOrThrow({ where: { id: created.id } }),
+  );
+  await queueUserNotification({
+    userId: user.id,
+    kind: notificationKinds.correctionReady,
+    dedupeKey: `correction-ready:${created.id}`,
+    title: "Your correction is ready",
+    body: `${challenge.title}: ${finalGrade.finalScore.toFixed(1)}/20. Review the examiner’s marked feedback.`,
+    scheduledFor: new Date(),
+    deepLink: "https://gurunet.uk/?section=daily-challenge",
+    payload: { challengeId: challenge.id, gradeId: created.id, route: "today" },
+  });
+  await processDueNotifications(10, user.id);
+  return finalGrade;
 }
 
 export async function redeemErt(user: User, input: z.infer<typeof redemptionSchema>) {
@@ -2227,20 +2296,17 @@ export async function createConnectionInvitation(
     });
   }
 
-  await prisma.scheduledNotification.upsert({
-    where: { dedupeKey: `connection-invite:${pairKey}:${new Date().toISOString().slice(0, 10)}` },
-    update: {},
-    create: {
-      id: createId("ntf"),
-      userId: target.id,
-      kind: "ConnectionInvitation",
-      dedupeKey: `connection-invite:${pairKey}:${new Date().toISOString().slice(0, 10)}`,
-      title: "New GURUnet connection request",
-      body: `${user.name || "A learner"} invited you to connect.`,
-      deepLink: "gurunet://network/invitations",
-      scheduledFor: new Date(),
-    },
+  await queueUserNotification({
+    userId: target.id,
+    kind: notificationKinds.connectionInvitation,
+    dedupeKey: `connection-invite:${pairKey}:${new Date().toISOString().slice(0, 10)}`,
+    title: "New GURUnet connection request",
+    body: `${user.name || "A learner"} invited you to connect.`,
+    deepLink: "https://gurunet.uk/?section=social",
+    scheduledFor: new Date(),
+    payload: { route: "network" },
   });
+  await processDueNotifications(10, target.id);
   return generic;
 }
 
@@ -2258,10 +2324,22 @@ export async function actOnConnectionInvitation(
     if (friendship.friendId !== user.id || friendship.status !== "Pending") {
       throw new Response("Only a pending recipient can accept this request", { status: 409 });
     }
-    return prisma.friendship.update({
+    const accepted = await prisma.friendship.update({
       where: { id: friendship.id },
       data: { status: "Accepted", respondedAt: new Date() },
     });
+    await queueUserNotification({
+      userId: friendship.userId,
+      kind: notificationKinds.connectionInvitation,
+      dedupeKey: `connection-accepted:${friendship.id}`,
+      title: "Connection accepted",
+      body: `${user.name || "A learner"} accepted your GURUnet connection request.`,
+      scheduledFor: new Date(),
+      deepLink: "https://gurunet.uk/?section=social",
+      payload: { route: "network" },
+    });
+    await processDueNotifications(10, friendship.userId);
+    return accepted;
   }
   if (action === "decline") {
     if (friendship.friendId !== user.id || friendship.status !== "Pending") {
@@ -2582,47 +2660,72 @@ function createDisciplineFallbackChallenge(
     discipline: DisciplineSnapshot;
   },
 ) {
-  const base = templateFallbackChallenge(
-    user,
-    options.recovery,
-    options.pressure,
-    options.dateKey,
-    options.recoveryContext,
-  );
+  const status: Challenge["status"] = options.pressure
+    ? "Pressure Challenge"
+    : options.recovery
+      ? "Recovery Challenge"
+      : "Active";
+  const base = {
+    id: createId("chl"),
+    userId: user.id,
+    dateKey: options.dateKey,
+    difficulty: difficultyForPis(user.pisScore),
+    deadlineAt: localDeadlineIso(options.dateKey, getUserTimezone(user.timezone), 15),
+    status,
+    isRecovery: options.recovery,
+    isPressure: options.pressure,
+    createdAt: new Date().toISOString(),
+  };
   const discipline = options.discipline;
-  if (discipline.id === "networking") return base;
-
-  const focus =
+  const blueprint = discipline.generationContext?.blueprint;
+  const focus = blueprint?.focus ??
     discipline.generationContext?.topicFocus ??
     validFocus(options.settings?.topicFocus, discipline.topics) ??
     discipline.topics[0] ??
     discipline.label;
-  const preferredFormat =
+  const preferredFormat = blueprint?.modeLabel ??
     discipline.generationContext?.preferredFormat ??
     discipline.formats[0] ??
     "Practical assessment";
   const packet = fallbackPacketForDiscipline(discipline.id, focus);
   const recoveryTopic = options.recoveryContext?.target ??
     options.recentWeaknesses[0] ?? discipline.weakAreas?.[0] ?? focus;
-  const sections = discipline.responseSections.length
-    ? discipline.responseSections
+  const sections = blueprint?.responseSections?.length
+    ? blueprint.responseSections
+    : discipline.responseSections.length
+      ? discipline.responseSections
     : ["Observation", "Evidence", "Plan", "Validation", "Risk"];
+  const exerciseModes = new Set(["configuration_build", "scripting_task", "environment_admin", "command_only"]);
+  const caseReference = blueprint
+    ? `GN-${blueprint.nonce.slice(0, 9).toUpperCase()}`
+    : `GN-${Math.abs(user.id.split("").reduce((total, item) => total + item.charCodeAt(0), 0)) + 1000}`;
 
   return {
     ...base,
-    title: `${discipline.label}: ${packet.title}`,
+    title: blueprint
+      ? `${blueprint.modeLabel}: ${blueprint.primaryTopic} in ${blueprint.scenarioFamily}`.slice(0, 120)
+      : `${discipline.label}: ${packet.title}`,
     topic: focus,
     scenario: [
       "Task 1 - Main assessment",
-      "Scenario / Background",
+      "Assessment mode",
+      `${preferredFormat}. ${blueprint?.promptDirective ?? "Complete a practical, evidence-led assessment."}`,
+      "",
+      "Role and setting",
+      `You are the ${blueprint?.practitionerRole ?? "responsible practitioner"} for a ${blueprint?.scenarioFamily ?? discipline.label.toLowerCase()} case (reference ${caseReference})${blueprint?.secondaryDiscipline ? ` with a governed ${blueprint.secondaryDiscipline} integration boundary` : ""}.`,
+      "",
+      "Context",
       packet.background,
       "",
-      "Evidence Provided",
+      "Available artifacts",
       ...packet.evidence,
       "",
-      "Optional Lab",
-      packet.lab,
+      "Required deliverable",
+      blueprint?.deliverable ?? packet.objective,
       "",
+      ...(blueprint && exerciseModes.has(blueprint.modeId)
+        ? ["Reproducible exercise", packet.lab, ""]
+        : []),
       ...(options.recovery
         ? [
             "Task 2 - Targeted reinforcement",
@@ -2634,12 +2737,15 @@ function createDisciplineFallbackChallenge(
       "Submission Deadline",
       "15:00 local time. Do not reveal the solution until after submission.",
     ].join("\n"),
-    objective: packet.objective,
+    objective: blueprint
+      ? `${blueprint.promptDirective} Produce ${blueprint.deliverable.toLowerCase()} using the supplied artifacts.`
+      : packet.objective,
     constraints: [
       "Do not invent evidence that is not present in the brief.",
       "Do not recommend destructive changes without verification and rollback.",
       `Use the active discipline context: ${discipline.label}.`,
       `Preferred challenge format: ${preferredFormat}.`,
+      ...(blueprint ? [blueprint.constraintTwist] : []),
       `Target completion time: ${options.settings?.durationMinutes ?? Math.max(30, Math.min(120, discipline.weeklyTimeBudgetHours * 12))} minutes.`,
       ...(discipline.preferenceNotes ? [`User preference notes: ${discipline.preferenceNotes}.`] : []),
     ].slice(0, 8),
@@ -2657,10 +2763,18 @@ function createDisciplineFallbackChallenge(
       ...(options.recovery ? ["Recovery retrieval task answer."] : []),
       ...discipline.evidenceTypes.slice(0, 4).map((item) => `Profile evidence expectation: ${item}.`),
     ].slice(0, 10),
-    solution: `${packet.solution}${options.recovery ? ` Reinforcement task: answer the targeted ${recoveryTopic} prompt with a correction, decisive evidence, and a validation step.` : ""}`,
+    solution: [
+      packet.solution,
+      ...(blueprint
+        ? [`For the ${blueprint.modeLabel} format, a strong answer must produce ${blueprint.deliverable.toLowerCase()}, use the provided ${blueprint.evidenceStyle.toLowerCase()}, and state what evidence would invalidate its conclusion.`]
+        : []),
+      ...(options.recovery
+        ? [`Reinforcement task: answer the targeted ${recoveryTopic} prompt with a correction, decisive evidence, and a validation step.`]
+        : []),
+    ].join(" "),
     recoveryContext: options.recoveryContext,
     antiGenericRequirement:
-      `Your answer must use ${discipline.label} evidence from the brief and follow the expected sections: ${sections.join(", ")}.`,
+      `Your answer must use the ${caseReference} ${discipline.label} artifacts, complete the ${preferredFormat} deliverable, and follow these sections: ${sections.join(", ")}.`,
   };
 }
 
@@ -2679,6 +2793,23 @@ function fallbackPacketForDiscipline(disciplineId: string, focus: string) {
     lab: string;
     solution: string;
   }> = {
+    networking: {
+      title: `${focus} Operational Review With Conflicting Evidence`,
+      background:
+        `A live network change involving ${focus} has produced a narrow but repeatable service symptom. The implementation record, observed state, and monitoring view disagree. Broad rollback would affect healthy users, so the next step must discriminate between a control-plane, policy, path, or local configuration fault.`,
+      evidence: [
+        `Change record: the ${focus} change passed syntax review but no post-change traffic test was attached.`,
+        "Monitoring: one service path fails while a second path in the same site remains healthy.",
+        "Device state: the relevant configuration is present, but one counter or state transition differs from the baseline.",
+        "Operations note: no power, carrier, or whole-site outage is active.",
+      ],
+      objective:
+        "Use the conflicting artifacts to define the most discriminating checks, the minimum safe action, and proof of recovery.",
+      allowedTools: ["running configuration", "state/show commands", "logs and counters", "path test", "change diff", "rollback checkpoint"],
+      lab: `Build a small two-path topology for ${focus}, introduce one scoped state or policy defect, and capture before/failure/after evidence.`,
+      solution:
+        `A strong answer does not assume that configuration presence proves correct behavior. It ranks the evidence, checks the operational state and counters specific to ${focus}, compares the failing and healthy paths, changes only the demonstrated fault, and validates both intended service and retained controls.`,
+    },
     linux_systems: {
       title: `Service Degradation After ${focus} Change`,
       background:
@@ -2826,19 +2957,6 @@ function isValidExcuseReason(reason: string) {
   );
 }
 
-function shouldEscalateToStrictCritique(
-  grade: ReturnType<typeof gradeSubmission>,
-  content: string,
-) {
-  if (process.env.AI_STRICT_CRITIQUE_ALWAYS === "true") return true;
-  if (grade.technicalCap !== "NONE") return true;
-  if (grade.finalScore >= 9 && grade.finalScore <= 17) return true;
-  if (grade.latePenalty > 0) return true;
-  if (grade.contentionNotes.length > 0) return true;
-  if (/\b(ai|chatgpt|copilot|generated)\b/i.test(content)) return true;
-  return false;
-}
-
 async function getChallengeSettings(user: User) {
   const fallback = defaultChallengeSettings(user);
   const delegate = (prisma as unknown as {
@@ -2920,14 +3038,20 @@ function challengeDisciplineSnapshot(
   userId: string,
   dateKey: string,
   scheduledRecovery = false,
+  novelty: {
+    recent: ChallengeHistorySignal[];
+    sameDayGlobal: ChallengeHistorySignal[];
+  } = { recent: [], sameDayGlobal: [] },
+  regenerationAttempt = 0,
 ): DisciplineSnapshot {
-  const topicFocus = profileFocusForChallenge(
+  const blueprint = selectChallengeBlueprint({
     userId,
     dateKey,
     discipline,
-    settings.topicFocus,
-  );
-  const preferredFormat = profileFormatForChallenge(userId, dateKey, discipline);
+    requestedTopic: settings.topicFocus,
+    novelty,
+    regenerationAttempt,
+  });
   return {
     ...discipline,
     generationContext: {
@@ -2936,9 +3060,33 @@ function challengeDisciplineSnapshot(
       recoveryMode: settings.recoveryMode,
       teamMode: settings.teamMode,
       scheduledRecovery,
-      ...(topicFocus ? { topicFocus } : {}),
-      ...(preferredFormat ? { preferredFormat } : {}),
+      topicFocus: blueprint.focus,
+      preferredFormat: blueprint.modeLabel,
+      blueprint,
     },
+  };
+}
+
+function challengeHistorySignal(challenge: {
+  dateKey: string;
+  title: string;
+  topic: string;
+  scenario?: string;
+  status?: string;
+  disciplineSnapshot: unknown;
+}): ChallengeHistorySignal {
+  const snapshot = challenge.disciplineSnapshot && typeof challenge.disciplineSnapshot === "object"
+    ? challenge.disciplineSnapshot as { id?: unknown }
+    : undefined;
+  return {
+    dateKey: challenge.dateKey,
+    title: challenge.title,
+    topic: challenge.topic,
+    scenario: challenge.scenario,
+    disciplineId: typeof snapshot?.id === "string" ? snapshot.id : undefined,
+    blueprint: challenge.status === "RestDay"
+      ? undefined
+      : blueprintFromSnapshot(challenge.disciplineSnapshot),
   };
 }
 
@@ -2950,16 +3098,10 @@ function profileFocusForChallenge(
 ) {
   const explicit = validFocus(requested, discipline.topics);
   if (explicit) return explicit;
-
-  const avoid = new Set(discipline.avoidAreas ?? []);
-  const topics = discipline.topics.filter((topic) => !avoid.has(topic));
-  const weakAreas = (discipline.weakAreas ?? []).filter((topic) => !avoid.has(topic));
-  const seed = `${userId}:${dateKey}:${discipline.id}`
-    .split("")
-    .reduce((total, character) => Math.imul(total ^ character.charCodeAt(0), 16777619), 2166136261);
-  const pool = weakAreas.length > 0 && Math.abs(seed % 3) !== 0 ? weakAreas : topics;
-  if (pool.length === 0) return undefined;
-  return pool[Math.abs(seed) % pool.length];
+  const avoided = new Set((discipline.avoidAreas ?? []).map((item) => item.toLowerCase()));
+  const topics = discipline.topics.filter((topic) => !avoided.has(topic.toLowerCase()));
+  if (!topics.length) return undefined;
+  return topics[stableSelectionIndex(`${userId}:${dateKey}:${discipline.id}:preview-topic`, topics.length)];
 }
 
 function profileFormatForChallenge(
@@ -2967,11 +3109,16 @@ function profileFormatForChallenge(
   dateKey: string,
   discipline: DisciplineSnapshot,
 ) {
-  if (discipline.formats.length === 0) return undefined;
-  const seed = `${dateKey}:${discipline.id}:${userId}:format`
-    .split("")
-    .reduce((total, character) => Math.imul(total ^ character.charCodeAt(0), 16777619), 2166136261);
-  return discipline.formats[Math.abs(seed) % discipline.formats.length];
+  if (!discipline.formats.length) return undefined;
+  return discipline.formats[
+    stableSelectionIndex(`${userId}:${dateKey}:${discipline.id}:preview-format`, discipline.formats.length)
+  ];
+}
+
+function stableSelectionIndex(seed: string, length: number) {
+  let hash = 2166136261;
+  for (const character of seed) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  return (hash >>> 0) % Math.max(1, length);
 }
 
 async function getCohortSnapshot(user: User) {
@@ -3187,14 +3334,33 @@ async function findSupportTargetUser(input: { email?: string; userId?: string })
 async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: string) {
   const existingChallenges = await prisma.challenge.findMany({
     where: { userId: user.id },
-    select: { userId: true, dateKey: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+    take: 180,
+    select: {
+      userId: true,
+      dateKey: true,
+      createdAt: true,
+      title: true,
+      topic: true,
+      scenario: true,
+      status: true,
+      disciplineSnapshot: true,
+    },
   });
   const today = currentChallengeDateKey(user, existingChallenges);
-  const challenge = await prisma.challenge.findFirst({
-    where: { userId: user.id, dateKey: today },
-    include: { submissions: true, grades: true },
-    orderBy: { createdAt: "desc" },
-  });
+  const [challenge, sameDayChallenges] = await Promise.all([
+    prisma.challenge.findFirst({
+      where: { userId: user.id, dateKey: today },
+      include: { submissions: true, grades: true },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.challenge.findMany({
+      where: { dateKey: today, userId: { not: user.id } },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+      select: { dateKey: true, title: true, topic: true, scenario: true, status: true, disciplineSnapshot: true },
+    }),
+  ]);
   if (!challenge) throw new Response("No challenge exists for today yet", { status: 404 });
   if (challenge.submissions.length > 0 || challenge.grades.length > 0) {
     throw new Response("Today challenge cannot be regenerated after submission or grading", { status: 409 });
@@ -3219,6 +3385,11 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
     user.id,
     today,
     scheduledRecovery,
+    {
+      recent: existingChallenges.map(challengeHistorySignal),
+      sameDayGlobal: sameDayChallenges.map(challengeHistorySignal),
+    },
+    1,
   );
   const recoveryContext = await recoveryContextForUser({
     userId: user.id,
@@ -3271,13 +3442,15 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
           recoveryContext: recoveryContext
             ? (recoveryContext as unknown as Prisma.InputJsonValue)
             : Prisma.DbNull,
+          generationSignature: discipline.generationContext?.blueprint?.signature,
+          contentFingerprint: challengeContentFingerprint(next),
           disciplineSnapshot: discipline,
           createdAt: new Date(),
         },
       });
     });
 
-    await enqueueAiJob("ChallengeGeneration", `challenge-regenerate:${user.id}:${today}`, {
+    const job = await enqueueAiJob("ChallengeGeneration", `challenge-regenerate:v2:${user.id}:${today}:${discipline.generationContext?.blueprint?.blueprintId ?? "base"}`, {
       userId: user.id,
       challengeId: updated.id,
       dateKey: today,
@@ -3289,16 +3462,29 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
       recentWeaknesses,
       recoveryContext,
     });
+    await runAiJobNow(job.id);
 
     await consumeManualRecoveryRequest(user.id, settings.recoveryMode, Boolean(recoveryContext));
+
+    const generated = await prisma.challenge.findUniqueOrThrow({ where: { id: updated.id } });
 
     return {
       action: "RegenerateTodayChallenge",
       remainingToday: 0,
-      challenge: fromDbChallenge(updated),
+      challenge: fromDbChallenge(generated),
     };
   } catch (error) {
     if (isUniqueConstraintError(error)) {
+      const alreadyRegenerated = await prisma.supportAction.findUnique({
+        where: { dedupeKey },
+        select: { id: true },
+      });
+      if (!alreadyRegenerated) {
+        throw new Response(
+          "A novelty collision prevented regeneration. Try again; the daily regeneration allowance was not consumed.",
+          { status: 409 },
+        );
+      }
       throw new Response(
         "Today challenge has already been regenerated once by a support action. Recovery status does not count as regeneration.",
         { status: 409 },
@@ -3344,13 +3530,30 @@ function isUniqueConstraintError(error: unknown) {
 }
 
 async function getSocialData(userId: string) {
-  const [users, grades, challenges, friendships, marketplaceChallenges, challengeEnrollments, studyProfiles, socialSettings] =
+  const friendships = await prisma.friendship.findMany({
+    where: { OR: [{ userId }, { friendId: userId }] },
+  });
+  const privateProfileIds = [
+    userId,
+    ...friendships
+      .filter((item) => item.status === "Accepted")
+      .map((item) => item.userId === userId ? item.friendId : item.userId),
+  ];
+  const [users, grades, challenges, marketplaceChallenges, challengeEnrollments, studyProfiles, socialSettings] =
     await Promise.all([
-      prisma.user.findMany(),
-      prisma.grade.findMany(),
-      prisma.challenge.findMany({ select: { userId: true } }),
-      prisma.friendship.findMany({
-        where: { OR: [{ userId }, { friendId: userId }] },
+      prisma.user.findMany({
+        select: {
+          id: true,
+          name: true,
+          pisScore: true,
+          ertBalance: true,
+          currentStreak: true,
+        },
+      }),
+      prisma.grade.findMany({ where: { userId: { in: privateProfileIds } } }),
+      prisma.challenge.findMany({
+        where: { userId: { in: privateProfileIds } },
+        select: { userId: true },
       }),
       prisma.marketplaceChallenge.findMany({ orderBy: { createdAt: "asc" } }),
       prisma.challengeEnrollment.findMany(),
@@ -3359,7 +3562,7 @@ async function getSocialData(userId: string) {
     ]);
 
   return {
-    users: users.map(fromDbUser),
+    users: users.map((item) => ({ ...item, name: item.name?.trim() || "GURUnet learner" })),
     grades: grades.map((grade) => ({
       userId: grade.userId,
       finalScore: grade.finalScore,
@@ -3393,7 +3596,13 @@ export async function getSocialSnapshot(user: User) {
 function buildSocialSnapshot(
   user: User,
   data: {
-    users: User[];
+    users: {
+      id: string;
+      name: string;
+      pisScore: number;
+      ertBalance: number;
+      currentStreak: number;
+    }[];
     grades: { userId: string; finalScore: number; createdAt: string }[];
     challenges: { userId: string }[];
     friendships: {
@@ -3433,7 +3642,7 @@ function buildSocialSnapshot(
       data.studyProfiles.find((profile) => profile.userId === item.id)?.primaryDiscipline ?? "Not configured",
     id: item.id,
     name: item.name,
-    handle: `@${item.email.split("@")[0].replace(/[^a-z0-9_]+/gi, "").toLowerCase() || "engineer"}`,
+    handle: `@learner-${stableLearnerAlias(item.id)}`,
     pisScore: item.pisScore,
     ertBalance: item.ertBalance,
     currentStreak: item.currentStreak,
@@ -3445,7 +3654,7 @@ function buildSocialSnapshot(
 
   const profiles = allProfiles.filter((item) => item.isYou || item.isFriend);
 
-  const leaderboard = profiles
+  const rankedProfiles = allProfiles
     .slice()
     .sort(
       (a, b) =>
@@ -3454,6 +3663,36 @@ function buildSocialSnapshot(
         (b.latestScore ?? -1) - (a.latestScore ?? -1),
     )
     .map((item, index) => ({ ...item, rank: index + 1 }));
+
+  const relationshipByUser = new Map<
+    string,
+    "Connected" | "Incoming" | "Outgoing" | "Blocked"
+  >();
+  for (const item of data.friendships) {
+    if (item.userId !== user.id && item.friendId !== user.id) continue;
+    const otherId = item.userId === user.id ? item.friendId : item.userId;
+    if (item.status === "Accepted") relationshipByUser.set(otherId, "Connected");
+    if (item.status === "Blocked") relationshipByUser.set(otherId, "Blocked");
+    if (item.status === "Pending") {
+      relationshipByUser.set(otherId, item.friendId === user.id ? "Incoming" : "Outgoing");
+    }
+  }
+
+  const leaderboard = rankedProfiles
+    .filter((item) => {
+      if (item.isYou) return true;
+      if (relationshipByUser.get(item.id) === "Blocked") return false;
+      return data.socialSettings.find((setting) => setting.userId === item.id)?.discoverable === true;
+    })
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      rank: item.rank,
+      isYou: item.isYou,
+      connectionState: item.isYou
+        ? ("You" as const)
+        : relationshipByUser.get(item.id) ?? ("Available" as const),
+    }));
 
   const connectedPairIds = new Set(
     data.friendships
@@ -3477,22 +3716,18 @@ function buildSocialSnapshot(
       return {
         id: candidate.id,
         name: candidate.name,
-        handle: candidate.handle,
-        preferredProfession: candidate.preferredProfession,
-        primaryDiscipline: candidate.primaryDiscipline,
-        reasons,
+        rank: rankedProfiles.find((item) => item.id === candidate.id)?.rank ?? null,
+        reason: reasons.length > 0 ? "Relevant to your study profile" : "Active GURUnet learner",
         score: reasons.length * 10 + stableDailyScore(`${today}:${user.id}:${candidate.id}`),
       };
     })
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
     .slice(0, 6)
-    .map(({ id, name, handle, preferredProfession, primaryDiscipline, reasons }) => ({
+    .map(({ id, name, rank, reason }) => ({
       id,
       name,
-      handle,
-      preferredProfession,
-      primaryDiscipline,
-      reasons,
+      rank,
+      reason,
     }));
 
   const invitationProfile = (id: string) => {
@@ -3501,9 +3736,6 @@ function buildSocialSnapshot(
       ? {
           id: profile.id,
           name: profile.name,
-          handle: profile.handle,
-          preferredProfession: profile.preferredProfession,
-          primaryDiscipline: profile.primaryDiscipline,
         }
       : null;
   };
@@ -3570,6 +3802,15 @@ function stableDailyScore(value: string) {
   let hash = 0;
   for (const character of value) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
   return hash % 10;
+}
+
+function stableLearnerAlias(value: string) {
+  let hash = 2166136261;
+  for (const character of value) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36).padStart(6, "0").slice(0, 6);
 }
 
 function preferredProfessionFor(profile?: StudyProfile) {

@@ -37,6 +37,29 @@ export type RubricAxis = {
   description: string;
 };
 
+export type ChallengeBlueprint = {
+  version: number;
+  blueprintId: string;
+  signature: string;
+  nonce: string;
+  primaryTopic: string;
+  secondaryTopic?: string;
+  secondaryDiscipline?: string;
+  focus: string;
+  modeId: string;
+  modeLabel: string;
+  modeFamily: string;
+  scenarioFamily: string;
+  practitionerRole: string;
+  evidenceStyle: string;
+  constraintTwist: string;
+  deliverable: string;
+  interaction: "written" | "commands" | "code" | "oral";
+  validationKind: "holistic" | "command-sequence" | "code-reasoning" | "oral-defense";
+  responseSections: string[];
+  promptDirective: string;
+};
+
 export type DisciplineSnapshot = {
   id: string;
   label: string;
@@ -65,6 +88,7 @@ export type DisciplineSnapshot = {
     recoveryMode: boolean;
     teamMode: boolean;
     scheduledRecovery?: boolean;
+    blueprint?: ChallengeBlueprint;
   };
 };
 

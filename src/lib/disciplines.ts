@@ -49,7 +49,7 @@ export const disciplineCatalog: DisciplineTemplate[] = [
     label: "Networking",
     summary: "Routing, switching, firewalls, wireless, packet reasoning, and operational troubleshooting.",
     topics: ["VLANs", "STP", "OSPF", "BGP", "NAT", "ACLs", "QoS", "Wireless", "Packet analysis"],
-    formats: ["Hands-on lab", "Troubleshooting scenario", "Configuration review", "Design review", "Incident triage"],
+    formats: ["Hands-on lab", "Troubleshooting scenario", "Configuration review", "Design review", "Incident triage", "Command-only challenge", "Minimum safe fix", "Evidence ranking", "Monitoring and observability", "Oral defense", "True / false with defense", "Technology selection"],
     evidenceTypes: ["Commands/config snippets", "Packet or log interpretation", "Topology assumptions", "Rollback plan"],
     responseSections: ["Hypothesis", "Evidence", "Checks", "Risk and rollback", "Recommendation"],
     weakPatterns: ["generic textbook explanation", "no command-level evidence", "ignores rollback"],
@@ -61,7 +61,7 @@ export const disciplineCatalog: DisciplineTemplate[] = [
     label: "Linux / Systems",
     summary: "Services, logs, permissions, shell tooling, performance, and operational recovery.",
     topics: ["systemd", "journald", "permissions", "processes", "storage", "networking", "Bash/Zsh"],
-    formats: ["Hands-on lab", "Log investigation", "Service recovery", "Shell task", "Hardening review"],
+    formats: ["Hands-on lab", "Log investigation", "Service recovery", "Shell task", "Hardening review", "Mini environment administration", "Command-only challenge", "Scripting and coding", "Forensics timeline", "Runbook repair", "Capacity planning"],
     evidenceTypes: ["Command output", "Log excerpts", "Config snippets", "Risk/rollback notes"],
     responseSections: ["Symptom", "Evidence", "Commands", "Root cause", "Fix and validation"],
     weakPatterns: ["blind chmod/chown", "missing logs", "no validation command"],
@@ -73,7 +73,7 @@ export const disciplineCatalog: DisciplineTemplate[] = [
     label: "Cybersecurity",
     summary: "Detection, triage, hardening, incident response, identity, and evidence handling.",
     topics: ["Authentication", "Threat triage", "Hardening", "Network security", "Detection logic", "Containment"],
-    formats: ["Hands-on lab", "Security investigation", "Control review", "Incident command", "Detection improvement"],
+    formats: ["Hands-on lab", "Security investigation", "Control review", "Incident command", "Detection improvement", "Forensics timeline", "Find the trap", "Evidence ranking", "Hardening review", "Oral defense", "Post-incident reconstruction"],
     evidenceTypes: ["Timeline", "Indicators", "Log correlation", "Containment and recovery plan"],
     responseSections: ["Impact", "Evidence", "Hypothesis", "Containment", "Follow-up"],
     weakPatterns: ["alarmist claims", "no timeline", "no containment criteria"],
@@ -85,7 +85,7 @@ export const disciplineCatalog: DisciplineTemplate[] = [
     label: "Software Engineering",
     summary: "Debugging, architecture, API design, testing, code review, and reliability.",
     topics: ["Debugging", "API design", "Testing", "Refactoring", "Performance", "Reliability"],
-    formats: ["Hands-on lab", "Bug triage", "Code review", "Design critique", "Test plan"],
+    formats: ["Hands-on lab", "Bug triage", "Code review", "Design critique", "Test plan", "Scripting and coding", "Find the trap", "Architecture trade-off", "Failure prediction", "Operational decision"],
     evidenceTypes: ["Reproduction steps", "Failure analysis", "Patch strategy", "Tests and trade-offs"],
     responseSections: ["Problem", "Evidence", "Approach", "Tests", "Trade-offs"],
     weakPatterns: ["solution before reproduction", "no tests", "overbroad refactor"],
@@ -97,7 +97,7 @@ export const disciplineCatalog: DisciplineTemplate[] = [
     label: "Automation / Scripting",
     summary: "Repeatable scripts, parsing, safety checks, idempotency, and operational tooling.",
     topics: ["Bash", "Python", "Ansible", "Parsing", "Idempotency", "Error handling"],
-    formats: ["Hands-on lab", "Script improvement", "Automation design", "Runbook automation", "Failure handling"],
+    formats: ["Hands-on lab", "Script improvement", "Automation design", "Runbook automation", "Failure handling", "Scripting and coding", "Code critique", "Command-only challenge", "Find the trap", "Test strategy"],
     evidenceTypes: ["Pseudocode/code", "Inputs/outputs", "Safety checks", "Dry-run behavior"],
     responseSections: ["Goal", "Inputs", "Logic", "Safety", "Validation"],
     weakPatterns: ["no input validation", "no dry run", "manual-only answer"],
@@ -109,7 +109,7 @@ export const disciplineCatalog: DisciplineTemplate[] = [
     label: "Cloud / DevOps",
     summary: "Cloud architecture, deployments, IAM, observability, reliability, and cost trade-offs.",
     topics: ["IAM", "Networking", "Deployments", "Observability", "Cost", "Reliability"],
-    formats: ["Hands-on lab", "Architecture review", "Incident triage", "Deployment plan", "Cost/risk review"],
+    formats: ["Hands-on lab", "Architecture review", "Incident triage", "Deployment plan", "Cost/risk review", "Monitoring and observability", "Technology selection", "Migration planning", "Capacity planning", "Minimum safe fix"],
     evidenceTypes: ["Architecture assumptions", "Metrics/logs", "IAM scope", "Rollback and blast radius"],
     responseSections: ["Context", "Risk", "Evidence", "Plan", "Rollback"],
     weakPatterns: ["ignores IAM", "no rollback", "no cost or blast-radius note"],
@@ -121,7 +121,7 @@ export const disciplineCatalog: DisciplineTemplate[] = [
     label: "Data / AI",
     summary: "Data quality, analysis, model behavior, evaluation, and practical AI system review.",
     topics: ["Data cleaning", "Evaluation", "Prompting", "Model risk", "Metrics", "Pipelines"],
-    formats: ["Hands-on lab", "Analysis review", "Model evaluation", "Pipeline triage", "Risk assessment"],
+    formats: ["Hands-on lab", "Analysis review", "Model evaluation", "Pipeline triage", "Risk assessment", "Evidence ranking", "Find the trap", "Scripting and coding", "Test strategy", "Technical brief"],
     evidenceTypes: ["Assumptions", "Metrics", "Sample errors", "Validation method"],
     responseSections: ["Question", "Data assumptions", "Method", "Validation", "Limitations"],
     weakPatterns: ["metric-free claims", "no baseline", "no data caveats"],
@@ -133,7 +133,7 @@ export const disciplineCatalog: DisciplineTemplate[] = [
     label: "Applied Engineering / Troubleshooting",
     summary: "Practical fault isolation, trade-offs, maintenance planning, and systems reasoning.",
     topics: ["Fault isolation", "Root cause", "Maintenance", "Reliability", "Safety", "Documentation"],
-    formats: ["Hands-on lab", "Troubleshooting case", "Decision review", "Maintenance plan", "Root-cause analysis"],
+    formats: ["Hands-on lab", "Troubleshooting case", "Decision review", "Maintenance plan", "Root-cause analysis", "Minimum safe fix", "Failure prediction", "Evidence ranking", "Capacity planning", "Post-incident reconstruction"],
     evidenceTypes: ["Symptoms", "Tests", "Assumptions", "Risk controls"],
     responseSections: ["Observation", "Hypothesis", "Tests", "Decision", "Prevention"],
     weakPatterns: ["guess-first reasoning", "no control test", "no safety consideration"],
@@ -145,7 +145,7 @@ export const disciplineCatalog: DisciplineTemplate[] = [
     label: "Technical Writing / Documentation",
     summary: "Runbooks, reports, postmortems, procedures, and clear technical communication.",
     topics: ["Runbooks", "Postmortems", "Procedures", "Reports", "Knowledge base", "Decision records"],
-    formats: ["Hands-on lab", "Runbook creation", "Incident report", "Procedure review", "Documentation rewrite"],
+    formats: ["Hands-on lab", "Runbook creation", "Incident report", "Procedure review", "Documentation rewrite", "Runbook repair", "Technical brief", "Find the trap", "True / false with defense", "Design critique"],
     evidenceTypes: ["Audience", "Prerequisites", "Steps", "Verification and escalation criteria"],
     responseSections: ["Audience", "Purpose", "Procedure", "Validation", "Escalation"],
     weakPatterns: ["unclear audience", "missing prerequisites", "no verification criteria"],
@@ -206,6 +206,17 @@ export function disciplineSnapshot(input: {
 
 export function disciplineProfileKey(snapshot?: DisciplineSnapshot) {
   if (!snapshot) return "missing-profile";
+  const generationContext = snapshot.generationContext
+    ? {
+        topicFocus: snapshot.generationContext.topicFocus,
+        preferredFormat: snapshot.generationContext.preferredFormat,
+        durationMinutes: snapshot.generationContext.durationMinutes,
+        difficultyFloor: snapshot.generationContext.difficultyFloor,
+        teamMode: snapshot.generationContext.teamMode,
+        scheduledRecovery: snapshot.generationContext.scheduledRecovery ?? false,
+        blueprint: snapshot.generationContext.blueprint,
+      }
+    : null;
   return JSON.stringify({
     id: snapshot.id,
     topics: snapshot.topics,
@@ -221,7 +232,7 @@ export function disciplineProfileKey(snapshot?: DisciplineSnapshot) {
     avoidAreas: snapshot.avoidAreas ?? [],
     goals: snapshot.goals ?? [],
     customDiscipline: snapshot.customDiscipline ?? "",
-    generationContext: snapshot.generationContext ?? null,
+    generationContext,
   });
 }
 

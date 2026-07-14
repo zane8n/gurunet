@@ -20,7 +20,46 @@ const unsafePattern =
   /\b(write erase|reload now|format flash|delete vlan\.dat|shutdown all|disable firewall|permit ip any any|chmod 777|rm -rf \/|no spanning-tree)\b/i;
 
 const evidencePattern =
-  /\b(show|ping|traceroute|tcpdump|wireshark|journalctl|grep|awk|log|packet|screenshot|attachment|attached|pcap|rollback|risk|verify|baseline|config|interface|route|vlan|stp|ospf|bgp|acl|nat)\b/i;
+  /\b(show|ping|traceroute|tcpdump|wireshark|journalctl|grep|awk|log|packet|screenshot|attachment|attached|pcap|verify|baseline|config|interface|route|vlan|stp|ospf|bgp|acl|nat|metric|measurement|timestamp|timeline|test|assert|expected|actual|diff|requirement|constraint|claim|counterexample|calculation|sample|trace|output|result|because|indicates|demonstrates)\b/i;
+
+const riskRequiredModes = new Set([
+  "troubleshooting",
+  "configuration_build",
+  "configuration_review",
+  "pressure_triage",
+  "time_boxed_diagnostic",
+  "hardening_review",
+  "environment_admin",
+  "command_only",
+  "minimum_safe_fix",
+  "operational_decision",
+  "failure_prediction",
+  "migration_plan",
+  "post_incident_reconstruction",
+]);
+
+function assessmentRequirements(challenge?: Challenge) {
+  const blueprint = challenge?.disciplineSnapshot?.generationContext?.blueprint;
+  const interaction = blueprint?.interaction ?? "written";
+  const modeId = blueprint?.modeId ?? "operational_assessment";
+  const minWords = modeId === "command_only"
+    ? 35
+    : interaction === "code"
+      ? 70
+      : interaction === "oral"
+        ? 75
+        : modeId === "true_false_defense"
+          ? 100
+          : 80;
+  return {
+    blueprint,
+    interaction,
+    modeId,
+    minWords,
+    requiresRisk: !blueprint || riskRequiredModes.has(modeId),
+    requiresSequence: interaction === "commands" || interaction === "code" || ["migration_plan", "runbook_repair", "test_strategy"].includes(modeId),
+  };
+}
 
 const weakStopWords = new Set([
   "and",
@@ -77,11 +116,12 @@ export function isAfterHardCapWindow(submittedAt: string, deadlineAt: string) {
   return minutesAfterDeadline(submittedAt, deadlineAt) > 480;
 }
 
-export function needsVerification(content: string) {
+export function needsVerification(content: string, challenge?: Challenge) {
   const analysis = submissionAnalysis(content);
+  const requirements = assessmentRequirements(challenge);
   return (
-    analysis.wordCount < 90 ||
-    (!evidencePattern.test(analysis.plainText) && !analysis.hasStructuredEvidence)
+    analysis.wordCount < requirements.minWords ||
+    !hasModeEvidence(analysis, challenge)
   );
 }
 
@@ -91,16 +131,17 @@ function categoryScores(content: string, challenge?: Challenge) {
   const lower = plainText.toLowerCase();
   const wordCount = analysis.wordCount;
   const disciplineEvidence = hasDisciplineEvidenceSignal(lower, challenge);
+  const requirements = assessmentRequirements(challenge);
 
-  const hasSequence = /\b(first|then|next|after|finally|step)\b/i.test(plainText);
+  const hasSequence = /\b(first|then|next|after|finally|step|phase|before|following)\b/i.test(plainText);
   const hasRisk = /\b(risk|rollback|change window|impact|safe|non-disruptive)\b/i.test(
     plainText,
   );
-  const hasEvidence = evidencePattern.test(plainText) || Boolean(disciplineEvidence) || analysis.attachmentCount > 0;
+  const hasEvidence = hasModeEvidence(analysis, challenge) || Boolean(disciplineEvidence);
   const hasTradeoff = /\b(trade[- ]?off|assumption|because|therefore|however)\b/i.test(
     plainText,
   );
-  const hasLateral = /\b(native vlan|asymmetric|mtu|duplex|mac move|stp|arp|misleading|hidden|unexpected)\b/i.test(
+  const hasLateral = /\b(native vlan|asymmetric|mtu|duplex|mac move|stp|arp|misleading|hidden|unexpected|edge case|boundary|exception|counterexample|alternative|second-order|uncertain|confidence|would disprove)\b/i.test(
     lower,
   );
   const hasStructure =
@@ -110,6 +151,17 @@ function categoryScores(content: string, challenge?: Challenge) {
       analysis.bodyText,
     );
   const hasCodeOrOutput = analysis.codeBlockCount > 0 || analysis.inlineCodeCount >= 2;
+  const hasCounterEvidence = /\b(disprove|cannot prove|does not prove|alternative|counterexample|unless|except|confidence|uncertain|limitation)\b/i.test(lower);
+  const hasValidation = /\b(verify|validate|confirm|test|assert|compare|measure|expected|pass criteria|acceptance criteria)\b/i.test(lower);
+  const sectionHits = (requirements.blueprint?.responseSections ?? challenge?.disciplineSnapshot?.responseSections ?? [])
+    .filter((section) => meaningfulWords(section).some((word) => lower.includes(word)))
+    .length;
+  const hasExpectedCoverage = sectionHits >= Math.min(2, requirements.blueprint?.responseSections.length ?? 2);
+  const hasRequiredWorkProduct = requirements.interaction === "code"
+    ? analysis.codeBlockCount > 0 || /\b(function|script|pseudocode|test case|input|output)\b/i.test(lower)
+    : requirements.interaction === "commands"
+      ? hasCodeOrOutput || /(^|\n)\s*(show|set|no |ip |sudo |systemctl|kubectl|terraform|ansible|git |curl |python |node )/im.test(plainText)
+      : hasTradeoff || hasCounterEvidence || hasEvidence;
   const hasExplainedAttachment =
     analysis.attachmentCount > 0 &&
     /\b(screenshot|attached|attachment|capture|output|evidence|shows|indicates)\b/i.test(
@@ -117,32 +169,49 @@ function categoryScores(content: string, challenge?: Challenge) {
     );
 
   return {
-    creativity: clampScore(3 + Number(hasTradeoff) + Number(hasRisk) + Number(wordCount > 220)),
+    creativity: clampScore(2 + Number(hasTradeoff) + Number(hasLateral) + Number(hasCounterEvidence) + Number(wordCount > requirements.minWords * 2)),
     ingenuity: clampScore(
       2 +
         Number(hasEvidence) +
-        Number(hasSequence) +
-        Number(hasRisk) +
-        Number(hasCodeOrOutput) +
-        Number(wordCount > 260),
+        Number(hasRequiredWorkProduct) +
+        Number(hasValidation) +
+        Number(requirements.requiresSequence ? hasSequence : hasTradeoff) +
+        Number(wordCount > requirements.minWords),
     ),
     reporting: clampScore(
       2 +
         Number(hasStructure) +
         Number(hasTradeoff) +
-        Number(hasRisk) +
+        Number(hasExpectedCoverage) +
+        Number(requirements.requiresRisk ? hasRisk : hasCounterEvidence) +
         Number(hasExplainedAttachment) +
-        Number(wordCount > 180),
+        Number(wordCount > requirements.minWords),
     ),
-    alienness: clampScore(2 + Number(hasLateral) + Number(hasTradeoff) + Number(lower.includes("not assume"))),
+    alienness: clampScore(2 + Number(hasLateral) + Number(hasTradeoff) + Number(hasCounterEvidence) + Number(/\b(assume|assumption)\b/i.test(lower))),
     neatness: clampScore(
       3 +
         Number(hasStructure) +
         Number(analysis.codeBlockCount <= 3) +
-        Number(wordCount >= 120 && wordCount <= 850) +
+        Number(wordCount >= requirements.minWords && wordCount <= 1200) +
         Number(!lower.includes("maybe maybe")),
     ),
   };
+}
+
+function hasModeEvidence(
+  analysis: ReturnType<typeof submissionAnalysis>,
+  challenge?: Challenge,
+) {
+  const requirements = assessmentRequirements(challenge);
+  const plainText = analysis.plainText;
+  if (analysis.attachmentCount > 0 || analysis.hasStructuredEvidence) return true;
+  if (requirements.interaction === "code") {
+    return analysis.codeBlockCount > 0 || /\b(function|script|pseudocode|test case|expected output|edge case)\b/i.test(plainText);
+  }
+  if (requirements.interaction === "commands") {
+    return analysis.codeBlockCount > 0 || analysis.inlineCodeCount >= 2 || /(^|\n)\s*(show|set|no |ip |sudo |systemctl|journalctl|kubectl|terraform|ansible|git |curl |python |node )/im.test(plainText);
+  }
+  return evidencePattern.test(plainText) || hasDisciplineEvidenceSignal(plainText.toLowerCase(), challenge);
 }
 
 function clampScore(score: number) {
@@ -153,6 +222,7 @@ function technicalCapFor(content: string, challenge?: Challenge): TechnicalCap {
   const analysis = submissionAnalysis(content);
   const plainText = analysis.plainText;
   const lower = plainText.toLowerCase();
+  const requirements = assessmentRequirements(challenge);
   const hasDisciplineEvidence = hasDisciplineEvidenceSignal(lower, challenge);
   const hasUnsafeDisciplinePattern = challenge?.disciplineSnapshot?.unsafePatterns?.some((item) =>
     hasGovernedPattern(lower, item),
@@ -161,12 +231,12 @@ function technicalCapFor(content: string, challenge?: Challenge): TechnicalCap {
     hasGovernedPattern(lower, item),
   );
   const hasSomeOperationalProof =
-    evidencePattern.test(plainText) ||
+    hasModeEvidence(analysis, challenge) ||
     hasDisciplineEvidence ||
     analysis.hasStructuredEvidence;
   if (unsafePattern.test(plainText) || hasUnsafeDisciplinePattern) return "UNSAFE";
   if (analysis.attachmentCount > 0 && analysis.wordCount < 45) return "INCOMPLETE";
-  if (analysis.wordCount < 50) return "INCOMPLETE";
+  if (analysis.wordCount < Math.max(30, Math.floor(requirements.minWords * 0.6))) return "INCOMPLETE";
   if (!hasSomeOperationalProof) return "MOSTLY_WRONG";
   if (hasWeakDisciplinePattern) return "INCOMPLETE";
   return "NONE";
@@ -285,7 +355,7 @@ export function gradeSubmission({ challenge, submission, user }: GradeInput): Gr
     verdict: verdictFor(finalScore),
     correction: correctionFor(technicalCap, submission.content, challenge),
     contentionNotes: contentionNotes(scores, technicalCap, latePenalty),
-    nextImprovementTarget: nextTarget(scores, technicalCap),
+    nextImprovementTarget: nextTarget(scores, technicalCap, challenge),
     pisChange,
     previousPis: user.pisScore,
     updatedPis,
@@ -385,24 +455,29 @@ export function createNotebookEntry(challenge: Challenge, grade: Grade): Noteboo
 function correctionFor(cap: TechnicalCap, content: string, challenge?: Challenge) {
   const plainText = submissionPlainText(content);
   const analysis = submissionAnalysis(content);
+  const requirements = assessmentRequirements(challenge);
   if (cap === "UNSAFE") {
     return "The answer contains an unsafe operational recommendation. A safe response must verify state, reduce blast radius, and include rollback before any disruptive change.";
   }
   if (cap === "MOSTLY_WRONG") {
-    const evidence = challenge?.disciplineSnapshot?.evidenceTypes?.join(", ") || "command-level verification, scenario-specific reasoning, and a defensible recommendation";
+    const evidence = challenge?.disciplineSnapshot?.evidenceTypes?.join(", ") || "scenario-specific artifacts, explicit reasoning, and a testable work product";
     return `The answer is not tied to usable evidence. It needs ${evidence}.`;
   }
   if (cap === "INCOMPLETE") {
-    const sections = challenge?.disciplineSnapshot?.responseSections?.join(", ") || "hypothesis, verification sequence, risks, rollback, and final recommendation";
+    const sections = (
+      requirements.blueprint?.responseSections ??
+      challenge?.disciplineSnapshot?.responseSections ??
+      ["position", "evidence", "work product", "validation", "limits"]
+    ).join(", ");
     return `The answer is too incomplete to prove competence. Provide ${sections}.`;
   }
   if (analysis.attachmentCount > 0 && !/\b(screenshot|attached|attachment|shows|indicates|evidence)\b/i.test(plainText)) {
     return "The submission includes attached evidence, but the answer does not explain what the evidence proves. Reference each important image or file and tie it to a decision.";
   }
-  if (!/\brollback|risk|impact\b/i.test(plainText)) {
+  if (requirements.requiresRisk && !/\brollback|risk|impact|reversal|stop condition\b/i.test(plainText)) {
     return "The technical direction is usable, but the operational risk and rollback plan are underdeveloped.";
   }
-  return "The submission provides a defensible technical path. Improve by making the verification order tighter and explicitly separating facts from assumptions.";
+  return `The submission provides a defensible ${requirements.blueprint?.modeLabel?.toLowerCase() ?? "technical"} response. Improve by making the evidence-to-conclusion links tighter and explicitly separating facts from assumptions.`;
 }
 
 function contentionNotes(scores: ReturnType<typeof categoryScores>, cap: TechnicalCap, late: number) {
@@ -415,8 +490,15 @@ function contentionNotes(scores: ReturnType<typeof categoryScores>, cap: Technic
   return notes;
 }
 
-function nextTarget(scores: ReturnType<typeof categoryScores>, cap: TechnicalCap) {
-  if (cap !== "NONE") return "Prove claims with command-level evidence before recommending changes.";
+function nextTarget(
+  scores: ReturnType<typeof categoryScores>,
+  cap: TechnicalCap,
+  challenge?: Challenge,
+) {
+  if (cap !== "NONE") {
+    const evidence = challenge?.disciplineSnapshot?.evidenceTypes?.slice(0, 2).join(" and ") ?? "scenario-specific evidence";
+    return `Prove the main claims with ${evidence} before finalizing the required work product.`;
+  }
   const entries = Object.entries(scores).sort((a, b) => a[1] - b[1]);
-  return `Raise ${entries[0][0]} by adding more scenario-specific operational reasoning.`;
+  return `Raise ${entries[0][0]} by making the ${challenge?.disciplineSnapshot?.generationContext?.blueprint?.modeLabel?.toLowerCase() ?? "assessment"} response more evidence-specific and testable.`;
 }
