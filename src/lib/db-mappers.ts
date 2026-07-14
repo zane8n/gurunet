@@ -75,6 +75,7 @@ export function fromDbChallenge(challenge: DbChallenge): Challenge {
     isRecovery: challenge.isRecovery,
     isPressure: challenge.isPressure,
     disciplineSnapshot: parseDisciplineSnapshot(challenge.disciplineSnapshot),
+    recoveryContext: parseRecoveryContext(challenge.recoveryContext),
     createdAt: challenge.createdAt.toISOString(),
   };
 }
@@ -115,6 +116,7 @@ export function fromDbGrade(grade: DbGrade): Grade {
     contentionNotes: grade.contentionNotes,
     nextImprovementTarget: grade.nextImprovementTarget,
     rubricSnapshot: parseRubricSnapshot(grade.rubricSnapshot),
+    recoveryOutcome: parseRecoveryOutcome(grade.recoveryOutcome),
     pisChange: grade.pisChange,
     previousPis: grade.previousPis,
     updatedPis: grade.updatedPis,
@@ -156,6 +158,16 @@ function parseDisciplineSnapshot(value: unknown): DisciplineSnapshot | undefined
 function parseRubricSnapshot(value: unknown): Grade["rubricSnapshot"] {
   if (!value || typeof value !== "object") return undefined;
   return value as Grade["rubricSnapshot"];
+}
+
+function parseRecoveryContext(value: unknown): Challenge["recoveryContext"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Challenge["recoveryContext"];
+}
+
+function parseRecoveryOutcome(value: unknown): Grade["recoveryOutcome"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Grade["recoveryOutcome"];
 }
 
 export function fromDbLedgerEvent(event: DbLedgerEvent): LedgerEvent {

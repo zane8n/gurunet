@@ -1,4 +1,4 @@
-import type { Challenge, Difficulty, User } from "@/lib/domain";
+import type { Challenge, Difficulty, RecoveryContext, User } from "@/lib/domain";
 import { createId } from "@/lib/store";
 import {
   challengeDateKeyFor,
@@ -246,6 +246,7 @@ export function buildChallengeFromAi({
   recovery,
   pressure,
   ai,
+  recoveryContext,
 }: {
   user: User;
   dateKey: string;
@@ -265,12 +266,11 @@ export function buildChallengeFromAi({
     solution: string;
     antiGenericRequirement: string;
   };
+  recoveryContext?: RecoveryContext;
 }): Challenge {
-  const hasRecoveryTask = /\b(task 2|recovery component|recovery task)\b/i.test(ai.scenario);
-  const scenario =
-    recovery && !hasRecoveryTask
-      ? `${ai.scenario}\n\nTask 2 - Recovery retrieval\nIn 3-5 lines, identify one relevant failure mode from a recent weak area, state the evidence that would expose it, and give one validation step.`
-      : ai.scenario;
+  const scenario = recovery
+    ? ensureRecoveryTask(ai.scenario, recoveryContext)
+    : ai.scenario;
   const expectedAnswerFormat =
     recovery && !/\brecovery\b/i.test(ai.expectedAnswerFormat)
       ? `${ai.expectedAnswerFormat}\n\nRecovery task`
@@ -298,13 +298,33 @@ export function buildChallengeFromAi({
     status: pressure ? "Pressure Challenge" : recovery ? "Recovery Challenge" : "Active",
     isRecovery: recovery,
     isPressure: pressure,
+    recoveryContext,
     createdAt: nowIso(),
   };
 }
 
+function ensureRecoveryTask(scenario: string, context?: RecoveryContext) {
+  const task = context?.task ??
+    "Identify one relevant failure mode from a recent weak area, state the evidence that would expose it, and give one validation step.";
+  if (scenario.includes(task)) return scenario;
+
+  const block = [
+    "Task 2 - Targeted reinforcement",
+    ...(context?.target ? [`Focus: ${context.target}`] : []),
+    task,
+    "",
+  ].join("\n");
+  const existingBlock = /(?:Task 2\s*[-:]?[^\n]*|Recovery Component|Recovery Task)[\s\S]*?(?=\n(?:Optional Lab|Submission Deadline)\b|$)/i;
+  if (existingBlock.test(scenario)) return scenario.replace(existingBlock, block.trimEnd());
+  const deadline = /\nSubmission Deadline\b/i;
+  return deadline.test(scenario)
+    ? scenario.replace(deadline, `\n${block}Submission Deadline`)
+    : `${scenario}\n\n${block.trimEnd()}`;
+}
+
 export function generateChallenge(
   user: User,
-  options?: { recovery?: boolean; pressure?: boolean; dateKey?: string },
+  options?: { recovery?: boolean; pressure?: boolean; dateKey?: string; recoveryContext?: RecoveryContext },
 ) {
   const timezone = getUserTimezone(user.timezone);
   const today = options?.dateKey ?? challengeDateKeyFor(new Date(), timezone);
@@ -321,7 +341,7 @@ export function generateChallenge(
     title: template.title,
     difficulty,
     topic: template.topic,
-    scenario: options?.recovery ? withRecoveryComponent(template.scenario) : template.scenario,
+    scenario: options?.recovery ? withRecoveryComponent(template.scenario, options.recoveryContext) : template.scenario,
     objective: template.objective,
     constraints: template.constraints,
     allowedTools: template.allowedTools,
@@ -337,19 +357,20 @@ export function generateChallenge(
     status: options?.pressure ? "Pressure Challenge" : options?.recovery ? "Recovery Challenge" : "Active",
     isRecovery: Boolean(options?.recovery),
     isPressure: Boolean(options?.pressure),
+    recoveryContext: options?.recoveryContext,
     createdAt: nowIso(),
   };
 
   return challenge;
 }
 
-function withRecoveryComponent(scenario: string) {
+function withRecoveryComponent(scenario: string, context?: RecoveryContext) {
   return scenario.replace(
     "Submission Deadline\n15:00 local time. Do not reveal the solution until after submission.",
     [
-      "Recovery Component",
-      "Previous missed topic: ACL troubleshooting.",
-      "In 3-5 lines explain why placing a deny statement before a permit statement in an ACL can block otherwise valid traffic.",
+      "Task 2 - Targeted reinforcement",
+      context?.target ? `Focus: ${context.target}` : "Focus: a recent weak area",
+      context?.task ?? "Identify a relevant failure mode, the evidence that exposes it, and one validation step.",
       "",
       "Submission Deadline",
       "15:00 local time. Do not reveal the solution until after submission.",

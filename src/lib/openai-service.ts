@@ -5,7 +5,7 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
 } from "openai/resources/chat/completions";
 import type { Response as OpenAIResponse } from "openai/resources/responses/responses";
-import type { Challenge, Difficulty, DisciplineSnapshot, Grade, Submission, TechnicalCap, User } from "@/lib/domain";
+import type { Challenge, Difficulty, DisciplineSnapshot, Grade, RecoveryContext, Submission, TechnicalCap, User } from "@/lib/domain";
 import { generateChallenge } from "@/lib/challenges";
 import { requireRuntimeEnv, getRuntimeEnv } from "@/lib/runtime-env";
 import { summarizeSubmissionForAi } from "@/lib/submission-content";
@@ -186,6 +186,7 @@ type ChallengeContext = {
   topicFocus?: string;
   durationMinutes?: number;
   disciplineSnapshot?: DisciplineSnapshot;
+  recoveryContext?: RecoveryContext;
 };
 
 let deepSeekClient: OpenAI | null = null;
@@ -430,10 +431,11 @@ function openAiChallengeInput(context: ChallengeContext) {
       "Require assumptions, verification, evidence, trade-offs, risk, rollback, and a defensible recommendation when relevant.",
       "Expected answer format must be a numbered outline with section names, not a sentence.",
       "Submission requirements must state exactly what will be graded.",
-      "When recoveryRequired is true, include a short recovery component based on recentWeaknesses or a nearby foundational concept. Keep it separate from the main incident.",
+      "When recoveryRequired is true, reproduce the supplied recoveryContext.task faithfully as a separate short task. Do not substitute a generic or previously used recovery question.",
       "When the discipline generation context says scheduledRecovery, the prompt must visibly contain exactly two tasks: Task 1 is the normal full assessment and Task 2 is a shorter retrieval/recovery task. Both must be represented in the expected answer format and submission requirements.",
       "Do not reveal the solution in the prompt-facing fields.",
       "The hidden solution must teach: correct approach, false paths, verification commands/checks, common vague answers, and what a strong submission should contain.",
+      "When recoveryRequired is true, the hidden solution must include a separate, direct teaching answer to recoveryContext.task and explain the evidence that establishes it.",
       "The antiGenericRequirement must force scenario-specific evidence and penalize hand-wavy answers.",
       "Deadline is 15:00 local time and handled by the app; do not say noon.",
     ],
@@ -445,6 +447,7 @@ function openAiChallengeInput(context: ChallengeContext) {
       recoveryRequired: context.recovery,
       pressureChallenge: context.pressure,
       recentWeaknesses: context.recentWeaknesses,
+      recoveryContext: context.recoveryContext,
       track: context.track ?? discipline?.id ?? "technical capacity",
       topicFocus: context.topicFocus,
       durationMinutes: context.durationMinutes,
@@ -590,6 +593,7 @@ export async function generateAiCritique(challenge: Challenge, submission: Submi
           solution: challenge.solution,
           antiGenericRequirement: challenge.antiGenericRequirement,
           disciplineSnapshot: challenge.disciplineSnapshot,
+          recoveryContext: challenge.recoveryContext,
         },
         submission: summarizeSubmissionForAi(submission.content),
         deterministicGrade: {
@@ -606,6 +610,7 @@ export async function generateAiCritique(challenge: Challenge, submission: Submi
           verdict: grade.verdict,
           existingCorrection: grade.correction,
           existingContentionNotes: grade.contentionNotes,
+          recoveryOutcome: grade.recoveryOutcome,
         },
         outputGuidance: {
           correction:
@@ -836,7 +841,7 @@ export async function generateExaminerChatReply(input: {
       messages: [
         {
           role: "system",
-          content: `${lecturerPolicy} You are the authoritative examiner for this user's challenge. You may answer questions, clarify rules, acknowledge late/excuse/context, resolve grading disputes, and explain applied behavior changes. The backend has already applied every allowed action listed in appliedActions. State the concrete outcome now. Never promise escalation, a future update, a 24-hour wait, or a grade change that is not listed. Return only JSON.`,
+          content: `${lecturerPolicy} You are the authoritative examiner for this user's challenge. You may answer questions, clarify rules, acknowledge late/excuse/context, resolve grading disputes, and explain governed changes to challenges, study profiles, reminders, privacy, or learning settings. The backend has already applied or rejected every action listed in appliedActions after checking evidence and safeguards. State the concrete outcome now. Never claim direct database authority beyond those listed actions. Never promise escalation, a future update, a 24-hour wait, or a grade change that is not listed. Return only JSON.`,
         },
         {
           role: "user",
@@ -863,6 +868,8 @@ export async function generateExaminerChatReply(input: {
               "Be conversational but direct.",
               "If the user asks for rule clarification, explain the active rule.",
               "For grade disputes, treat grade_adjusted as final confirmation that the database and ledgers changed; treat grade_review_upheld as a completed review with no change; treat grade_review_unavailable as no change.",
+              "For challenge reformulation, explain the accepted evidence or state precisely what auditable defect is still required.",
+              "When a profile, reminder, privacy, or challenge setting action is listed, confirm its exact persisted value without adding an unlisted change.",
               "Do not ask the user to re-quote evidence that is already present in the submitted response and was checked by the backend review.",
               "Explain continuity credits as limited protection for genuine busy periods, not as a substitute for completing challenges.",
               "If the user states future preferences, mention what changed if an action was applied.",
@@ -897,9 +904,9 @@ function fallbackExaminerReply(input: {
     return "Your lab preference is part of the active study profile. Future challenges should be framed as hands-on exercises with setup, evidence capture, and validation. If a generated challenge misses that shape, ask for one regeneration.";
   }
   if (/\?/.test(input.message)) {
-    return "I can clarify the active challenge rules, deadline behavior, grading expectations, or adjust future challenge settings when you state a clear preference.";
+    return "I can clarify active rules, review a grade against the complete response, or apply governed changes to the challenge, study profile, reminders, privacy, and learning settings when you state the requested change and supporting evidence.";
   }
-  return "Message received. If you want me to adjust the system, state the change plainly: track, duration, difficulty floor, recovery mode, team mode, late notice, or excuse reason.";
+  return "Message received. State the requested outcome and why the current challenge, grade, profile, reminder, or rule should change. I will apply it only when the backend can validate the request and its evidence.";
 }
 
 function fallbackDisciplineReply(input: {
@@ -921,8 +928,9 @@ export function templateFallbackChallenge(
   recovery: boolean,
   pressure: boolean,
   dateKey?: string,
+  recoveryContext?: RecoveryContext,
 ) {
-  return generateChallenge(user, { recovery, pressure, dateKey });
+  return generateChallenge(user, { recovery, pressure, dateKey, recoveryContext });
 }
 
 function logAiFallback(message: string, error: unknown, provider: "deepseek" | "openai" = "deepseek") {

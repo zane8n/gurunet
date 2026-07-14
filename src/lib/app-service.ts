@@ -2,12 +2,12 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import type {
   Challenge,
-  DisciplineRecord,
   DisciplineSnapshot,
   Difficulty,
   Grade,
   MarketplaceChallenge,
   RetentionSnapshot,
+  RecoveryContext,
   StudyProfile,
   User,
 } from "@/lib/domain";
@@ -29,7 +29,6 @@ import { createId } from "@/lib/store";
 import { prisma } from "@/lib/prisma";
 import {
   fromDbChallenge,
-  fromDbDisciplineRecord,
   fromDbGrade,
   fromDbMarketplaceChallenge,
   fromDbNotebookEntry,
@@ -50,6 +49,7 @@ import {
 } from "@/lib/disciplines";
 import { enqueueAiJob } from "@/lib/ai-jobs";
 import { buildSubmissionContent, type SubmissionAttachment } from "@/lib/submission-content";
+import { assessRecoveryOutcome, selectRecoveryContext } from "@/lib/recovery";
 import {
   challengeDateKeyFor,
   dateKeyFor,
@@ -632,6 +632,14 @@ export async function getOrCreateTodayChallenge(user: User) {
     today,
     scheduledRecovery,
   );
+  const recoveryContext = await recoveryContextForUser({
+    userId: user.id,
+    dateKey: today,
+    discipline,
+    scheduledAfterRest: scheduledRecovery,
+    manualRequested: settings.recoveryMode,
+  });
+  const recoveryRequired = Boolean(recoveryContext);
 
   const existing = await prisma.challenge.findFirst({
     where: { userId: user.id, dateKey: today },
@@ -662,6 +670,7 @@ export async function getOrCreateTodayChallenge(user: User) {
             status: "RestDay",
             isRecovery: false,
             isPressure: false,
+            recoveryContext: Prisma.DbNull,
             disciplineSnapshot: discipline,
           },
         })
@@ -696,7 +705,9 @@ export async function getOrCreateTodayChallenge(user: User) {
     const canRefreshForProfile =
       existing.submissions.length === 0 &&
       existing.grades.length === 0 &&
-      disciplineProfileKey(existingDomain.disciplineSnapshot) !== disciplineProfileKey(discipline);
+      (disciplineProfileKey(existingDomain.disciplineSnapshot) !== disciplineProfileKey(discipline) ||
+        existingDomain.isRecovery !== recoveryRequired ||
+        existingDomain.recoveryContext?.targetKey !== recoveryContext?.targetKey);
 
     if (canRefreshForProfile) {
       const recentGrades = await prisma.grade.findMany({
@@ -708,9 +719,10 @@ export async function getOrCreateTodayChallenge(user: User) {
       const recentWeaknesses = recentGrades.map((grade) => grade.nextImprovementTarget);
       const refreshed = createDailyChallenge(currentUser, {
         dateKey: today,
-        recovery: scheduledRecovery || existing.isRecovery || settings.recoveryMode,
+        recovery: recoveryRequired,
         pressure: existing.isPressure,
         recentWeaknesses,
+        recoveryContext: recoveryContext ?? undefined,
         settings,
         discipline,
       });
@@ -732,6 +744,9 @@ export async function getOrCreateTodayChallenge(user: User) {
           status: toDbStatus(refreshed.status),
           isRecovery: refreshed.isRecovery,
           isPressure: refreshed.isPressure,
+          recoveryContext: recoveryContext
+            ? (recoveryContext as unknown as Prisma.InputJsonValue)
+            : Prisma.DbNull,
           disciplineSnapshot: discipline,
         },
       });
@@ -748,8 +763,10 @@ export async function getOrCreateTodayChallenge(user: User) {
           durationMinutes: settings.durationMinutes,
           disciplineSnapshot: discipline,
           recentWeaknesses,
+          recoveryContext,
         },
       );
+      await consumeManualRecoveryRequest(user.id, settings.recoveryMode, recoveryRequired);
       return fromDbChallenge(updated);
     }
 
@@ -757,23 +774,18 @@ export async function getOrCreateTodayChallenge(user: User) {
     return fromDbChallenge(normalized);
   }
 
-  const [records, recentGrades] = await Promise.all([
-    prisma.weeklyDisciplineRecord.findMany({ where: { userId: user.id } }),
-    prisma.grade.findMany({
+  const recentGrades = await prisma.grade.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
       take: 3,
       select: { nextImprovementTarget: true, createdAt: true },
-    }),
-  ]);
+    });
   const challenge = createDailyChallenge(currentUser, {
     dateKey: today,
-    recovery:
-      scheduledRecovery ||
-      settings.recoveryMode ||
-      needsRecovery(records.map(fromDbDisciplineRecord), currentUser),
+    recovery: recoveryRequired,
     pressure: false,
     recentWeaknesses: recentGrades.map((grade) => grade.nextImprovementTarget),
+    recoveryContext: recoveryContext ?? undefined,
     settings,
     discipline,
   });
@@ -799,6 +811,9 @@ export async function getOrCreateTodayChallenge(user: User) {
       isRecovery: challenge.isRecovery,
       isPressure: challenge.isPressure,
       disciplineSnapshot: discipline,
+      recoveryContext: recoveryContext
+        ? (recoveryContext as unknown as Prisma.InputJsonValue)
+        : undefined,
       createdAt: new Date(challenge.createdAt),
     },
   });
@@ -813,7 +828,10 @@ export async function getOrCreateTodayChallenge(user: User) {
     durationMinutes: settings.durationMinutes,
     disciplineSnapshot: discipline,
     recentWeaknesses: recentGrades.map((grade) => grade.nextImprovementTarget),
+    recoveryContext,
   });
+
+  await consumeManualRecoveryRequest(user.id, settings.recoveryMode, recoveryRequired);
 
   return fromDbChallenge(created);
 }
@@ -1502,15 +1520,16 @@ async function applyExaminerActions(
   const lower = message.toLowerCase();
   const nextSettings = { ...settings };
   let settingsChanged = false;
+  let profile = await safeFindStudyProfile(user.id);
   const preferenceIntent =
-    /\b(prefer|set|switch|change|make|future|next challenge|focus my|study|configure)\b/i.test(message);
+    /\b(prefer|set|switch|change|make|future|next challenge|focus my|study|configure|add|remove|stop|start)\b/i.test(message);
 
-  const track = preferenceIntent ? inferTrack(lower) : null;
+  const disciplineIntent = /\b(?:switch|change|set|move)\b[\s\S]{0,40}\b(?:discipline|track|field)\b|\bstudy\b[\s\S]{0,30}\binstead\b/i.test(message);
+  const track = disciplineIntent ? inferTrack(lower) : null;
   if (track) {
     nextSettings.track = track;
     settingsChanged = true;
     actions.push({ type: "settings.track", summary: `Future challenge track set to ${trackLabel(track)}.` });
-    const profile = await safeFindStudyProfile(user.id);
     if (profile) {
       const template = getDiscipline(track);
       await prisma.userStudyProfile.update({
@@ -1528,11 +1547,11 @@ async function applyExaminerActions(
         type: "profile.discipline",
         summary: `Study profile discipline updated to ${trackLabel(track)} with governed topics, formats, and evidence standards reset for that domain.`,
       });
+      profile = await safeFindStudyProfile(user.id);
     }
   }
 
-  if (preferenceIntent && /\b(lab|hands-on|practical exercise|practical lab)\b/i.test(message)) {
-    const profile = await safeFindStudyProfile(user.id);
+  if (preferenceIntent && !/\b(remove|stop|do not|don't|less)\b/i.test(message) && /\b(lab|hands-on|practical exercise|practical lab)\b/i.test(message)) {
     if (profile) {
       const template = getDiscipline(profile.primaryDiscipline);
       const labFormat = template.formats.find((format) => /\blab|hands-on\b/i.test(format));
@@ -1547,12 +1566,85 @@ async function applyExaminerActions(
           type: "profile.format",
           summary: `${labFormat} added to the study profile. Future challenges will prefer practical setup, task, evidence capture, and validation when suitable.`,
         });
+        profile = await safeFindStudyProfile(user.id);
       }
     }
   }
 
+  if (profile) {
+    const template = getDiscipline(profile.primaryDiscipline);
+    const mentionedTopic = mentionedCatalogValue(message, template.topics);
+    const clearTopicFocus = /\b(clear|remove|stop using|no fixed)\b.*\b(topic|focus)\b/i.test(message);
+    if (clearTopicFocus) {
+      nextSettings.topicFocus = "";
+      settingsChanged = true;
+      actions.push({ type: "settings.topicFocus", summary: "The fixed topic focus was removed; future challenges will rotate governed profile topics." });
+    } else if (mentionedTopic && /\b(focus|prioriti[sz]e|concentrate|next challenge|more work on)\b/i.test(message)) {
+      nextSettings.topicFocus = mentionedTopic;
+      settingsChanged = true;
+      const rankedTopics = [mentionedTopic, ...profile.rankedTopics.filter((item) => item !== mentionedTopic)];
+      await prisma.userStudyProfile.update({
+        where: { userId: user.id },
+        data: { rankedTopics },
+      });
+      profile = { ...profile, rankedTopics };
+      actions.push({ type: "settings.topicFocus", summary: `${mentionedTopic} is now the first governed topic and the fixed focus for future challenges.` });
+    }
+
+    const mentionedFormat = mentionedCatalogValue(message, template.formats);
+    if (mentionedFormat && /\b(remove|stop|do not|don't|less)\b/i.test(message)) {
+      const preferredFormats = profile.preferredFormats.filter((item) => item !== mentionedFormat);
+      if (preferredFormats.length >= 2) {
+        await prisma.userStudyProfile.update({ where: { userId: user.id }, data: { preferredFormats } });
+        profile = { ...profile, preferredFormats };
+        actions.push({ type: "profile.format_removed", summary: `${mentionedFormat} was removed from preferred formats.` });
+      } else {
+        actions.push({ type: "profile.change_rejected", summary: `${mentionedFormat} was not removed because the governed profile requires at least two challenge formats.` });
+      }
+    } else if (mentionedFormat && /\b(add|prefer|more|include|use)\b/i.test(message) && !profile.preferredFormats.includes(mentionedFormat)) {
+      const preferredFormats = [mentionedFormat, ...profile.preferredFormats].slice(0, 6);
+      await prisma.userStudyProfile.update({ where: { userId: user.id }, data: { preferredFormats } });
+      profile = { ...profile, preferredFormats };
+      actions.push({ type: "profile.format_added", summary: `${mentionedFormat} was added to preferred challenge formats.` });
+    }
+
+    if (mentionedTopic && /\b(weak|struggl|need practice|need work|reinforce)\b/i.test(message) && !/\b(remove|no longer|not weak|mastered)\b/i.test(message)) {
+      const weakAreas = [mentionedTopic, ...profile.weakAreas.filter((item) => item !== mentionedTopic)].slice(0, 8);
+      const avoidAreas = profile.avoidAreas.filter((item) => item !== mentionedTopic);
+      await prisma.userStudyProfile.update({ where: { userId: user.id }, data: { weakAreas, avoidAreas } });
+      profile = { ...profile, weakAreas, avoidAreas };
+      actions.push({ type: "profile.weakArea_added", summary: `${mentionedTopic} was added as a governed reinforcement target.` });
+    } else if (mentionedTopic && /\b(remove|no longer|not weak|mastered)\b.*\b(weak|weakness|reinforcement)\b/i.test(message)) {
+      const weakAreas = profile.weakAreas.filter((item) => item !== mentionedTopic);
+      if (weakAreas.length >= 1) {
+        await prisma.userStudyProfile.update({ where: { userId: user.id }, data: { weakAreas } });
+        profile = { ...profile, weakAreas };
+        actions.push({ type: "profile.weakArea_removed", summary: `${mentionedTopic} was removed from explicit weak-area targets.` });
+      } else {
+        actions.push({ type: "profile.change_rejected", summary: `${mentionedTopic} remains because a governed profile must retain at least one explicit development target.` });
+      }
+    }
+
+    if (mentionedTopic && /\b(avoid|exclude|do not give|don't give|skip)\b/i.test(message) && !/\b(stop avoiding|remove from avoid|include again|resume)\b/i.test(message)) {
+      const avoidAreas = [mentionedTopic, ...profile.avoidAreas.filter((item) => item !== mentionedTopic)].slice(0, 8);
+      const weakAreas = profile.weakAreas.filter((item) => item !== mentionedTopic);
+      if (weakAreas.length >= 1) {
+        await prisma.userStudyProfile.update({ where: { userId: user.id }, data: { avoidAreas, weakAreas } });
+        profile = { ...profile, avoidAreas, weakAreas };
+        actions.push({ type: "profile.avoidArea_added", summary: `${mentionedTopic} will be excluded from normal challenge rotation.` });
+      } else {
+        actions.push({ type: "profile.change_rejected", summary: `${mentionedTopic} cannot be avoided because it is the profile's only remaining development target.` });
+      }
+    } else if (mentionedTopic && /\b(stop avoiding|remove from avoid|include again|resume)\b/i.test(message)) {
+      const avoidAreas = profile.avoidAreas.filter((item) => item !== mentionedTopic);
+      await prisma.userStudyProfile.update({ where: { userId: user.id }, data: { avoidAreas } });
+      profile = { ...profile, avoidAreas };
+      actions.push({ type: "profile.avoidArea_removed", summary: `${mentionedTopic} returned to the eligible topic rotation.` });
+    }
+  }
+
   const duration = lower.match(/\b(\d{2,3})\s*(min|minute|minutes)\b/);
-  if (duration) {
+  if (duration && preferenceIntent) {
     nextSettings.durationMinutes = Math.max(15, Math.min(180, Number(duration[1])));
     settingsChanged = true;
     actions.push({ type: "settings.duration", summary: `Future challenge duration set to ${nextSettings.durationMinutes} minutes.` });
@@ -1565,20 +1657,30 @@ async function applyExaminerActions(
     actions.push({ type: "settings.difficultyFloor", summary: `Difficulty floor set to ${difficulty}.` });
   }
 
-  if (/\b(recovery mode|recovery challenge|need recovery)\b/i.test(message)) {
+  if (/\b(turn off|disable|remove|cancel|stop)\b[\s\S]{0,30}\b(recovery|reinforcement)\b/i.test(message)) {
+    nextSettings.recoveryMode = false;
+    settingsChanged = true;
+    actions.push({ type: "settings.recoveryMode", summary: "The pending one-time reinforcement request was removed." });
+  } else if (preferenceIntent && /\b(recovery mode|recovery challenge|need recovery|targeted reinforcement)\b/i.test(message)) {
     nextSettings.recoveryMode = true;
     settingsChanged = true;
-    actions.push({ type: "settings.recoveryMode", summary: "Recovery mode enabled for future challenge generation." });
+    actions.push({
+      type: "settings.recoveryMode",
+      summary: "A one-time targeted reinforcement task was requested for the next generated challenge.",
+    });
   }
-  if (/\b(team mode|cohort mode|group mode)\b/i.test(message)) {
+  if (/\b(turn off|disable|remove|stop)\b[\s\S]{0,30}\b(team|cohort|group) mode\b/i.test(message)) {
+    nextSettings.teamMode = false;
+    settingsChanged = true;
+    actions.push({ type: "settings.teamMode", summary: "Team/cohort mode was disabled." });
+  } else if (preferenceIntent && /\b(team mode|cohort mode|group mode)\b/i.test(message)) {
     nextSettings.teamMode = true;
     settingsChanged = true;
     actions.push({ type: "settings.teamMode", summary: "Team/cohort mode enabled." });
   }
 
   const requestedRestDay = inferRestDay(lower);
-  if (requestedRestDay !== null) {
-    const profile = await safeFindStudyProfile(user.id);
+  if (requestedRestDay !== null && preferenceIntent) {
     if (profile && profile.restDay !== requestedRestDay) {
       await prisma.userStudyProfile.update({
         where: { userId: user.id },
@@ -1588,7 +1690,49 @@ async function applyExaminerActions(
         type: "profile.restDay",
         summary: `Weekly rest day changed to ${weekDayName(requestedRestDay)}. No assessment will be due that day, and the following day will contain two tasks.`,
       });
+      profile = { ...profile, restDay: requestedRestDay };
     }
+  }
+
+  const mentionedTimes = Array.from(message.matchAll(/\b([01]\d|2[0-3]):([0-5]\d)\b/g)).map((match) => match[0]);
+  if (/\b(remind|study reminder|study window)\b/i.test(message) && mentionedTimes[0]) {
+    await prisma.notificationPreference.upsert({
+      where: { userId: user.id },
+      update: { studyWindowReminder: true, studyWindowLocalTime: mentionedTimes[0] },
+      create: { userId: user.id, studyWindowReminder: true, studyWindowLocalTime: mentionedTimes[0] },
+    });
+    actions.push({ type: "notifications.studyWindow", summary: `The daily study-window reminder was set to ${mentionedTimes[0]} local time.` });
+  }
+  if (/\bquiet hours?\b/i.test(message) && mentionedTimes.length >= 2) {
+    await prisma.notificationPreference.upsert({
+      where: { userId: user.id },
+      update: { quietStartLocalTime: mentionedTimes[0], quietEndLocalTime: mentionedTimes[1] },
+      create: { userId: user.id, quietStartLocalTime: mentionedTimes[0], quietEndLocalTime: mentionedTimes[1] },
+    });
+    actions.push({ type: "notifications.quietHours", summary: `Quiet hours were set from ${mentionedTimes[0]} to ${mentionedTimes[1]} local time.` });
+  }
+  if (/\b(turn off|disable|stop)\b[\s\S]{0,30}\bdeadline (?:warning|reminder)s?\b/i.test(message)) {
+    await prisma.notificationPreference.upsert({
+      where: { userId: user.id },
+      update: { deadlineWarning: false },
+      create: { userId: user.id, deadlineWarning: false },
+    });
+    actions.push({ type: "notifications.deadline", summary: "Incomplete-challenge deadline warnings were disabled." });
+  }
+  if (/\b(make|set)\b[\s\S]{0,20}\bprofile\b[\s\S]{0,20}\bdiscoverable\b/i.test(message)) {
+    await prisma.userSocialSettings.upsert({
+      where: { userId: user.id },
+      update: { discoverable: true },
+      create: { userId: user.id, discoverable: true },
+    });
+    actions.push({ type: "social.discoverable", summary: "Limited profile discovery was enabled." });
+  } else if (/\b(make|set)\b[\s\S]{0,20}\bprofile\b[\s\S]{0,20}\bprivate\b|\bdisable discovery\b/i.test(message)) {
+    await prisma.userSocialSettings.upsert({
+      where: { userId: user.id },
+      update: { discoverable: false },
+      create: { userId: user.id, discoverable: false },
+    });
+    actions.push({ type: "social.private", summary: "Profile discovery was disabled; existing accepted connections are unaffected." });
   }
 
   if (settingsChanged) {
@@ -1600,30 +1744,40 @@ async function applyExaminerActions(
   }
 
   if (isChallengeReformulationRequest(message)) {
-    try {
-      await regenerateTodayChallengeOnce("examiner", user, message);
+    const evidence = await challengeReformulationEvidence(user.id, challenge, message, profile);
+    if (!evidence.accepted) {
       actions.push({
-        type: "challenge_reformulated",
-        summary: "I replaced today's unsubmitted challenge immediately. This is the one permitted examiner reformulation for the day.",
+        type: "challenge_reformulation_needs_evidence",
+        summary: evidence.reason,
       });
-    } catch (error) {
-      actions.push({
-        type: "challenge_reformulation_rejected",
-        summary:
-          error instanceof Response
-            ? await error.text()
-            : "The challenge could not be reformulated under the active safeguards.",
-      });
+    } else {
+      try {
+        await regenerateTodayChallengeOnce("examiner", user, `${evidence.reason} User statement: ${message}`);
+        actions.push({
+          type: "challenge_reformulated",
+          summary: `I replaced today's unsubmitted challenge immediately. ${evidence.reason} This is the one permitted examiner reformulation for the day.`,
+        });
+      } catch (error) {
+        actions.push({
+          type: "challenge_reformulation_rejected",
+          summary:
+            error instanceof Response
+              ? await error.text()
+              : "The challenge could not be reformulated under the active safeguards.",
+        });
+      }
     }
   }
 
-  if (/\b(late|delay|delayed|after deadline|cannot submit on time|won't submit on time|will submit later)\b/i.test(message)) {
+  const lateNoticeIntent = /\b(?:i(?:'m| am| will|'ll| cannot| can't| won't| was)?\s+(?:be\s+)?(?:late|delayed)|cannot submit on time|can't submit on time|won't submit on time|will submit later)\b/i.test(message);
+  const excuseIntent = /\b(?:please excuse|request an excuse|i\s+(?:cannot|can't|am unable to|will miss|missed|was|am|have been)[\s\S]{0,40}\b(?:sick|ill|hospital|doctor|emergency|travelling|traveling|flight|work outage|unavoidable duty)\b|my\s+(?:flight|emergency|work outage)|family emergency|unavoidable duty|load shedding|power outage)\b/i.test(message);
+  if (lateNoticeIntent) {
     const notice = await recordChallengeNotice(user, challenge.id, {
       kind: "late",
       reason: message,
     });
     actions.push({ type: "late_notice", summary: notice.reply });
-  } else if (/\b(excuse|excused|sick|ill|hospital|doctor|emergency|travel|flight|work outage|real work|unavoidable|duty|load shedding|power outage)\b/i.test(message)) {
+  } else if (excuseIntent) {
     const notice = await recordChallengeNotice(user, challenge.id, {
       kind: "excuse",
       reason: message,
@@ -1631,7 +1785,92 @@ async function applyExaminerActions(
     actions.push({ type: notice.accepted ? "excuse_accepted" : "excuse_reviewed", summary: notice.reply });
   }
 
+  await recordExaminerActionAudit(user.id, challenge.id, message, actions);
   return actions;
+}
+
+async function challengeReformulationEvidence(
+  userId: string,
+  challenge: Challenge,
+  message: string,
+  profile: StudyProfile | null,
+) {
+  const lower = message.toLowerCase();
+  const explicitDefect = /\b(does not match|doesn't match|wrong discipline|wrong topic|duplicate|repeated|same challenge|contradict|impossible|missing evidence|invalid|outside my profile|not configured|not a lab|not hands-on)\b/i.test(message);
+  const preferredLab = profile?.preferredFormats.some((format) => /\b(lab|hands-on)\b/i.test(format));
+  const labMismatch = Boolean(preferredLab && /\b(not a lab|not hands-on|missing (?:the )?lab)\b/i.test(message));
+  const topicMismatch = Boolean(
+    profile &&
+    /\b(wrong topic|outside my profile|not (?:one of )?my topics)\b/i.test(message) &&
+    !profile.rankedTopics.some((topic) => topic.toLowerCase() === challenge.topic.toLowerCase()),
+  );
+  const duplicateCount = /\b(duplicate|repeated|same challenge)\b/i.test(message)
+    ? await prisma.challenge.count({
+        where: {
+          userId,
+          id: { not: challenge.id },
+          OR: [{ title: challenge.title }, { scenario: challenge.scenario }],
+        },
+      })
+    : 0;
+
+  if (duplicateCount > 0) {
+    return { accepted: true, reason: "The stored challenge history confirms a duplicate prompt." };
+  }
+  if (labMismatch) {
+    return { accepted: true, reason: "The study profile requires a lab or hands-on format and the learner identified a concrete format mismatch." };
+  }
+  if (topicMismatch) {
+    return { accepted: true, reason: "The active challenge topic falls outside the learner's governed ranked topics." };
+  }
+  if (explicitDefect && lower.trim().split(/\s+/).length >= 8) {
+    return { accepted: true, reason: "The learner supplied a specific challenge defect that can be audited against the stored brief." };
+  }
+  return {
+    accepted: false,
+    reason: "I did not replace the challenge because no auditable defect was stated. Identify the exact profile mismatch, duplicated prompt, contradiction, impossible constraint, or missing evidence in the brief.",
+  };
+}
+
+async function recordExaminerActionAudit(
+  userId: string,
+  challengeId: string,
+  message: string,
+  actions: ExaminerAction[],
+) {
+  if (actions.length === 0) return;
+  const messageKey = stableActionKey(message);
+  await prisma.supportAction.createMany({
+    data: actions.map((action, index) => ({
+      id: createId("sup"),
+      userId,
+      actor: "examiner",
+      type: `Examiner:${action.type}`,
+      dedupeKey: `examiner:${userId}:${challengeId}:${messageKey}:${index}`,
+      reason: `${action.summary} User evidence: ${message}`.slice(0, 1800),
+    })),
+    skipDuplicates: true,
+  });
+}
+
+function mentionedCatalogValue(message: string, values: string[]) {
+  const lower = message.toLowerCase();
+  return values.find((value) => {
+    const escaped = value
+      .toLowerCase()
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\s+/g, "\\s+");
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(lower);
+  }) ?? null;
+}
+
+function stableActionKey(value: string) {
+  let hash = 2166136261;
+  for (const character of value.trim().toLowerCase()) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash).toString(36);
 }
 
 function inferTrack(lower: string) {
@@ -1648,7 +1887,7 @@ function inferTrack(lower: string) {
 }
 
 function inferRestDay(lower: string) {
-  if (!/\b(rest day|break day|day off|weekly break|weekly rest)\b/.test(lower)) return null;
+  if (!/\b(rest day|break day|day off|weekly break|weekly rest|rest on|take\s+\w+\s+off)\b/.test(lower)) return null;
   const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
   const index = days.findIndex((day) => new RegExp(`\\b${day}\\b`).test(lower));
   return index >= 0 ? index : null;
@@ -1729,11 +1968,23 @@ export async function gradeExistingSubmission(user: User, submissionId: string) 
 
   const domainChallenge = fromDbChallenge(challenge);
   const domainSubmission = submissionWithAttachments(submission);
-  const grade = gradeSubmission({
+  const deterministicGrade = gradeSubmission({
     challenge: domainChallenge,
     submission: domainSubmission,
     user: fromDbUser(storedUser),
   });
+  const recoveryOutcome = assessRecoveryOutcome({
+    recoveryContext: domainChallenge.recoveryContext,
+    submission: domainSubmission.content,
+  });
+  const grade = recoveryOutcome
+    ? {
+        ...deterministicGrade,
+        recoveryOutcome,
+        ertEarned: deterministicGrade.ertEarned + recoveryOutcome.ertBonus,
+        ertBalance: deterministicGrade.ertBalance + recoveryOutcome.ertBonus,
+      }
+    : deterministicGrade;
   const rubricSnapshot =
     domainChallenge.disciplineSnapshot?.rubric ?? defaultDisciplineSnapshot().rubric;
   const notebookEntry = createNotebookEntry(domainChallenge, grade);
@@ -1769,6 +2020,9 @@ export async function gradeExistingSubmission(user: User, submissionId: string) 
         contentionNotes: grade.contentionNotes,
         nextImprovementTarget: grade.nextImprovementTarget,
         rubricSnapshot,
+        recoveryOutcome: recoveryOutcome
+          ? (recoveryOutcome as unknown as Prisma.InputJsonValue)
+          : undefined,
         pisChange: grade.pisChange,
         previousPis: grade.previousPis,
         updatedPis: grade.updatedPis,
@@ -2169,12 +2423,58 @@ export async function joinCohortChallenge(
   });
 }
 
-function needsRecovery(records: DisciplineRecord[], user: User) {
-  return records.some(
-    (record) =>
-      record.userId === user.id &&
-      (record.weekendRecoveryRequired || record.missedCount > 0),
-  );
+async function recoveryContextForUser(input: {
+  userId: string;
+  dateKey: string;
+  discipline: DisciplineSnapshot;
+  scheduledAfterRest: boolean;
+  manualRequested: boolean;
+}) {
+  const history = await prisma.challenge.findMany({
+    where: { userId: input.userId, dateKey: { lt: input.dateKey } },
+    include: { grades: { orderBy: { createdAt: "desc" }, take: 1 } },
+    orderBy: { dateKey: "desc" },
+    take: 18,
+  });
+
+  return selectRecoveryContext({
+    dateKey: input.dateKey,
+    scheduledAfterRest: input.scheduledAfterRest,
+    manualRequested: input.manualRequested,
+    disciplineLabel: input.discipline.label,
+    profileWeakAreas: input.discipline.weakAreas ?? [],
+    disciplineTopics: input.discipline.topics,
+    history: history.map((item) => {
+      const challenge = fromDbChallenge(item);
+      const grade = item.grades[0] ? fromDbGrade(item.grades[0]) : undefined;
+      return {
+        id: item.id,
+        dateKey: item.dateKey,
+        title: item.title,
+        topic: item.topic,
+        objective: item.objective,
+        status: challenge.status,
+        recoveryContext: challenge.recoveryContext,
+        grade: grade
+          ? {
+              id: grade.id,
+              finalScore: grade.finalScore,
+              technicalCap: grade.technicalCap,
+              nextImprovementTarget: grade.nextImprovementTarget,
+              recoveryOutcome: grade.recoveryOutcome,
+            }
+          : undefined,
+      };
+    }),
+  });
+}
+
+async function consumeManualRecoveryRequest(userId: string, requested: boolean, assigned: boolean) {
+  if (!requested || !assigned) return;
+  await prisma.userChallengeSettings.update({
+    where: { userId },
+    data: { recoveryMode: false },
+  });
 }
 
 function createRestDayChallenge(
@@ -2218,6 +2518,7 @@ function createDailyChallenge(
     recovery: boolean;
     pressure: boolean;
     recentWeaknesses: string[];
+    recoveryContext?: RecoveryContext;
     settings?: Awaited<ReturnType<typeof getChallengeSettings>>;
     discipline?: DisciplineSnapshot;
   },
@@ -2276,11 +2577,18 @@ function createDisciplineFallbackChallenge(
     recovery: boolean;
     pressure: boolean;
     recentWeaknesses: string[];
+    recoveryContext?: RecoveryContext;
     settings?: Awaited<ReturnType<typeof getChallengeSettings>>;
     discipline: DisciplineSnapshot;
   },
 ) {
-  const base = templateFallbackChallenge(user, options.recovery, options.pressure, options.dateKey);
+  const base = templateFallbackChallenge(
+    user,
+    options.recovery,
+    options.pressure,
+    options.dateKey,
+    options.recoveryContext,
+  );
   const discipline = options.discipline;
   if (discipline.id === "networking") return base;
 
@@ -2294,7 +2602,7 @@ function createDisciplineFallbackChallenge(
     discipline.formats[0] ??
     "Practical assessment";
   const packet = fallbackPacketForDiscipline(discipline.id, focus);
-  const recoveryTopic =
+  const recoveryTopic = options.recoveryContext?.target ??
     options.recentWeaknesses[0] ?? discipline.weakAreas?.[0] ?? focus;
   const sections = discipline.responseSections.length
     ? discipline.responseSections
@@ -2317,8 +2625,9 @@ function createDisciplineFallbackChallenge(
       "",
       ...(options.recovery
         ? [
-            "Task 2 - Recovery retrieval",
-            `In 3-5 lines, explain one important failure mode or misconception related to ${recoveryTopic}. State the evidence that would expose it and one validation step.`,
+            "Task 2 - Targeted reinforcement",
+            `Focus: ${recoveryTopic}`,
+            options.recoveryContext?.task ?? `Explain one important failure mode or misconception related to ${recoveryTopic}. State the evidence that would expose it and one validation step.`,
             "",
           ]
         : []),
@@ -2348,7 +2657,8 @@ function createDisciplineFallbackChallenge(
       ...(options.recovery ? ["Recovery retrieval task answer."] : []),
       ...discipline.evidenceTypes.slice(0, 4).map((item) => `Profile evidence expectation: ${item}.`),
     ].slice(0, 10),
-    solution: `${packet.solution}${options.recovery ? ` Recovery task: explain a concrete ${recoveryTopic} failure mode, the evidence that distinguishes it, and a validation step.` : ""}`,
+    solution: `${packet.solution}${options.recovery ? ` Reinforcement task: answer the targeted ${recoveryTopic} prompt with a correction, decisive evidence, and a validation step.` : ""}`,
+    recoveryContext: options.recoveryContext,
     antiGenericRequirement:
       `Your answer must use ${discipline.label} evidence from the brief and follow the expected sections: ${sections.join(", ")}.`,
   };
@@ -2891,8 +3201,7 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
   }
 
   const dedupeKey = `support:regen:${user.id}:${today}`;
-  const [records, recentGrades, settings, profileState] = await Promise.all([
-    prisma.weeklyDisciplineRecord.findMany({ where: { userId: user.id } }),
+  const [recentGrades, settings, profileState] = await Promise.all([
     prisma.grade.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
@@ -2911,15 +3220,20 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
     today,
     scheduledRecovery,
   );
+  const recoveryContext = await recoveryContextForUser({
+    userId: user.id,
+    dateKey: today,
+    discipline,
+    scheduledAfterRest: scheduledRecovery,
+    manualRequested: settings.recoveryMode,
+  });
   const recentWeaknesses = recentGrades.map((grade) => grade.nextImprovementTarget);
   const next = createDailyChallenge(user, {
     dateKey: today,
-    recovery:
-      scheduledRecovery ||
-      settings.recoveryMode ||
-      needsRecovery(records.map(fromDbDisciplineRecord), user),
+    recovery: Boolean(recoveryContext),
     pressure: false,
     recentWeaknesses,
+    recoveryContext: recoveryContext ?? undefined,
     settings,
     discipline,
   });
@@ -2954,6 +3268,9 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
           status: toDbStatus(next.status),
           isRecovery: next.isRecovery,
           isPressure: next.isPressure,
+          recoveryContext: recoveryContext
+            ? (recoveryContext as unknown as Prisma.InputJsonValue)
+            : Prisma.DbNull,
           disciplineSnapshot: discipline,
           createdAt: new Date(),
         },
@@ -2970,7 +3287,10 @@ async function regenerateTodayChallengeOnce(actor: string, user: User, reason?: 
       durationMinutes: settings.durationMinutes,
       disciplineSnapshot: discipline,
       recentWeaknesses,
+      recoveryContext,
     });
+
+    await consumeManualRecoveryRequest(user.id, settings.recoveryMode, Boolean(recoveryContext));
 
     return {
       action: "RegenerateTodayChallenge",
@@ -3166,7 +3486,14 @@ function buildSocialSnapshot(
     })
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
     .slice(0, 6)
-    .map(({ score: _score, ...candidate }) => candidate);
+    .map(({ id, name, handle, preferredProfession, primaryDiscipline, reasons }) => ({
+      id,
+      name,
+      handle,
+      preferredProfession,
+      primaryDiscipline,
+      reasons,
+    }));
 
   const invitationProfile = (id: string) => {
     const profile = allProfiles.find((item) => item.id === id);

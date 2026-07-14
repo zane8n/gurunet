@@ -68,6 +68,26 @@ export type DisciplineSnapshot = {
   };
 };
 
+export type RecoveryContext = {
+  targetKey: string;
+  target: string;
+  reason: string;
+  trigger: "ScheduledRest" | "ManualRequest" | "MissedChallenge" | "LowScore";
+  sourceType: "MissedChallenge" | "LowScore" | "ProfileWeakArea" | "RecentLearning";
+  sourceId?: string;
+  taskStyle: "Evidence drill" | "Error correction" | "Transfer check" | "Teach-back";
+  task: string;
+  assignedAt: string;
+};
+
+export type RecoveryOutcome = {
+  targetKey: string;
+  target: string;
+  status: "Completed" | "Attempted" | "NotAddressed";
+  evidence: string;
+  ertBonus: number;
+};
+
 export type StudyProfile = {
   userId: string;
   primaryDiscipline: string;
@@ -117,6 +137,7 @@ export type Challenge = {
   isRecovery: boolean;
   isPressure: boolean;
   disciplineSnapshot?: DisciplineSnapshot;
+  recoveryContext?: RecoveryContext;
   createdAt: string;
 };
 
@@ -153,6 +174,7 @@ export type Grade = {
   contentionNotes: string[];
   nextImprovementTarget: string;
   rubricSnapshot?: Record<string, RubricAxis>;
+  recoveryOutcome?: RecoveryOutcome;
   pisChange: number;
   previousPis: number;
   updatedPis: number;

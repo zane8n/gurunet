@@ -24,6 +24,11 @@ export const challengeSchema = z.object({
   constraints: z.array(z.string()), allowedTools: z.array(z.string()),
   expectedAnswerFormat: z.string(), submissionRequirements: z.array(z.string()),
   deadlineAt: z.string(), status: z.string(), isRecovery: z.boolean(), isPressure: z.boolean(),
+  recoveryContext: z.object({
+    targetKey: z.string(), target: z.string(), reason: z.string(), trigger: z.string(),
+    sourceType: z.string(), sourceId: z.string().optional(), taskStyle: z.string(),
+    task: z.string(), assignedAt: z.string(),
+  }).optional(),
 });
 
 export const draftSchema = z.object({

@@ -266,6 +266,7 @@ model Challenge {
   isRecovery           Boolean         @default(false)
   isPressure           Boolean         @default(false)
   disciplineSnapshot   Json?
+  recoveryContext      Json?
   createdAt            DateTime        @default(now())
 
   user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -426,6 +427,7 @@ model Grade {
   contentionNotes       String[]
   nextImprovementTarget String
   rubricSnapshot        Json?
+  recoveryOutcome       Json?
   pisChange             Float
   previousPis           Float
   updatedPis            Float

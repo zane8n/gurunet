@@ -214,6 +214,7 @@ async function runChallengeGenerationJob(payload: Record<string, unknown>) {
     topicFocus: typeof payload.topicFocus === "string" ? payload.topicFocus : undefined,
     durationMinutes: typeof payload.durationMinutes === "number" ? payload.durationMinutes : undefined,
     disciplineSnapshot: requestedSnapshot ?? currentSnapshot,
+    recoveryContext: fromDbChallenge(challenge).recoveryContext,
   });
   if (!ai) return { fallback: true, output: { skipped: "no generated challenge" } };
 
@@ -224,6 +225,7 @@ async function runChallengeGenerationJob(payload: Record<string, unknown>) {
     recovery: challenge.isRecovery,
     pressure: challenge.isPressure,
     ai,
+    recoveryContext: fromDbChallenge(challenge).recoveryContext,
   });
   await prisma.challenge.update({
     where: { id: challenge.id },

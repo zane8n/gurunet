@@ -15,7 +15,7 @@ import {
   Command,
   Download,
   FileText,
-  Github,
+  GitBranch,
   Heading2,
   ImagePlus,
   Italic,
@@ -256,7 +256,7 @@ type ExaminerMessage = {
   challengeId?: string | null;
   role: string;
   content: string;
-  actions?: unknown;
+  actions?: Array<{ type: string; summary: string }>;
   createdAt: string;
 };
 
@@ -1324,7 +1324,7 @@ export function GurunetApp() {
             <div className="mt-5 grid gap-2">
               <ProviderButton provider="google" label="Continue with Google" icon={<GoogleMark />} />
               <div className="grid gap-2 sm:grid-cols-2">
-                <ProviderButton provider="github" label="GitHub" icon={<Github size={16} />} />
+                <ProviderButton provider="github" label="GitHub" icon={<GitBranch size={16} />} />
                 <ProviderButton provider="apple" label="Apple" icon={<Apple size={16} />} />
               </div>
             </div>
@@ -1793,6 +1793,12 @@ function DashboardHero({
             )}
             <span>Next brief {nextUnlock}</span>
             <span>{dashboard.today.topic}</span>
+            {dashboard.today.recoveryContext && (
+              <span className="inline-flex items-center gap-1.5 text-amber-800">
+                <CheckCircle2 size={15} />
+                {dashboard.today.recoveryContext.taskStyle}: {dashboard.today.recoveryContext.target}
+              </span>
+            )}
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
             <button
@@ -3744,6 +3750,19 @@ function ExaminerChatModal({
                         <div className="rounded-md border border-slate-200 bg-white/85 px-3.5 py-3 text-sm leading-6 text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
                           <RichSubmissionBody body={item.content} />
                         </div>
+                        {item.actions && item.actions.length > 0 && (
+                          <div className="mt-2 grid gap-1.5">
+                            {item.actions.map((action, index) => {
+                              const rejected = /rejected|unavailable|needs_evidence|limit/.test(action.type);
+                              return (
+                                <div key={`${action.type}-${index}`} className={`flex items-start gap-2 text-xs leading-5 ${rejected ? "text-amber-800 dark:text-amber-300" : "text-cyan-800 dark:text-cyan-300"}`}>
+                                  <CheckCircle2 className="mt-0.5 shrink-0" size={14} />
+                                  <span>{action.summary}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </article>
                     </li>
                   ),
@@ -4563,6 +4582,17 @@ function GradeSummary({
   const content = (
       <div className="grid gap-4">
         {showStrip && <GradeScoreStrip grade={grade} />}
+
+        {grade.recoveryOutcome && (
+          <div className="flex items-start gap-3 border-l-2 border-cyan-700 py-1 pl-3 text-sm leading-6 text-slate-700">
+            <CheckCircle2 className="mt-0.5 shrink-0 text-cyan-700" size={17} />
+            <p>
+              <strong className="text-slate-950">Reinforcement {grade.recoveryOutcome.status.replace(/([A-Z])/g, " $1").trim().toLowerCase()}:</strong>{" "}
+              {grade.recoveryOutcome.target}. {grade.recoveryOutcome.evidence}
+              {grade.recoveryOutcome.ertBonus > 0 ? ` +${grade.recoveryOutcome.ertBonus} ERT.` : ""}
+            </p>
+          </div>
+        )}
 
         <ScoreMathPanel grade={grade} />
         <p className="rounded-md bg-cyan-50 px-3 py-2 text-sm font-semibold leading-6 text-cyan-900">
@@ -5426,7 +5456,7 @@ function VersatilityPanel({
                 type="checkbox"
                 defaultChecked={settings.recoveryMode}
               />
-              Recovery mode
+              Add targeted reinforcement to the next challenge
             </label>
             <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-white/60 px-3 py-2 text-sm text-slate-700">
               <input
@@ -5437,6 +5467,9 @@ function VersatilityPanel({
               Team/cohort mode
             </label>
           </div>
+          <p className="text-xs leading-5 text-slate-500">
+            This is a one-time request. The system chooses a recent unresolved gap, rotates the task style, records the outcome, and switches the request off after assignment.
+          </p>
           <button
             disabled={busy}
             className="h-10 w-fit rounded-md bg-cyan-700 px-4 text-sm font-semibold text-white disabled:opacity-60"
