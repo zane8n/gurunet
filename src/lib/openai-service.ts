@@ -14,6 +14,7 @@ import {
   challengeNoveltyIssues,
   type ChallengeHistorySignal,
 } from "@/lib/challenge-blueprints";
+import { buildCoherentChallengeCase } from "@/lib/challenge-cases";
 
 const challengeSchema = z.object({
   title: z.string().min(8).max(120),
@@ -349,7 +350,7 @@ async function createOpenAiChallengeCompletion(
     format: openAiChallengeResponseFormat,
     effort: openAiChallengeReasoningEffort(),
     max_output_tokens: 6200,
-    prompt_cache_key: "gurunet-challenge-v5",
+    prompt_cache_key: "gurunet-challenge-v6",
   });
 }
 
@@ -403,6 +404,9 @@ async function createOpenAiStructuredCompletion({
 function openAiChallengeInput(context: ChallengeContext, rejectionFeedback: string[] = []) {
   const discipline = context.disciplineSnapshot;
   const blueprint = discipline?.generationContext?.blueprint;
+  const caseAnchor = blueprint && discipline
+    ? buildCoherentChallengeCase(blueprint, discipline.id)
+    : undefined;
   const baseSections = blueprint?.responseSections?.length
     ? blueprint.responseSections
     : discipline?.responseSections?.length
@@ -434,13 +438,19 @@ function openAiChallengeInput(context: ChallengeContext, rejectionFeedback: stri
       modeLabel: discipline?.generationContext?.preferredFormat,
       responseSections: expectedSections,
     },
+    governedCaseAnchor: caseAnchor,
     generationRules: [
       "Respect the user's active discipline template, selected topics, preferred formats, evidence types, weak areas, avoid areas, and preference notes.",
-      "Implement every material blueprint dimension: exact focus, assessment mode, setting, practitioner role, evidence style, constraint twist, deliverable, interaction style, and response sections.",
+      "Treat generationBlueprint.primaryTopic as the technical subject. Treat generationBlueprint.emphasis and mode fields as assessment method metadata; never fuse them into a fake compound topic.",
+      "Implement every material blueprint dimension: exact technical focus, assessment mode, setting, practitioner role, evidence style, constraint twist, deliverable, interaction style, and response sections.",
       `The topic field must be exactly: ${blueprint?.focus ?? context.topicFocus ?? discipline?.topics[0] ?? "Applied technical judgment"}.`,
+      "Use governedCaseAnchor as the factual consistency floor. Preserve its concrete entities, values, causal relationships, and solvable evidence chain while reshaping the learner's activity to the selected assessment mode. Never replace it with abstract phrases such as 'one service path', 'the relevant configuration', or 'a state differs from baseline'.",
+      "governedCaseAnchor.solution is instructor-only material. Use it to keep the case answerable, but place that knowledge only in the output solution field and never reveal it in learner-facing fields.",
+      "Do not narrate or repeat promptDirective, mode definitions, profile labels, or blueprint metadata as if they were case facts. Present the actual professional situation directly.",
       "The title and scenario must be semantically distinct from every recent and same-day avoidance item. Changing hostnames, numbers, or vendor names does not make a repeated problem new.",
       "Shape the scenario around the selected mode. Troubleshooting may use symptoms and logs; configuration work needs an initial and target state; critique needs a realistic artifact; true/false defense needs 5-7 claims; evidence ranking needs mixed-strength evidence; selection needs requirements and viable options; an oral defense needs a position worth challenging.",
-      "Use at least three concrete artifacts appropriate to the mode: logs, configurations, command output, code, test failures, metrics, timelines, claims, requirements, diagrams described in text, tickets, excerpts, or measured observations.",
+      "Use at least four labelled concrete artifacts appropriate to the mode: actual logs, configurations, command output, code, test failures, metrics, timelines, claims, requirements, diagrams described in text, tickets, excerpts, or measured observations. Each artifact needs real values or exact text and must contribute to the case.",
+      "Make the evidence internally consistent: names, interfaces, addresses, timestamps, states, and expected behavior must agree across the context, artifacts, task, and hidden solution.",
       "Use plain-text headings that fit this task. Do not mechanically reuse Scenario / Evidence / Optional Lab when another structure would be clearer.",
       "Allowed tools must be a narrow allowlist of commands, references, standards, calculators, runtimes, or evidence sources actually needed by this task.",
       "Constraints must create useful professional judgment while keeping the task solvable. Include the supplied constraint twist faithfully.",
@@ -455,6 +465,7 @@ function openAiChallengeInput(context: ChallengeContext, rejectionFeedback: stri
       "When scheduledRecovery is true, the prompt must visibly contain exactly two tasks: Task 1 is the normal full assessment and Task 2 is the shorter targeted retrieval task.",
       "Do not reveal the solution in prompt-facing fields.",
       "The hidden solution must teach the selected mode comprehensively: correct work product or conclusion, evidence-to-claim mapping, false paths, verification, important limits, and what a strong submission should contain.",
+      "The objective must name the case-specific decision or work product once. Do not repeat the mode description, focus label, or deliverable in several phrasings.",
       "When recoveryRequired is true, the hidden solution must include a separate direct teaching answer to recoveryContext.task and explain the evidence that establishes it.",
       "The antiGenericRequirement must force scenario-specific evidence and penalize hand-wavy answers.",
       "Deadline is 15:00 local time and handled by the app; do not say noon.",
@@ -532,6 +543,7 @@ export async function generateAiChallenge(context: ChallengeContext) {
         title: challenge.title,
         topic: challenge.topic,
         scenario: challenge.scenario,
+        objective: challenge.objective,
         blueprint,
         history: [
           ...(context.recentChallenges ?? []),

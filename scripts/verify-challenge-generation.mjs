@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import {
   challengeNoveltyIssues,
+  CHALLENGE_BLUEPRINT_VERSION,
   selectChallengeBlueprint,
 } from "../src/lib/challenge-blueprints.ts";
+import { buildCoherentChallengeCase } from "../src/lib/challenge-cases.ts";
+import { selectRecoveryContext } from "../src/lib/recovery.ts";
 
 function discipline(id, label, topics, formats) {
   return {
@@ -33,9 +36,21 @@ const linux = discipline(
   ["systemd", "journald", "permissions", "storage", "Bash/Zsh"],
   ["Hands-on lab", "Log investigation", "Shell task"],
 );
+const governedDisciplines = [
+  networking,
+  linux,
+  discipline("cybersecurity", "Cybersecurity", ["Authentication", "Threat triage", "Hardening", "Network security", "Detection logic", "Containment"], ["Security investigation", "Hardening review", "Forensics timeline"]),
+  discipline("software_engineering", "Software Engineering", ["Debugging", "API design", "Testing", "Refactoring", "Performance", "Reliability"], ["Bug triage", "Code review", "Test plan"]),
+  discipline("automation_scripting", "Automation / Scripting", ["Bash", "Python", "Ansible", "Parsing", "Idempotency", "Error handling"], ["Scripting and coding", "Code critique", "Command-only challenge"]),
+  discipline("cloud_devops", "Cloud / DevOps", ["IAM", "Networking", "Deployments", "Observability", "Cost", "Reliability"], ["Architecture review", "Incident triage", "Minimum safe fix"]),
+  discipline("data_ai", "Data / AI", ["Data cleaning", "Evaluation", "Prompting", "Model risk", "Metrics", "Pipelines"], ["Analysis review", "Model evaluation", "Evidence ranking"]),
+  discipline("applied_engineering", "Applied Engineering / Troubleshooting", ["Fault isolation", "Root cause", "Maintenance", "Reliability", "Safety", "Documentation"], ["Troubleshooting case", "Decision review", "Failure prediction"]),
+  discipline("technical_writing", "Technical Writing / Documentation", ["Runbooks", "Postmortems", "Procedures", "Reports", "Knowledge base", "Decision records"], ["Runbook repair", "Technical brief", "Design critique"]),
+];
 
 const userHistory = [];
 const focuses = new Set();
+const signatures = new Set();
 const modes = new Set();
 const families = new Set();
 let previousPrimary = "";
@@ -47,10 +62,13 @@ for (let day = 1; day <= 45; day += 1) {
     discipline: networking,
     novelty: { recent: userHistory, sameDayGlobal: [] },
   });
-  assert.notEqual(blueprint.focus, [...focuses].at(-1), "focus must not repeat consecutively");
+  assert.equal(blueprint.version, CHALLENGE_BLUEPRINT_VERSION, "blueprint version drifted");
+  assert.equal(blueprint.focus, blueprint.primaryTopic, "assessment emphasis leaked into the technical topic");
+  assert(!blueprint.focus.includes("·"), "technical topic contains presentation metadata");
   assert.notEqual(blueprint.primaryTopic, previousPrimary, "primary topic must rotate when alternatives exist");
-  assert(!focuses.has(blueprint.focus), `focus repeated inside the 45-day test: ${blueprint.focus}`);
+  assert(!signatures.has(blueprint.signature), `blueprint signature repeated inside the 45-day test: ${blueprint.signature}`);
   focuses.add(blueprint.focus);
+  signatures.add(blueprint.signature);
   modes.add(blueprint.modeId);
   families.add(blueprint.modeFamily);
   previousPrimary = blueprint.primaryTopic;
@@ -63,6 +81,50 @@ for (let day = 1; day <= 45; day += 1) {
 }
 assert(modes.size >= 15, `expected broad mode rotation, received ${modes.size}`);
 assert(families.size >= 8, `expected broad cognitive-family rotation, received ${families.size}`);
+assert.equal(focuses.size, networking.topics.length, "topic rotation did not cover the governed catalog");
+
+const labOnly = discipline("networking", "Networking", networking.topics, ["Hands-on lab"]);
+const labAlignedModes = new Set(["configuration_build", "scripting_task", "environment_admin", "command_only"]);
+let labAlignedCount = 0;
+const labHistory = [];
+for (let day = 1; day <= 40; day += 1) {
+  const dateKey = day <= 28
+    ? `2027-01-${String(day).padStart(2, "0")}`
+    : `2027-02-${String(day - 28).padStart(2, "0")}`;
+  const blueprint = selectChallengeBlueprint({
+    userId: "lab-preference-user",
+    dateKey,
+    discipline: labOnly,
+    novelty: { recent: labHistory, sameDayGlobal: [] },
+  });
+  if (labAlignedModes.has(blueprint.modeId)) labAlignedCount += 1;
+  labHistory.unshift({ dateKey, title: blueprint.blueprintId, topic: blueprint.focus, blueprint });
+}
+assert(labAlignedCount >= 26, `lab preference was not materially respected: ${labAlignedCount}/40 aligned modes`);
+assert(labAlignedCount < 40, "format balancing removed all controlled exploration");
+
+for (const historyItem of userHistory) {
+  const blueprint = historyItem.blueprint;
+  const packet = buildCoherentChallengeCase(blueprint, networking.id);
+  const scenario = [
+    `Assessment mode: ${blueprint.modeLabel}`,
+    blueprint.promptDirective,
+    packet.background,
+    "Supplied artifacts",
+    ...packet.evidence,
+    packet.objective,
+  ].join("\n");
+  const issues = challengeNoveltyIssues({
+    title: `${blueprint.primaryTopic}: ${packet.title}`,
+    topic: blueprint.focus,
+    scenario,
+    objective: packet.objective,
+    blueprint,
+    history: [],
+  });
+  assert.deepEqual(issues, [], `coherent fallback rejected for ${blueprint.modeId}: ${issues.join(" ")}`);
+  assert.equal(packet.evidence.length, 4, "fallback packet must provide four concrete artifacts");
+}
 
 const sameDayGlobal = [];
 const globalSignatures = new Set();
@@ -91,6 +153,25 @@ const linuxBlueprint = selectChallengeBlueprint({
 });
 assert(linux.topics.includes(linuxBlueprint.primaryTopic), "Linux profile drifted outside its topic catalog");
 assert(!networking.topics.includes(linuxBlueprint.primaryTopic), "Linux profile received a networking topic");
+
+let governedCaseCount = 0;
+for (const [disciplineIndex, governed] of governedDisciplines.entries()) {
+  for (const [topicIndex, topic] of governed.topics.entries()) {
+    const blueprint = selectChallengeBlueprint({
+      userId: `governed-${governed.id}-${topicIndex}`,
+      dateKey: `2026-10-${String(disciplineIndex + 1).padStart(2, "0")}`,
+      discipline: governed,
+      requestedTopic: topic,
+      novelty: { recent: [], sameDayGlobal: [] },
+    });
+    const packet = buildCoherentChallengeCase(blueprint, governed.id);
+    assert.equal(blueprint.primaryTopic, topic, `${governed.id} did not retain its requested governed topic`);
+    assert.equal(packet.evidence.length, 4, `${governed.id}/${topic} does not have four supplied artifacts`);
+    assert(packet.evidence.every((item) => /^\[[A-D]\]/.test(item)), `${governed.id}/${topic} artifacts are not explicitly labelled`);
+    assert(packet.solution.length >= 100, `${governed.id}/${topic} teaching answer is underdeveloped`);
+    governedCaseCount += 1;
+  }
+}
 
 const focused = selectChallengeBlueprint({
   userId: "focused-user",
@@ -130,4 +211,42 @@ const validationIssues = challengeNoveltyIssues({
 assert(validationIssues.some((issue) => issue.includes("topic field")), "topic drift was not detected");
 assert(validationIssues.some((issue) => issue.includes("title repeats")), "title repetition was not detected");
 
-console.log(`Challenge generation verified: ${focuses.size} unique focuses, ${modes.size} modes, ${globalSignatures.size} same-day user blueprints.`);
+const abstractIssues = challengeNoveltyIssues({
+  title: `Pressure triage: ${focused.primaryTopic}`,
+  topic: focused.focus,
+  scenario: "A narrow but repeatable service symptom exists. The relevant configuration is present, but one counter or state transition differs from baseline. One service path fails.",
+  objective: "Use the artifacts to make a decision.",
+  blueprint: focused,
+  history: [],
+});
+assert(abstractIssues.some((issue) => issue.includes("abstract placeholder")), "abstract fallback prose was not rejected");
+assert(abstractIssues.some((issue) => issue.includes("concrete, testable artifacts")), "artifact-free prompt was not rejected");
+
+const recovery = selectRecoveryContext({
+  dateKey: "2026-09-04",
+  scheduledAfterRest: false,
+  manualRequested: false,
+  disciplineLabel: "Networking",
+  profileWeakAreas: [],
+  disciplineTopics: ["ACLs", "VLANs"],
+  history: [{
+    id: "challenge-1",
+    dateKey: "2026-09-03",
+    title: "ACL review",
+    topic: "ACL troubleshooting: Prove claims with command-level evidence before recommending changes.",
+    objective: "Identify the shadowed permit.",
+    status: "Submitted",
+    grade: {
+      id: "grade-1",
+      finalScore: 8,
+      technicalCap: "INCOMPLETE",
+      nextImprovementTarget: "Prove claims with command-level evidence before recommending changes.",
+    },
+  }],
+});
+assert(recovery, "low-score recovery was not selected");
+assert.equal(recovery.target, "ACL troubleshooting", "recovery target retained an instruction fragment");
+assert(recovery.task.includes("10 deny ip 10.10.0.0"), "ACL recovery did not provide a concrete retrieval case");
+assert(!recovery.task.includes("nearby but different case"), "legacy generic recovery wording survived");
+
+console.log(`Challenge generation verified: ${signatures.size} unique blueprints, ${governedCaseCount} governed topic cases, ${modes.size} modes, ${globalSignatures.size} same-day user blueprints.`);

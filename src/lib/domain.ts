@@ -46,6 +46,7 @@ export type ChallengeBlueprint = {
   secondaryTopic?: string;
   secondaryDiscipline?: string;
   focus: string;
+  emphasis?: string;
   modeId: string;
   modeLabel: string;
   modeFamily: string;
@@ -95,6 +96,7 @@ export type DisciplineSnapshot = {
 export type RecoveryContext = {
   targetKey: string;
   target: string;
+  skill?: string;
   reason: string;
   trigger: "ScheduledRest" | "ManualRequest" | "MissedChallenge" | "LowScore";
   sourceType: "MissedChallenge" | "LowScore" | "ProfileWeakArea" | "RecentLearning";

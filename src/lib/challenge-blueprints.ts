@@ -1,6 +1,6 @@
 import type { ChallengeBlueprint, DisciplineSnapshot } from "@/lib/domain";
 
-export const CHALLENGE_BLUEPRINT_VERSION = 2;
+export const CHALLENGE_BLUEPRINT_VERSION = 3;
 
 type ChallengeMode = {
   id: string;
@@ -116,6 +116,17 @@ export function selectChallengeBlueprint(input: {
   const compatibleModes = modes.filter((item) => !item.excludedDisciplines?.includes(discipline.id));
   const preferredModeIds = preferredModes(discipline.formats, compatibleModes);
   const regenerationAttempt = input.regenerationAttempt ?? 0;
+  const preferenceIsConstrained = preferredModeIds.size < compatibleModes.length;
+  const explorationSlot = stableIndex(
+    `${input.userId}:${input.dateKey}:${discipline.id}:${regenerationAttempt}:mode-balance`,
+    4,
+  ) === 0;
+  const exploratoryModes = compatibleModes.filter((item) => !preferredModeIds.has(item.id));
+  const selectedModes = preferenceIsConstrained
+    ? explorationSlot && exploratoryModes.length
+      ? exploratoryModes
+      : compatibleModes.filter((item) => preferredModeIds.has(item.id))
+    : compatibleModes;
   const recent = input.novelty.recent.filter(
     (item) => regenerationAttempt > 0 || item.dateKey !== input.dateKey,
   );
@@ -127,7 +138,7 @@ export function selectChallengeBlueprint(input: {
   const candidates: Array<{ blueprint: ChallengeBlueprint; penalty: number }> = [];
 
   for (const [topicRank, primaryTopic] of topics.entries()) {
-    for (const challengeMode of compatibleModes) {
+    for (const challengeMode of selectedModes) {
       const seed = `${input.userId}:${input.dateKey}:${discipline.id}:${primaryTopic}:${challengeMode.id}:${regenerationAttempt}`;
       const settingPool = scenarioFamilies[discipline.id] ?? scenarioFamilies.applied_engineering;
       const scenarioFamily = settingPool[stableIndex(`${seed}:setting`, settingPool.length)];
@@ -142,7 +153,7 @@ export function selectChallengeBlueprint(input: {
         seed,
         challengeMode.family,
       );
-      const focus = `${primaryTopic} · ${challengeMode.lens}${secondaryTopic ? ` with ${secondaryTopic}` : ""}`;
+      const focus = primaryTopic;
       const signature = normalize([
         discipline.id,
         primaryTopic,
@@ -163,6 +174,7 @@ export function selectChallengeBlueprint(input: {
         ...(secondaryTopic ? { secondaryTopic } : {}),
         ...(secondaryDiscipline ? { secondaryDiscipline } : {}),
         focus,
+        emphasis: challengeMode.lens,
         modeId: challengeMode.id,
         modeLabel: challengeMode.label,
         modeFamily: challengeMode.family,
@@ -216,12 +228,37 @@ export function challengeNoveltyIssues(input: {
   title: string;
   topic: string;
   scenario: string;
+  objective?: string;
   blueprint: ChallengeBlueprint;
   history: ChallengeHistorySignal[];
 }) {
   const issues: string[] = [];
   if (normalize(input.topic) !== normalize(input.blueprint.focus)) {
     issues.push(`The topic field must be exactly "${input.blueprint.focus}".`);
+  }
+  if (/[·|]/.test(input.topic)) {
+    issues.push("The topic field mixes the technical subject with assessment metadata.");
+  }
+  const packetText = `${input.title}\n${input.scenario}\n${input.objective ?? ""}`;
+  if (!containsTopic(packetText, input.blueprint.primaryTopic)) {
+    issues.push(`The packet does not materially address the selected technical topic "${input.blueprint.primaryTopic}".`);
+  }
+  const vaguePhrases = [
+    "narrow but repeatable service symptom",
+    "the relevant configuration is present",
+    "one counter or state transition",
+    "one service path fails",
+    "implementation record, observed state, and monitoring view disagree",
+    "nearby but different case",
+  ];
+  const normalizedPacket = normalize(packetText);
+  for (const phrase of vaguePhrases) {
+    if (normalizedPacket.includes(normalize(phrase))) {
+      issues.push(`The packet uses an abstract placeholder instead of concrete case evidence: "${phrase}".`);
+    }
+  }
+  if (concreteArtifactScore(input.scenario) < 3) {
+    issues.push("The scenario needs at least three concrete, testable artifacts with actual values, excerpts, claims, or observed states.");
   }
   const recent = input.history.slice(0, 45);
   for (const prior of recent) {
@@ -321,7 +358,8 @@ function emergencyBlueprint(input: {
     signature: normalize(`${input.discipline.id}:${primaryTopic}:troubleshooting:${nonce}`),
     nonce,
     primaryTopic,
-    focus: `${primaryTopic} · fault isolation`,
+    focus: primaryTopic,
+    emphasis: "fault isolation",
     modeId: "troubleshooting",
     modeLabel: "Troubleshooting investigation",
     modeFamily: "diagnose",
@@ -354,6 +392,7 @@ function mode(
 }
 
 const modeEvidenceNeedles: Record<string, string[]> = {
+  pressure_triage: ["first 15", "15 minute", "decision window", "triage"],
   configuration_build: ["configuration", "implement", "build"],
   configuration_review: ["configuration", "review", "excerpt"],
   scripting_task: ["code", "script", "function", "input"],
@@ -365,6 +404,20 @@ const modeEvidenceNeedles: Record<string, string[]> = {
   evidence_ranking: ["rank", "evidence"],
   technology_selection: ["option", "select", "requirements"],
 };
+
+function containsTopic(value: string, topic: string) {
+  const source = normalize(value);
+  const tokens = normalize(topic).split(" ").filter((token) => token.length >= 2);
+  return tokens.length > 0 && tokens.every((token) => source.includes(token));
+}
+
+function concreteArtifactScore(value: string) {
+  const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const concrete = lines.filter((line) =>
+    /(?:\b\d+(?:\.\d+)?(?:%|ms|s|gb|mb|kb|\/\d+)?\b|\b\d{1,3}(?:\.\d{1,3}){3}\b|\b(?:gi|te|eth|ens|vlan|pid|uid|http|tcp|udp|acl|api|pod|node|host|line|step)[-\w./:]*\b|[#>$]|=>|==|!=|\b(?:true|false|deny|permit|failed|error|warning|timeout|dropped|active|inactive)\b|["'`][^"'`]{4,}["'`])/i.test(line),
+  );
+  return Math.min(6, concrete.length);
+}
 
 function meaningfulTokens(value: string) {
   return new Set(normalize(value).split(" ").filter((token) => token.length >= 5));
