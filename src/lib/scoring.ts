@@ -22,42 +22,29 @@ const unsafePattern =
 const evidencePattern =
   /\b(show|ping|traceroute|tcpdump|wireshark|journalctl|grep|awk|log|packet|screenshot|attachment|attached|pcap|verify|baseline|config|interface|route|vlan|stp|ospf|bgp|acl|nat|metric|measurement|timestamp|timeline|test|assert|expected|actual|diff|requirement|constraint|claim|counterexample|calculation|sample|trace|output|result|because|indicates|demonstrates)\b/i;
 
-const riskRequiredModes = new Set([
-  "troubleshooting",
-  "configuration_build",
-  "configuration_review",
-  "pressure_triage",
-  "time_boxed_diagnostic",
-  "hardening_review",
-  "environment_admin",
-  "command_only",
-  "minimum_safe_fix",
-  "operational_decision",
-  "failure_prediction",
-  "migration_plan",
-  "post_incident_reconstruction",
-]);
-
 function assessmentRequirements(challenge?: Challenge) {
   const blueprint = challenge?.disciplineSnapshot?.generationContext?.blueprint;
-  const interaction = blueprint?.interaction ?? "written";
-  const modeId = blueprint?.modeId ?? "operational_assessment";
-  const minWords = modeId === "command_only"
-    ? 35
-    : interaction === "code"
+  const taskContract = challenge
+    ? `${challenge.objective}\n${challenge.expectedAnswerFormat}\n${challenge.submissionRequirements.join("\n")}`
+    : "";
+  const interaction = /\b(code|script|function|pseudocode|test cases?|implementation)\b/i.test(taskContract)
+    ? "code"
+    : /\b(exact commands?|command sequence|configuration|cli|shell commands?)\b/i.test(taskContract)
+      ? "commands"
+      : /\b(oral|spoken defense|defend verbally)\b/i.test(taskContract)
+        ? "oral"
+        : "written";
+  const minWords = interaction === "code"
       ? 70
       : interaction === "oral"
         ? 75
-        : modeId === "true_false_defense"
-          ? 100
-          : 80;
+        : 80;
   return {
     blueprint,
     interaction,
-    modeId,
     minWords,
-    requiresRisk: !blueprint || riskRequiredModes.has(modeId),
-    requiresSequence: interaction === "commands" || interaction === "code" || ["migration_plan", "runbook_repair", "test_strategy"].includes(modeId),
+    requiresRisk: /\b(risk|rollback|backout|blast radius|stop condition|reversal|safety|operational impact)\b/i.test(taskContract),
+    requiresSequence: interaction === "commands" || interaction === "code" || /\b(sequence|ordered steps|procedure|phases|test plan)\b/i.test(taskContract),
   };
 }
 
@@ -477,7 +464,7 @@ function correctionFor(cap: TechnicalCap, content: string, challenge?: Challenge
   if (requirements.requiresRisk && !/\brollback|risk|impact|reversal|stop condition\b/i.test(plainText)) {
     return "The technical direction is usable, but the operational risk and rollback plan are underdeveloped.";
   }
-  return `The submission provides a defensible ${requirements.blueprint?.modeLabel?.toLowerCase() ?? "technical"} response. Improve by making the evidence-to-conclusion links tighter and explicitly separating facts from assumptions.`;
+  return "The submission provides a defensible technical response. Improve by making the evidence-to-conclusion links tighter and explicitly separating facts from assumptions.";
 }
 
 function contentionNotes(scores: ReturnType<typeof categoryScores>, cap: TechnicalCap, late: number) {
@@ -500,5 +487,5 @@ function nextTarget(
     return `Prove the main claims with ${evidence} before finalizing the required work product.`;
   }
   const entries = Object.entries(scores).sort((a, b) => a[1] - b[1]);
-  return `Raise ${entries[0][0]} by making the ${challenge?.disciplineSnapshot?.generationContext?.blueprint?.modeLabel?.toLowerCase() ?? "assessment"} response more evidence-specific and testable.`;
+  return `Raise ${entries[0][0]} by making the assessment response more evidence-specific and testable.`;
 }

@@ -5,6 +5,7 @@ import {
   selectChallengeBlueprint,
 } from "../src/lib/challenge-blueprints.ts";
 import { buildCoherentChallengeCase } from "../src/lib/challenge-cases.ts";
+import { challengeGenerationSystemPrompt } from "../src/lib/challenge-prompt.ts";
 import { selectRecoveryContext } from "../src/lib/recovery.ts";
 
 function discipline(id, label, topics, formats) {
@@ -48,14 +49,19 @@ const governedDisciplines = [
   discipline("technical_writing", "Technical Writing / Documentation", ["Runbooks", "Postmortems", "Procedures", "Reports", "Knowledge base", "Decision records"], ["Runbook repair", "Technical brief", "Design critique"]),
 ];
 
+assert(challengeGenerationSystemPrompt.split(/\s+/).length < 260, "challenge prompt has become a rule engine again");
+assert(challengeGenerationSystemPrompt.includes("format hint is a preference"), "format hint is still treated as a binding mode");
+assert(challengeGenerationSystemPrompt.includes("Do not combine unrelated assessment styles"), "coherence instruction is missing");
+
 const userHistory = [];
 const focuses = new Set();
 const signatures = new Set();
 const modes = new Set();
-const families = new Set();
 let previousPrimary = "";
 for (let day = 1; day <= 45; day += 1) {
-  const dateKey = `2026-08-${String(day).padStart(2, "0")}`;
+  const dateKey = day <= 31
+    ? `2026-08-${String(day).padStart(2, "0")}`
+    : `2026-09-${String(day - 31).padStart(2, "0")}`;
   const blueprint = selectChallengeBlueprint({
     userId: "learner-networking",
     dateKey,
@@ -70,7 +76,8 @@ for (let day = 1; day <= 45; day += 1) {
   focuses.add(blueprint.focus);
   signatures.add(blueprint.signature);
   modes.add(blueprint.modeId);
-  families.add(blueprint.modeFamily);
+  assert.equal(blueprint.modeFamily, "adaptive", "legacy cognitive-mode matrix is still active");
+  assert(networking.formats.includes(blueprint.modeLabel), "selector introduced a format the learner did not choose");
   previousPrimary = blueprint.primaryTopic;
   userHistory.unshift({
     dateKey,
@@ -79,12 +86,10 @@ for (let day = 1; day <= 45; day += 1) {
     blueprint,
   });
 }
-assert(modes.size >= 15, `expected broad mode rotation, received ${modes.size}`);
-assert(families.size >= 8, `expected broad cognitive-family rotation, received ${families.size}`);
+assert.equal(modes.size, networking.formats.length, "preferred format hints did not rotate");
 assert.equal(focuses.size, networking.topics.length, "topic rotation did not cover the governed catalog");
 
 const labOnly = discipline("networking", "Networking", networking.topics, ["Hands-on lab"]);
-const labAlignedModes = new Set(["configuration_build", "scripting_task", "environment_admin", "command_only"]);
 let labAlignedCount = 0;
 const labHistory = [];
 for (let day = 1; day <= 40; day += 1) {
@@ -97,18 +102,15 @@ for (let day = 1; day <= 40; day += 1) {
     discipline: labOnly,
     novelty: { recent: labHistory, sameDayGlobal: [] },
   });
-  if (labAlignedModes.has(blueprint.modeId)) labAlignedCount += 1;
+  if (blueprint.modeLabel === "Hands-on lab" && blueprint.modeId === "hands_on_lab") labAlignedCount += 1;
   labHistory.unshift({ dateKey, title: blueprint.blueprintId, topic: blueprint.focus, blueprint });
 }
-assert(labAlignedCount >= 26, `lab preference was not materially respected: ${labAlignedCount}/40 aligned modes`);
-assert(labAlignedCount < 40, "format balancing removed all controlled exploration");
+assert.equal(labAlignedCount, 40, "selector ignored or explored outside the learner's sole format preference");
 
 for (const historyItem of userHistory) {
   const blueprint = historyItem.blueprint;
   const packet = buildCoherentChallengeCase(blueprint, networking.id);
   const scenario = [
-    `Assessment mode: ${blueprint.modeLabel}`,
-    blueprint.promptDirective,
     packet.background,
     "Supplied artifacts",
     ...packet.evidence,
@@ -249,4 +251,4 @@ assert.equal(recovery.target, "ACL troubleshooting", "recovery target retained a
 assert(recovery.task.includes("10 deny ip 10.10.0.0"), "ACL recovery did not provide a concrete retrieval case");
 assert(!recovery.task.includes("nearby but different case"), "legacy generic recovery wording survived");
 
-console.log(`Challenge generation verified: ${signatures.size} unique blueprints, ${governedCaseCount} governed topic cases, ${modes.size} modes, ${globalSignatures.size} same-day user blueprints.`);
+console.log(`Challenge generation verified: ${signatures.size} unique plans, ${governedCaseCount} governed fallback cases, ${modes.size} profile formats, ${globalSignatures.size} same-day user plans.`);

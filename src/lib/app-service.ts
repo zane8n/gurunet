@@ -2,7 +2,6 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import type {
   Challenge,
-  ChallengeBlueprint,
   DisciplineSnapshot,
   Difficulty,
   Grade,
@@ -799,7 +798,7 @@ export async function getOrCreateTodayChallenge(user: User) {
       });
       const job = await enqueueAiJob(
         "ChallengeGeneration",
-        `challenge-profile:v3:${user.id}:${today}:${disciplineProfileFingerprint(discipline)}`,
+        `challenge-profile:v4:${user.id}:${today}:${disciplineProfileFingerprint(discipline)}`,
         {
           userId: user.id,
           challengeId: updated.id,
@@ -870,7 +869,7 @@ export async function getOrCreateTodayChallenge(user: User) {
     },
   });
 
-  const job = await enqueueAiJob("ChallengeGeneration", `challenge:v3:${user.id}:${today}:${discipline.generationContext?.blueprint?.blueprintId ?? "base"}`, {
+  const job = await enqueueAiJob("ChallengeGeneration", `challenge:v4:${user.id}:${today}:${discipline.generationContext?.blueprint?.blueprintId ?? "base"}`, {
     userId: user.id,
     challengeId: created.id,
     dateKey: today,
@@ -2698,10 +2697,6 @@ function createDisciplineFallbackChallenge(
     validFocus(options.settings?.topicFocus, discipline.topics) ??
     discipline.topics[0] ??
     discipline.label;
-  const preferredFormat = blueprint?.modeLabel ??
-    discipline.generationContext?.preferredFormat ??
-    discipline.formats[0] ??
-    "Practical assessment";
   const packet = blueprint
     ? buildCoherentChallengeCase(blueprint, discipline.id)
     : fallbackPacketForDiscipline(discipline.id, focus);
@@ -2712,22 +2707,21 @@ function createDisciplineFallbackChallenge(
     : discipline.responseSections.length
       ? discipline.responseSections
     : ["Observation", "Evidence", "Plan", "Validation", "Risk"];
-  const exerciseModes = new Set(["configuration_build", "scripting_task", "environment_admin", "command_only"]);
+  const includeLab = /lab|hands-on|practical/i.test(
+    blueprint?.modeLabel ?? discipline.formats[0] ?? "",
+  );
   const caseReference = blueprint
     ? `GN-${blueprint.nonce.slice(0, 9).toUpperCase()}`
     : `GN-${Math.abs(user.id.split("").reduce((total, item) => total + item.charCodeAt(0), 0)) + 1000}`;
 
   return {
     ...base,
-    title: blueprint
-      ? `${blueprint.modeLabel}: ${packet.title}`.slice(0, 120)
-      : `${discipline.label}: ${packet.title}`,
+    title: packet.title.slice(0, 120),
     topic: focus,
     scenario: [
       "Task 1 - Main assessment",
       "Case brief",
       `You are the ${blueprint?.practitionerRole ?? "responsible practitioner"} for a ${blueprint?.scenarioFamily ?? discipline.label.toLowerCase()} case (reference ${caseReference})${blueprint?.secondaryDiscipline ? ` with a governed ${blueprint.secondaryDiscipline} integration boundary` : ""}.`,
-      `Assessment: ${preferredFormat}${blueprint?.emphasis ? `. Emphasis: ${blueprint.emphasis}.` : "."}`,
       "",
       "Context",
       packet.background,
@@ -2735,13 +2729,11 @@ function createDisciplineFallbackChallenge(
       "Supplied artifacts",
       ...packet.evidence,
       "",
-      "Your task",
+      "Objective",
       packet.objective,
-      ...(blueprint ? [fallbackModeInstruction(blueprint)] : []),
-      `Deliverable: ${blueprint?.deliverable ?? packet.objective}.`,
       "",
-      ...(blueprint && exerciseModes.has(blueprint.modeId)
-        ? ["Reproducible exercise", packet.lab, ""]
+      ...(includeLab
+        ? ["Optional lab", packet.lab, ""]
         : []),
       ...(options.recovery
         ? [
@@ -2754,17 +2746,12 @@ function createDisciplineFallbackChallenge(
       "Submission Deadline",
       "15:00 local time. Do not reveal the solution until after submission.",
     ].join("\n"),
-    objective: blueprint
-      ? `Resolve the ${blueprint.primaryTopic} case by producing ${withLowercaseArticle(blueprint.deliverable)}. Every material claim must trace to a supplied artifact or an explicit assumption.`
-      : packet.objective,
+    objective: packet.objective,
     constraints: [
       "Do not invent evidence that is not present in the brief.",
       "Do not recommend destructive changes without verification and rollback.",
-      `Use the active discipline context: ${discipline.label}.`,
-      `Preferred challenge format: ${preferredFormat}.`,
       ...(blueprint ? [blueprint.constraintTwist] : []),
       `Target completion time: ${options.settings?.durationMinutes ?? Math.max(30, Math.min(120, discipline.weeklyTimeBudgetHours * 12))} minutes.`,
-      ...(discipline.preferenceNotes ? [`User preference notes: ${discipline.preferenceNotes}.`] : []),
     ].slice(0, 8),
     allowedTools: packet.allowedTools,
     expectedAnswerFormat: [
@@ -2778,64 +2765,22 @@ function createDisciplineFallbackChallenge(
       "Verification method.",
       "Risk, rollback, limitation, or escalation note.",
       ...(options.recovery ? ["Recovery retrieval task answer."] : []),
-      ...discipline.evidenceTypes.slice(0, 4).map((item) => `Profile evidence expectation: ${item}.`),
     ].slice(0, 10),
     solution: [
       packet.solution,
-      ...(blueprint
-        ? [`For the ${blueprint.modeLabel} format, a strong answer must produce ${blueprint.deliverable.toLowerCase()}, use the provided ${blueprint.evidenceStyle.toLowerCase()}, and state what evidence would invalidate its conclusion.`]
-        : []),
       ...(options.recovery
         ? [`Reinforcement teaching answer: ${options.recoveryContext ? recoveryTeachingAnswer(options.recoveryContext) : `Explain ${recoveryTopic} with a correction, decisive evidence, and a validation step.`}`]
         : []),
     ].join(" "),
     recoveryContext: options.recoveryContext,
     antiGenericRequirement:
-      `Your answer must use the ${caseReference} ${discipline.label} artifacts, complete the ${preferredFormat} deliverable, and follow these sections: ${sections.join(", ")}.`,
+      `Your answer must use the ${caseReference} artifacts, reach a case-specific conclusion, and follow these sections: ${sections.join(", ")}.`,
   };
 }
 
 function validFocus(value: string | null | undefined, topics: string[]) {
   if (!value) return null;
   return topics.includes(value) ? value : null;
-}
-
-function fallbackModeInstruction(blueprint: ChallengeBlueprint) {
-  const instructions: Record<string, string> = {
-    pressure_triage:
-      "Decision window: treat this as the first 15 minutes. Commit to the safest first action, name the next three discriminating checks in order, and state the observation that makes you stop or reverse course.",
-    time_boxed_diagnostic:
-      "Diagnostic budget: use no more than three initial checks. For each check, state the expected observation and which branch it selects.",
-    configuration_build:
-      "Produce exact minimally scoped configuration, pre-checks, expected output, activation sequence, and rollback. Descriptive advice alone is incomplete.",
-    configuration_review:
-      "Annotate the supplied state line by line where material, identify the consequential defect, and provide only the corrected lines plus proof.",
-    command_only:
-      "Command budget: eight commands. Put commands in execution order and attach only an expected observation, abort condition, or rollback note.",
-    evidence_ranking:
-      "Rank artifacts A-D by diagnostic value. For each, state what it proves, what it cannot prove, and the next discriminator.",
-    true_false_defense:
-      "Evaluate these claims against the case: (1) the healthy component rules out a local fault; (2) configuration presence proves operational correctness; (3) broad rollback is the safest first step; (4) one supplied artifact is decisive by itself; (5) the proposed minimum fix still needs rollback. Mark each true, false, or conditional and defend it from the evidence.",
-    oral_defense:
-      "Open with a position of no more than 120 words, then list the three examiner challenges you expect and defend each assumption.",
-    minimum_safe_fix:
-      "Choose one smallest reversible production action. State its blast radius, pre-check, success evidence, rollback trigger, and the attractive broader action you reject.",
-    scripting_task:
-      "Provide executable-quality code or precise pseudocode, deterministic fixtures, expected outputs, safety behavior, and failure tests grounded in this case.",
-    code_critique:
-      "Identify the observable behavior and interacting defects, then provide a scoped patch and regression tests rather than a broad rewrite.",
-    forensics_timeline:
-      "Normalize timestamps before ordering events. Label each conclusion confirmed, probable, or unknown and include the next evidence-preservation step.",
-    technology_selection:
-      "Define the requirements before comparing options. Use a weighted decision, state adoption risks, and name the condition that would change the recommendation.",
-    observability_design:
-      "Design signals with measurable thresholds, sustained windows, false-positive controls, ownership, and an operator action tied to this exact failure.",
-  };
-  return instructions[blueprint.modeId] ?? blueprint.promptDirective;
-}
-
-function withLowercaseArticle(value: string) {
-  return value ? `${value[0].toLowerCase()}${value.slice(1)}` : "case-specific work product";
 }
 
 function fallbackPacketForDiscipline(disciplineId: string, focus: string) {

@@ -2034,8 +2034,6 @@ function ChallengeWidget({
   submission: Submission | null;
   verification: string;
 }) {
-  const challengeMode = challenge.disciplineSnapshot?.generationContext?.blueprint?.modeLabel ??
-    challenge.disciplineSnapshot?.generationContext?.preferredFormat;
   if (challenge.status === "RestDay") {
     return (
       <div className="grid gap-4 border-y border-slate-200 py-6">
@@ -2070,7 +2068,6 @@ function ChallengeWidget({
         <div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold text-cyan-800">
             <span>{challenge.topic}</span>
-            {challengeMode && <span className="font-normal text-slate-500">{challengeMode}</span>}
           </div>
           <h2 className="mt-1 text-2xl font-semibold tracking-normal text-slate-950">
             {challenge.title}
@@ -2096,7 +2093,6 @@ function ChallengeWidget({
           <div className="border-t border-slate-200 py-4">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold text-cyan-800">
               <span>{challenge.topic}</span>
-              {challengeMode && <span className="font-normal text-slate-500">{challengeMode}</span>}
             </div>
             <p className="mt-2 text-lg font-semibold text-slate-950">{challenge.title}</p>
             <div className="mt-3">
@@ -3558,8 +3554,6 @@ function ChallengeFocusModal({
   open: boolean;
   submission: Submission | null;
 }) {
-  const challengeMode = challenge.disciplineSnapshot?.generationContext?.blueprint?.modeLabel ??
-    challenge.disciplineSnapshot?.generationContext?.preferredFormat;
   function respond() {
     onOpenChange(false);
     onRespond();
@@ -3574,7 +3568,7 @@ function ChallengeFocusModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-6xl">
         <DialogHeader>
-          <DialogTitle>Challenge focus mode</DialogTitle>
+          <DialogTitle>Challenge details</DialogTitle>
         </DialogHeader>
 
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
@@ -3587,11 +3581,6 @@ function ChallengeFocusModal({
               <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
                 Due {deadline}
               </span>
-              {challengeMode && (
-                <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600">
-                  {challengeMode}
-                </span>
-              )}
             </div>
             <p className="mt-4 text-sm font-semibold text-cyan-800">{challenge.topic}</p>
             <h2 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
@@ -4213,22 +4202,6 @@ function ResponseEditorModal({
   );
 }
 
-const readinessRiskModes = new Set([
-  "troubleshooting",
-  "configuration_build",
-  "configuration_review",
-  "pressure_triage",
-  "time_boxed_diagnostic",
-  "hardening_review",
-  "environment_admin",
-  "command_only",
-  "minimum_safe_fix",
-  "operational_decision",
-  "failure_prediction",
-  "migration_plan",
-  "post_incident_reconstruction",
-]);
-
 function responseReadiness(
   body: string,
   attachments: SubmissionAttachment[],
@@ -4236,18 +4209,20 @@ function responseReadiness(
 ) {
   const text = body.trim();
   const lower = text.toLowerCase();
-  const blueprint = challenge.disciplineSnapshot?.generationContext?.blueprint;
-  const interaction = blueprint?.interaction ?? "written";
-  const minWords = blueprint?.modeId === "command_only"
-    ? 35
-    : interaction === "code"
+  const taskContract = `${challenge.objective}\n${challenge.expectedAnswerFormat}\n${challenge.submissionRequirements.join("\n")}`;
+  const interaction = /\b(code|script|function|pseudocode|test cases?|implementation)\b/i.test(taskContract)
+    ? "code"
+    : /\b(exact commands?|command sequence|configuration|cli|shell commands?)\b/i.test(taskContract)
+      ? "commands"
+      : /\b(oral|spoken defense|defend verbally)\b/i.test(taskContract)
+        ? "oral"
+        : "written";
+  const minWords = interaction === "code"
       ? 70
       : interaction === "oral"
         ? 75
-        : blueprint?.modeId === "true_false_defense"
-          ? 100
-          : 80;
-  const requiresRisk = !blueprint || readinessRiskModes.has(blueprint.modeId);
+        : 80;
+  const requiresRisk = /\b(risk|rollback|backout|blast radius|stop condition|reversal|safety|operational impact)\b/i.test(taskContract);
   const words = text.split(/\s+/).filter(Boolean);
   const lines = text.split(/\r?\n/);
   const headings = lines.filter((line) => /^#{1,3}\s+\S/.test(line)).length;
@@ -4278,7 +4253,7 @@ function responseReadiness(
         : actionSignals >= 1 || reasoningConnectors >= 2;
   const hasConclusion = actionSignals >= 1 ||
     (interaction === "oral" && /\b(position|conclude|maintain|recommend)\b/i.test(text)) ||
-    (blueprint?.modeId === "true_false_defense" && /\b(true|false|conditionally true|verdict)\b/i.test(text));
+    (/\btrue\s*\/\s*false|true or false|claim defense\b/i.test(taskContract) && /\b(true|false|conditionally true|verdict)\b/i.test(text));
   const expectedTouchCount = challenge.submissionRequirements.filter((requirement) =>
     requirement
       .toLowerCase()
@@ -4298,13 +4273,13 @@ function responseReadiness(
       guidance: `Use the expected format as scaffolding: ${challenge.expectedAnswerFormat}`,
     },
     {
-      label: blueprint?.deliverable ?? "Required work product",
+      label: "Required work product",
       complete: requiredWorkProduct,
       guidance: interaction === "code"
         ? "Provide the implementation or precise pseudocode and the tests that establish its behavior."
         : interaction === "commands"
           ? "Provide an ordered command sequence and the observations expected from it."
-          : `Complete the requested deliverable: ${blueprint?.deliverable ?? "a defensible conclusion"}.`,
+          : `Complete the actual task stated in the objective: ${challenge.objective}`,
     },
     {
       label: "Evidence or justification",
