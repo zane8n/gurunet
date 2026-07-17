@@ -288,6 +288,7 @@ type Dashboard = {
   activeDiscipline: ActiveDiscipline;
   cohorts: CohortSummary[];
   nextChallengeUnlockAt: string;
+  challengeGenerationStatus: "Queued" | "Running" | "Succeeded" | "Failed" | "FallbackUsed" | null;
   todaySubmission: Submission | null;
   todayGrade: Grade | null;
   progress: ProgressRow[];
@@ -523,6 +524,7 @@ export function GurunetApp() {
   const [draftAttachments, setDraftAttachments] = useState<SubmissionAttachment[]>([]);
   const [draftSavedAt, setDraftSavedAt] = useState("");
   const [verification, setVerification] = useState("");
+  const challengeRefresh = useRef({ challengeId: "", attempts: 0 });
 
   const user = dashboard?.user;
   const today = dashboard?.today;
@@ -545,25 +547,22 @@ export function GurunetApp() {
   useEffect(() => {
     async function bootstrap() {
       try {
-        const session = await apiRequest<{ user: SafeUser | null }>("/api/auth/session");
-        if (session.user) {
-          const [profile, catalog] = await Promise.all([
-            apiRequest<{
-              onboardingRequired: boolean;
-              studyProfile: StudyProfile | null;
-              activeDiscipline: ActiveDiscipline;
-            }>("/api/study-profile"),
-            apiRequest<{ disciplines: DisciplineTemplate[] }>("/api/disciplines"),
-          ]);
-          setDisciplines(catalog.disciplines);
-          setProfileGate(profile);
-          if (profile.onboardingRequired) {
-            setDashboard(null);
-            return;
-          }
-          const data = await apiRequest<Dashboard>("/api/me/stats");
-          setDashboard(data);
+        const data = await apiRequest<{
+          user: SafeUser | null;
+          profile: {
+            onboardingRequired: boolean;
+            studyProfile: StudyProfile | null;
+            activeDiscipline: ActiveDiscipline;
+          } | null;
+          disciplines: DisciplineTemplate[];
+          dashboard: Dashboard | null;
+        }>("/api/bootstrap");
+        setDisciplines(data.disciplines);
+        if (data.user) {
+          setProfileGate(data.profile);
+          setDashboard(data.dashboard);
         } else {
+          setProfileGate(null);
           setDashboard(null);
         }
       } catch (error) {
@@ -576,6 +575,48 @@ export function GurunetApp() {
 
     void bootstrap();
   }, []);
+
+  useEffect(() => {
+    const challengeId = dashboard?.today.id;
+    const generationStatus = dashboard?.challengeGenerationStatus;
+    if (
+      !challengeId ||
+      dashboard?.todaySubmission ||
+      (generationStatus !== "Queued" && generationStatus !== "Running")
+    ) return;
+    if (challengeRefresh.current.challengeId !== challengeId) {
+      challengeRefresh.current = { challengeId, attempts: 0 };
+    }
+    if (challengeRefresh.current.attempts >= 8) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        challengeRefresh.current.attempts += 1;
+        const result = await apiRequest<{
+          challenge: Challenge;
+          challengeGenerationStatus: Dashboard["challengeGenerationStatus"];
+        }>("/api/challenges/today");
+        if (cancelled) return;
+        setDashboard((current) =>
+          current?.today.id === challengeId
+            ? {
+                ...current,
+                today: result.challenge,
+                challengeGenerationStatus: result.challengeGenerationStatus,
+              }
+            : current,
+        );
+      } catch (error) {
+        console.error("Challenge refresh failed", error);
+      }
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [dashboard?.challengeGenerationStatus, dashboard?.today.id, dashboard?.todaySubmission]);
 
   async function loadDashboard() {
     const data = await apiRequest<Dashboard>("/api/me/stats");
@@ -1845,7 +1886,7 @@ function DashboardHero({
             {dashboard.today.recoveryContext && (
               <span className="inline-flex items-center gap-1.5 text-amber-800">
                 <CheckCircle2 size={15} />
-                {dashboard.today.recoveryContext.taskStyle}: {dashboard.today.recoveryContext.target}
+                Quick recovery: {dashboard.today.recoveryContext.target}
               </span>
             )}
           </div>
@@ -1947,6 +1988,10 @@ const packetHeadings = new Set([
   "Recovery Component",
   "Optional Lab",
   "Submission Deadline",
+  "The setup",
+  "Clues",
+  "Try it yourself (optional)",
+  "Deadline",
   "CPU",
   "MAC Table",
   "Logs",
@@ -1966,7 +2011,7 @@ function PacketText({ compact = false, text }: { compact?: boolean; text: string
       {lines.map((line, index) => {
         const trimmed = line.trim();
         if (!trimmed) return <div key={`gap-${index}`} className="h-2" />;
-        if (packetHeadings.has(trimmed)) {
+        if (packetHeadings.has(trimmed) || /^Quick recovery(?:\s*[-:·].*)?$/i.test(trimmed)) {
           return (
             <p key={`${trimmed}-${index}`} className="challenge-packet-heading">
               {trimmed}

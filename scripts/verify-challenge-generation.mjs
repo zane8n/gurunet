@@ -51,7 +51,8 @@ const governedDisciplines = [
 
 assert(challengeGenerationSystemPrompt.split(/\s+/).length < 260, "challenge prompt has become a rule engine again");
 assert(challengeGenerationSystemPrompt.includes("format hint is a preference"), "format hint is still treated as a binding mode");
-assert(challengeGenerationSystemPrompt.includes("Do not combine unrelated assessment styles"), "coherence instruction is missing");
+assert(challengeGenerationSystemPrompt.includes("personal study after a busy day"), "challenge tone is still written like assigned work");
+assert(challengeGenerationSystemPrompt.includes("Never expose generator language"), "internal generation labels can leak into the learner brief");
 
 const userHistory = [];
 const focuses = new Set();
@@ -224,6 +225,16 @@ const abstractIssues = challengeNoveltyIssues({
 assert(abstractIssues.some((issue) => issue.includes("abstract placeholder")), "abstract fallback prose was not rejected");
 assert(abstractIssues.some((issue) => issue.includes("concrete, testable artifacts")), "artifact-free prompt was not rejected");
 
+const internalLabelIssues = challengeNoveltyIssues({
+  title: `A practical ${focused.primaryTopic} mystery`,
+  topic: focused.focus,
+  scenario: "Assessment mode: pressure triage. Task 1 - Main assessment. [A] show output 14. [B] log output 22. [C] test output 31.",
+  objective: `Investigate ${focused.primaryTopic} using the supplied evidence.`,
+  blueprint: focused,
+  history: [],
+});
+assert(internalLabelIssues.some((issue) => issue.includes("internal generator language")), "internal planning labels were not rejected");
+
 const recovery = selectRecoveryContext({
   dateKey: "2026-09-04",
   scheduledAfterRest: false,
@@ -250,5 +261,6 @@ assert(recovery, "low-score recovery was not selected");
 assert.equal(recovery.target, "ACL troubleshooting", "recovery target retained an instruction fragment");
 assert(recovery.task.includes("10 deny ip 10.10.0.0"), "ACL recovery did not provide a concrete retrieval case");
 assert(!recovery.task.includes("nearby but different case"), "legacy generic recovery wording survived");
+assert(!recovery.task.includes("Retrieval target"), "internal recovery metadata leaked into the learner task");
 
 console.log(`Challenge generation verified: ${signatures.size} unique plans, ${governedCaseCount} governed fallback cases, ${modes.size} profile formats, ${globalSignatures.size} same-day user plans.`);

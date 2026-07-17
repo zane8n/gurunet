@@ -68,7 +68,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
   if (topic.includes("vlan")) {
     if (variant === 0) {
       return {
-        title: "Payroll VLAN missing on one side of an access uplink",
+        title: "Payroll devices lose their gateway after an access-switch replacement",
         background: "At 09:12, users moved to VLAN 120 on ACC-03 lost access to gateway 10.12.0.1. Voice VLAN 40 and management VLAN 10 remain healthy. The only change was replacement of ACC-03; its uplink Gi1/0/48 connects to DIST-01 Gi2/0/7.",
         evidence: [
           "[A] ACC-03# show interfaces trunk: Gi1/0/48 trunking, native VLAN 999, allowed VLANs 10,40,120,999.",
@@ -82,7 +82,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
       };
     }
     return {
-      title: "Access-port VLAN drift after a desk move",
+      title: "One finance workstation lands on the wrong network after a desk move",
       background: "A finance workstation on ACC-07 Gi1/0/24 receives 10.70.30.84/24 but its documented subnet is 10.70.20.0/24. The desk move ticket says the port should match working port Gi1/0/23. The IP phone on Gi1/0/24 remains registered through voice VLAN 60.",
       evidence: [
         "[A] show run interface Gi1/0/23: switchport access vlan 20; switchport voice vlan 60; spanning-tree portfast.",
@@ -97,7 +97,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
   }
   if (topic === "stp") {
     return variant === 0 ? {
-      title: "Unexpected access switch became the spanning-tree root",
+      title: "Campus paths change after a lab switch joins VLAN 210",
       background: "After a lab switch was connected to the campus, VLAN 210 traffic began taking an indirect path and access uplink Gi1/0/48 alternates between forwarding and blocking. DIST-A is the intended root; no physical link is down.",
       evidence: [
         "[A] DIST-A# show spanning-tree vlan 210: Root ID priority 24576, address 70b3.d500.2100; this bridge priority 32768.",
@@ -108,7 +108,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
       objective: "Prove the root-role error and propose the smallest reversible correction without disabling STP or shutting the campus uplink.",
       solution: "ACC-LAB was configured with a superior VLAN 210 bridge priority and became root. Validate the intended root design, remove or raise only ACC-LAB's VLAN 210 priority, then confirm DIST-A becomes root and topology changes stabilize. Do not disable STP. Restore the previous line only if the approved root design contradicts the stated baseline.",
     } : {
-      title: "Layer-2 loop isolated to an undocumented office bridge",
+      title: "Core CPU surges while VLAN 30 endpoints flap between two ports",
       background: "SW-CORE-01 CPU is 88% and users on VLAN 30 report intermittent service. A contractor connected an unmanaged switch. Only one access port may be disabled remotely; Gi1/0/18 has a documented IP phone and Gi1/0/22 is undocumented.",
       evidence: [
         "[A] show processes cpu sorted: STP process 69.4% over 5 seconds; total CPU 88%/71%.",
@@ -122,7 +122,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
   }
   if (topic === "ospf") {
     return {
-      title: variant === 0 ? "OSPF adjacency stuck in EXSTART after an MTU change" : "OSPF neighbors rejected by an area mismatch",
+      title: variant === 0 ? "An OSPF neighbour never gets past EXSTART" : "A healthy branch link stops exchanging OSPF routes",
       background: variant === 0
         ? "R-BR1 and R-HUB1 lost route exchange after the carrier increased R-HUB1's subinterface MTU. The point-to-point link still passes small pings."
         : "R-BR2 stopped learning campus routes after a templated interface change. The link and IP addressing remain up/up.",
@@ -145,7 +145,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
   }
   if (topic === "bgp") {
     return {
-      title: "A prefix-list permits the session but suppresses the new route",
+      title: "A new public prefix never leaves ISP-B",
       background: "The eBGP session to ISP-B is Established, but new public prefix 203.0.113.0/24 is not advertised. Existing 198.51.100.0/24 service remains healthy, so resetting both providers would create avoidable risk.",
       evidence: [
         "[A] show bgp ipv4 unicast summary: 192.0.2.9 Established, 184 prefixes received.",
@@ -159,7 +159,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
   }
   if (topic === "nat") {
     return {
-      title: "A new inside subnet is absent from the NAT classifier",
+      title: "A new VLAN reaches the edge router but not the internet",
       background: "Clients in 10.44.30.0/24 can reach the edge router but not the internet. Existing 10.44.10.0/24 clients remain healthy. The new VLAN was routed this morning; no ISP alarm is active.",
       evidence: [
         "[A] show ip nat translations: active translations only for inside local 10.44.10.0/24.",
@@ -173,7 +173,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
   }
   if (topic.includes("acl")) {
     return {
-      title: "A broad deny shadows the remote-management permit",
+      title: "Remote switch management disappears after an ACL resequence",
       background: "After ACL MGMT-IN was resequenced on interface Vlan207, SSH from 10.10.40.25 to 10.20.7.11 fails while console access remains available. The intended policy permits the admin subnet and denies other 10.10.0.0/16 sources.",
       evidence: [
         "[A] 10 deny ip 10.10.0.0 0.0.255.255 any log (47 matches).",
@@ -187,7 +187,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
   }
   if (topic === "qos") {
     return {
-      title: "Voice markings are erased at the access trust boundary",
+      title: "Calls break up on one floor only while backups are running",
       background: "Calls from one floor become choppy only during backup traffic. The WAN policy has an LLQ for EF traffic and shows no configuration change. Phones connect through ACC-12; other floors are unaffected.",
       evidence: [
         "[A] ACC-12 Gi1/0/12 ingress capture counters: phone sends DSCP EF (46), uplink egress class-default sees DSCP 0.",
@@ -201,7 +201,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
   }
   if (topic === "wireless") {
     return {
-      title: "RADIUS rejects otherwise valid clients after clock drift",
+      title: "Corporate Wi-Fi authentication fails in one building",
       background: "Corporate Wi-Fi authentication began failing on APs at Building C after their NTP source changed. Guest PSK Wi-Fi still works, RF health is normal, and the identity service reports expired request timestamps.",
       evidence: [
         "[A] AP-C17 clock: 14:26:41; controller clock: 14:19:08; offset 7m33s.",
@@ -214,7 +214,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
     };
   }
   return {
-    title: "Path MTU black hole visible in a packet trace",
+    title: "An IPsec web session stalls only when the response grows",
     background: "A web portal completes TCP handshakes across an IPsec path but stalls when returning larger responses. Small pings work. The issue began after tunnel overhead increased; the application and DNS are healthy.",
     evidence: [
       "[A] Trace: SYN MSS 1460, SYN-ACK MSS 1460, HTTP request sent, server retransmits a 1460-byte segment three times.",
@@ -229,7 +229,7 @@ function networkingCase(topic: string, variant: number): CaseCore {
 
 function linuxCase(topic: string, variant: number): CaseCore {
   if (topic.includes("systemd") || topic.includes("journal")) return {
-    title: "A systemd override points the service at a retired environment file",
+    title: "api.service is active, yet every health check returns 503",
     background: "api.service is active but returns HTTP 503 after a deployment. A manual shell launch works. The unit was changed through a drop-in at 11:14.",
     evidence: [
       "[A] systemctl status api.service: active (running); ExecStart=/opt/api/bin/server; restart count 0.",
@@ -241,7 +241,7 @@ function linuxCase(topic: string, variant: number): CaseCore {
     solution: "The drop-in makes systemd load the retired environment file. Correct or remove only the erroneous override, run daemon-reload, coordinate one service restart, then verify effective properties, logs, health endpoint, and database connectivity. Restore the drop-in to roll back if the current environment file is invalid.",
   };
   if (topic.includes("permission")) return {
-    title: "Cache ownership changed during maintenance",
+    title: "A web host starts returning intermittent 502s after cache maintenance",
     background: "A production web host returns intermittent 502 responses after cache cleanup. app.service is running and listening on 127.0.0.1:8080; active traffic makes an unplanned restart undesirable.",
     evidence: [
       "[A] journalctl -u app.service: permission denied opening /var/lib/app/cache/session.db.",
@@ -253,7 +253,7 @@ function linuxCase(topic: string, variant: number): CaseCore {
     solution: "The appsvc process cannot traverse/write the root-owned 0700 cache directory. Confirm the expected baseline and affected files, restore only the required appsvc ownership/mode, then verify a new session file, clear journal errors, and test the health endpoint. Preserve the old metadata for rollback.",
   };
   if (topic.includes("storage")) return {
-    title: "Writes fail because the filesystem exhausted inodes, not bytes",
+    title: "A build volume says 'no space' while 124 GB remains free",
     background: "A build worker reports no space left on device although the workspace volume shows 38% byte usage. Existing files can be read and the mount remains read-write.",
     evidence: [
       "[A] df -h /var/lib/runner: 200G total, 76G used, 124G available.",
@@ -265,7 +265,7 @@ function linuxCase(topic: string, variant: number): CaseCore {
     solution: "The volume has free bytes but no free inodes due to millions of cache files. Pause only affected jobs, identify cache retention ownership, delete a reviewed bounded cache cohort, and verify inode recovery and new file creation. Add file-count monitoring and retention; do not format or indiscriminately delete the workspace.",
   };
   if (topic.includes("process")) return {
-    title: "One worker leaks file descriptors under sustained load",
+    title: "One search worker fades after several hours of healthy load",
     background: "A search service degrades after several hours and recovers when one worker is replaced. CPU and memory remain below 60%; the process limit is 1024 descriptors.",
     evidence: [
       "[A] ls /proc/1842/fd | wc -l: 1018; sibling worker PID 1843: 146.",
@@ -277,7 +277,7 @@ function linuxCase(topic: string, variant: number): CaseCore {
     solution: "PID 1842 is leaking or retaining backend sockets until it reaches its descriptor limit. Drain/replace the single worker if supported, preserve diagnostics, and verify descriptor count and errors. A higher limit may delay recurrence but is not the root fix; investigate connection lifecycle and add descriptor/session alerts.",
   };
   if (topic.includes("network")) return {
-    title: "A host route sends the database subnet to the wrong gateway",
+    title: "Database traffic takes an unexpected path after a route update",
     background: "One Linux application node cannot reach 10.80.4.12:5432 after a VPN test. Peer nodes on the same VLAN remain healthy, and local DNS resolves correctly.",
     evidence: [
       "[A] ip route get 10.80.4.12: via 192.0.2.1 dev tun0 src 192.0.2.44.",
@@ -289,7 +289,7 @@ function linuxCase(topic: string, variant: number): CaseCore {
     solution: "A more-specific stale route sends the database subnet to a down test tunnel. Confirm ownership, remove the stale route or stop/fix the responsible VPN test service, and verify route selection plus TCP 5432 and application health. Restore only if the route was approved and the tunnel is made operational.",
   };
   return {
-    title: variant === 0 ? "A shell cleanup loop breaks on spaces and symlinks" : "A Bash pipeline hides the command that actually failed",
+    title: variant === 0 ? "A cleanup job behaves differently when filenames contain spaces" : "A nightly Bash job reports success despite a failed stage",
     background: variant === 0
       ? "A cleanup script passed against simple fixtures but production paths include spaces and a symlink to shared storage. It must support a reviewed dry run before deletion."
       : "A backup script reported success even though compression failed; the final upload command accepted an empty stream.",
@@ -313,7 +313,7 @@ function linuxCase(topic: string, variant: number): CaseCore {
 
 function securityCase(topic: string, variant: number): CaseCore {
   if (topic.includes("auth")) return {
-    title: "A service-account key changed immediately before an unusual login",
+    title: "A service account signs in from a new source minutes after a key change",
     background: "A privileged deployment account logged in from an internal build host without an approved change. External password failures occurred earlier but did not authenticate.",
     evidence: [
       "[A] 01:38:22 failed password for invalid user admin from 185.22.14.8.",
@@ -325,7 +325,7 @@ function securityCase(topic: string, variant: number): CaseCore {
     solution: "The successful service-account login and preceding key modification are material; the external failures are context, not proof of compromise. Preserve logs/key metadata, isolate or restrict the specific credential/session as policy permits, identify activity on runner-07, and validate ownership before broad blocking. Rotate the affected key if unauthorized.",
   };
   if (topic.includes("hardening")) return {
-    title: "An admin endpoint is internet-reachable behind valid TLS",
+    title: "An internal admin endpoint appears in an external scan",
     background: "A new operations portal works correctly but its /admin path is reachable from the internet. SSO is enabled; security review requires reducing exposure without breaking remote on-call access.",
     evidence: [
       "[A] External test: GET /admin returns 302 to SSO; TLS 1.3 certificate is valid.",
@@ -337,7 +337,7 @@ function securityCase(topic: string, variant: number): CaseCore {
     solution: "Valid TLS and SSO do not remove unnecessary internet exposure. Restrict the route to approved VPN/private access at the load balancer, keep SSO and authorization, rate-limit and alert on rejects, and test managed on-call access plus public denial. Roll back the routing restriction if emergency access fails while retaining identity controls.",
   };
   if (topic.includes("detect")) return {
-    title: "A detection rule fires on scanner noise but misses successful access",
+    title: "An alert is noisy during scans yet silent during a real login",
     background: "The SOC receives hundreds of failed-login alerts but no alert for a privileged login from a new country. Analysts are suppressing the noisy rule manually.",
     evidence: [
       "[A] Existing rule: count(authentication.failure) > 20 by source.ip in 5 minutes.",
@@ -349,7 +349,7 @@ function securityCase(topic: string, variant: number): CaseCore {
     solution: "Suppress or tag only the verified scanner identity while retaining failure coverage, and add a higher-severity rule for privileged success with new geography and unknown device trust. Test expected scanner traffic, malicious failures, known travel, VPN egress, and the supplied anomalous success.",
   };
   if (topic.includes("contain")) return {
-    title: "Contain one compromised endpoint without blocking the finance subnet",
+    title: "One finance endpoint is compromised while the rest of the subnet stays busy",
     background: "EDR flags credential dumping on FIN-LT-044 while payroll processing is active. The user account also has a live session on a known clean virtual desktop.",
     evidence: [
       "[A] EDR process tree: winword.exe -> powershell.exe -enc ... -> rundll32 comsvcs.dll MiniDump.",
@@ -361,7 +361,7 @@ function securityCase(topic: string, variant: number): CaseCore {
     solution: "Isolate FIN-LT-044 through EDR/network access control and preserve volatile and EDR evidence. Revoke/rotate affected credentials and review sessions based on scope; validate the clean VDI before allowing continuity. A subnet-wide block is disproportionate without evidence of lateral spread.",
   };
   return {
-    title: variant === 0 ? "Correlate proxy, identity, and endpoint events without overstating causality" : "A firewall review hides an outbound any-any exception",
+    title: variant === 0 ? "Three security timelines disagree about how an incident began" : "A routine firewall review contains one easy-to-miss exception",
     background: variant === 0
       ? "A user clicked a document link before an unusual cloud login. Three systems use different timestamps; one source is 94 seconds slow."
       : "A temporary egress rule was added for vendor testing and remains enabled after the ticket closed.",
@@ -385,7 +385,7 @@ function securityCase(topic: string, variant: number): CaseCore {
 
 function softwareCase(topic: string, variant: number): CaseCore {
   if (topic.includes("api")) return {
-    title: "An idempotency key is recorded after the side effect",
+    title: "A retried payment request occasionally creates two charges",
     background: "A payment API occasionally creates duplicate charges when clients retry after a gateway timeout. The endpoint accepts Idempotency-Key but duplicate records share the same key.",
     evidence: [
       "[A] Handler order: chargeProvider(); orders.insert(); idempotencyKeys.insert(key, response).",
@@ -397,7 +397,7 @@ function softwareCase(topic: string, variant: number): CaseCore {
     solution: "The key is reserved too late. Atomically claim the key/request state before the external side effect, make concurrent requests observe in-progress/completed state, and reconcile uncertain provider outcomes. Test timeout after provider success, concurrent same-key requests, payload mismatch, and retry after failure.",
   };
   if (topic.includes("test")) return {
-    title: "A green unit suite misses a transaction boundary regression",
+    title: "Every unit test is green, but failed orders leave partial records",
     background: "Order creation tests pass, but production can save an order without inventory reservation when the inventory call times out. Unit tests mock both repositories independently.",
     evidence: [
       "[A] Service code commits orderRepository.save(order) before await inventory.reserve(items).",
@@ -409,7 +409,7 @@ function softwareCase(topic: string, variant: number): CaseCore {
     solution: "The unit suite does not test failure ordering or persisted state. Add integration/transaction tests for timeout and rollback or introduce an explicit pending state with retry/compensation. Verify no Confirmed order exists without reservation and avoid an unrelated refactor.",
   };
   if (topic.includes("performance")) return {
-    title: "A list endpoint performs one query per row",
+    title: "A list endpoint slows down in proportion to the number of rows",
     background: "GET /teams has p95 latency 2.8 seconds for 250 teams after member counts were added. CPU is modest, but database query volume rose sharply.",
     evidence: [
       "[A] Trace: SELECT teams once, then SELECT count(*) FROM members WHERE team_id=? repeated 250 times.",
@@ -421,7 +421,7 @@ function softwareCase(topic: string, variant: number): CaseCore {
     solution: "This is an N+1 query path. Fetch counts with a grouped query/join or batched repository method, preserve teams with zero members, and test count correctness, authorization, query count, and p95 under a representative fixture.",
   };
   if (topic.includes("refactor")) return {
-    title: "A proposed refactor changes retry semantics under the guise of cleanup",
+    title: "A small cleanup diff quietly changes how retries behave",
     background: "A pull request consolidates three job handlers into one helper. The old handlers retry transient errors but dead-letter validation errors; the helper retries every thrown error.",
     evidence: [
       "[A] Old handler: if (err instanceof ValidationError) return deadLetter(job, err).",
@@ -433,7 +433,7 @@ function softwareCase(topic: string, variant: number): CaseCore {
     solution: "The helper erases error type and turns permanent validation failures into retries. Preserve/categorize known permanent errors before wrapping transient failures, then test validation, network timeout, unknown error, retry count, and dead-letter metadata.",
   };
   return {
-    title: variant === 0 ? "Empty optional input triggers a deployment regression" : "A background worker acknowledges before durable processing",
+    title: variant === 0 ? "An optional empty value breaks only the new deployment" : "Some queued jobs vanish when a worker exits at the wrong moment",
     background: variant === 0
       ? "POST /orders returns 500 only when discountCode is an empty string. Omitting the field works; the regression followed schema consolidation."
       : "A queue reports successful delivery while some invoices disappear during worker restarts.",
@@ -457,7 +457,7 @@ function softwareCase(topic: string, variant: number): CaseCore {
 
 function automationCase(topic: string, variant: number): CaseCore {
   if (topic.includes("ansible") || topic.includes("idempot")) return {
-    title: "An Ansible task reports changed on every run and restarts production",
+    title: "A no-op Ansible run restarts production every time",
     background: "A hardening playbook restarts nginx every execution although the desired header is already present. The maintenance policy permits restart only after an effective configuration change.",
     evidence: [
       "[A] Task: shell: echo 'add_header X-Frame-Options SAMEORIGIN;' >> /etc/nginx/conf.d/security.conf.",
@@ -469,7 +469,7 @@ function automationCase(topic: string, variant: number): CaseCore {
     solution: "Use a governed template, lineinfile with an exact state, or managed block; notify a validated reload only on change. Run nginx -t before activation. The second run must report no change and no reload; invalid config must stop before service action.",
   };
   if (topic.includes("pars")) return {
-    title: "A CSV parser shifts fields when a quoted value contains a comma",
+    title: "One quoted customer name scrambles an otherwise clean CSV import",
     background: "An account-import script works for simple rows but assigns the wrong department when display names contain commas. The input is RFC-style CSV, not a delimiter-safe flat file.",
     evidence: [
       "[A] Code: line.split(',') assigned to email,name,department.",
@@ -481,7 +481,7 @@ function automationCase(topic: string, variant: number): CaseCore {
     solution: "Use the language's CSV parser rather than split, validate header/field count and email before mutation, and collect row-level errors. Test quoted commas, escaped quotes, blank required fields, Unicode, and a valid control row.",
   };
   if (topic.includes("error")) return {
-    title: "A bulk job swallows failures and exits successfully",
+    title: "A bulk job reports success while several records never arrive",
     background: "A certificate-rotation script processed 80 hosts and exited 0, but 11 hosts still present the old certificate. Operations relies on the exit code for release approval.",
     evidence: [
       "[A] Loop body: rotate(host) except Exception: print('skipped', host).",
@@ -493,7 +493,7 @@ function automationCase(topic: string, variant: number): CaseCore {
     solution: "Track success/failure per host, retry only transient errors with a bound, emit a machine-readable failure list, and return non-zero when required hosts fail. Do not count attempted as completed. Test mixed success, timeout recovery, auth failure, and rerun from the failed set.",
   };
   return {
-    title: variant === 0 ? "A cleanup script crosses its intended filesystem boundary" : "A Python dry run still mutates remote state",
+    title: variant === 0 ? "A cleanup script reaches files outside its target directory" : "A Python dry run changes remote state anyway",
     background: variant === 0
       ? "A fleet cleanup task must remove regular .tmp files older than 14 days under /srv/app/cache only. Production includes symlinks and mounted subdirectories."
       : "A user-deprovisioning tool offers --dry-run, but audit logs show group membership was removed during a preview.",
@@ -517,7 +517,7 @@ function automationCase(topic: string, variant: number): CaseCore {
 
 function cloudCase(topic: string, variant: number): CaseCore {
   if (topic.includes("iam")) return {
-    title: "A deploy role lost one required artifact permission",
+    title: "A deployment succeeds, but the new release cannot read one artifact",
     background: "The production service is healthy, but new releases cannot upload artifacts after an IAM cleanup. An engineer proposes s3:* on all buckets to unblock the pipeline.",
     evidence: [
       "[A] Pipeline: AccessDenied s3:PutObject arn:aws:s3:::app-artifacts/prod/api-218.tgz.",
@@ -529,7 +529,7 @@ function cloudCase(topic: string, variant: number): CaseCore {
     solution: "Restore s3:PutObject only for the approved prod artifact prefix to the deploy role, preserving required conditions such as encryption. Validate with policy simulation and one staged upload/deploy. Revert that statement if the principal or prefix is incorrect.",
   };
   if (topic.includes("deploy")) return {
-    title: "A readiness probe masks a failed dependency migration",
+    title: "Kubernetes marks a release ready while user requests still fail",
     background: "A Kubernetes rollout reaches 100% available, but checkout requests return 500. The readiness endpoint checks only process liveness; version 42 requires a database column not present in production.",
     evidence: [
       "[A] Deployment checkout-api image v42, ready 6/6; rollout status successful.",
@@ -541,7 +541,7 @@ function cloudCase(topic: string, variant: number): CaseCore {
     solution: "The application version and schema are incompatible; readiness is insufficient. Use the approved compatibility strategy: roll back v42 if the migration is not backward-safe, or execute the validated migration under its gate. Add dependency/schema checks and transactional smoke tests before promotion.",
   };
   if (topic.includes("cost")) return {
-    title: "A log-retention change doubled storage cost without improving investigations",
+    title: "Cloud log cost doubles, but investigators gain no useful history",
     background: "Cloud logging spend rose 118% after all debug logs were retained for 365 days. Incident policy requires 30 days searchable and one year only for security audit events.",
     evidence: [
       "[A] Monthly ingest 4.2 TB; 71% is DEBUG from health-check requests.",
@@ -553,7 +553,7 @@ function cloudCase(topic: string, variant: number): CaseCore {
     solution: "Reduce noisy health-check/debug ingest at source, retain application logs searchable for the required 30 days, and archive or expire by class. Keep regulated audit events for one year in the mandated tier. Validate searchability, lifecycle rules, and projected cost before deleting existing data.",
   };
   if (topic.includes("observ")) return {
-    title: "An availability alert ignores partial regional failure",
+    title: "The global availability alert stays green during a regional outage",
     background: "A multi-region API reports 99.99% aggregate availability while users in region eu-west see 14% errors. The alert averages every region into one global ratio.",
     evidence: [
       "[A] eu-west: 14.2% HTTP 5xx over 10 minutes, 2,100 requests/minute.",
@@ -565,7 +565,7 @@ function cloudCase(topic: string, variant: number): CaseCore {
     solution: "Global traffic volume masks eu-west. Alert on per-region error rate and minimum volume, pair it with latency/dependency burn signals, and retain a global SLO view. Define sustained windows, ownership, and a runbook that can shift traffic only after health validation.",
   };
   if (topic.includes("network")) return {
-    title: "A private service endpoint resolves to a public address in one VPC",
+    title: "One VPC reaches a private service through an unexpected public path",
     background: "Workers in VPC-B cannot reach object storage after private-endpoint rollout. VPC-A works; security groups and route tables appear unchanged.",
     evidence: [
       "[A] VPC-A dig storage.internal: 10.82.4.19; VPC-B: 198.51.100.44.",
@@ -577,7 +577,7 @@ function cloudCase(topic: string, variant: number): CaseCore {
     solution: "VPC-B is not associated with the private DNS zone, so it receives the public address and correctly cannot egress. Associate the approved private zone with VPC-B, verify private resolution and endpoint connectivity, and preserve egress policy. Remove the association to roll back.",
   };
   return {
-    title: variant === 0 ? "A managed database is healthy but connection slots are exhausted" : "A single-zone dependency defeats the stated reliability target",
+    title: variant === 0 ? "A healthy managed database rejects new application sessions" : "A multi-zone service still fails when one zone disappears",
     background: variant === 0
       ? "API latency rises during traffic peaks while database CPU remains 42%. New connections time out; existing sessions continue."
       : "A service claims multi-zone resilience, but all workers depend on one zonal cache endpoint.",
@@ -601,7 +601,7 @@ function cloudCase(topic: string, variant: number): CaseCore {
 
 function dataCase(topic: string, variant: number): CaseCore {
   if (topic.includes("clean")) return {
-    title: "A timezone-normalisation step shifts late-night orders into the wrong day",
+    title: "Late-night orders appear on the wrong reporting day",
     background: "Daily revenue for Johannesburg dropped 8% after a pipeline converted every timestamp as if it were already UTC. Raw orders contain ISO offsets.",
     evidence: [
       "[A] Raw order: 2026-07-13T23:30:00+02:00 amount 1200.00.",
@@ -613,7 +613,7 @@ function dataCase(topic: string, variant: number): CaseCore {
     solution: "The pipeline discards the supplied offset and relocalizes incorrectly. Parse offset-aware timestamps, convert to UTC for storage, and derive business date in the configured local zone. Test midnight boundaries, DST zones, missing offsets, and aggregate reconciliation.",
   };
   if (topic.includes("evaluat") || topic.includes("metric")) return {
-    title: "Aggregate accuracy improves after a difficult production slice is removed",
+    title: "A model score improves just as one difficult user group disappears",
     background: "A recommendation model report shows 91% accuracy, up from 86%, while wrong-recommendation tickets rise 38%. The evaluation export changed this week.",
     evidence: [
       "[A] Evaluation query filters WHERE region IS NOT NULL.",
@@ -625,7 +625,7 @@ function dataCase(topic: string, variant: number): CaseCore {
     solution: "The evaluation excludes a common difficult production slice, so aggregate improvement is misleading. Reinclude or separately weight the missing-region slice, report coverage and per-slice metrics, compare against the prior model on the same population, and investigate upstream missingness.",
   };
   if (topic.includes("prompt")) return {
-    title: "A summarisation prompt invents resolution status when notes are incomplete",
+    title: "Incident summaries close cases that the source notes leave unresolved",
     background: "An incident-note summariser marks unresolved cases as fixed because its prompt asks for a definitive resolution even when no closure event exists.",
     evidence: [
       "[A] Prompt: 'State the root cause and final resolution in one paragraph.'",
@@ -637,7 +637,7 @@ function dataCase(topic: string, variant: number): CaseCore {
     solution: "Permit unknown/unresolved outputs, require claims to map to supplied events, and use structured status/evidence references. Reject unsupported resolution text. Evaluate open cases, conflicting notes, explicit closure, missing root cause, and malicious instructions in notes.",
   };
   if (topic.includes("risk")) return {
-    title: "A credit-risk feature leaks the future outcome into training",
+    title: "A credit model performs suspiciously well before launch",
     background: "A model's validation AUC jumped from 0.72 to 0.96 after adding account_status_30d. The model is intended to decide at application time.",
     evidence: [
       "[A] account_status_30d is populated 30 days after application approval.",
@@ -649,7 +649,7 @@ function dataCase(topic: string, variant: number): CaseCore {
     solution: "The feature is unavailable at decision time and leaks future outcome; the random split also risks customer/time leakage. Remove post-decision features, split by time and customer, verify feature availability contracts, and compare to the baseline before deployment.",
   };
   if (topic.includes("pipeline")) return {
-    title: "A successful pipeline run published a partially stale partition",
+    title: "A green data pipeline publishes yesterday's values in one partition",
     background: "The daily dashboard mixes today's sales with yesterday's refunds. The orchestrator reports success because each task exited 0.",
     evidence: [
       "[A] sales partition max(event_date)=2026-07-14; refunds max(event_date)=2026-07-13.",
@@ -661,7 +661,7 @@ function dataCase(topic: string, variant: number): CaseCore {
     solution: "Task success does not imply partition freshness. Validate run_date, source completeness, and row/quality thresholds before atomic publish; quarantine stale fallback data and expose freshness status. Rerun the refund extract and republish only a consistent snapshot.",
   };
   return {
-    title: variant === 0 ? "A retrieval system scores well while citing the wrong policy version" : "A metric dashboard hides a high-impact minority segment",
+    title: variant === 0 ? "A retrieval assistant answers correctly from an obsolete policy" : "A healthy model dashboard hides one costly failure segment",
     background: variant === 0
       ? "A support assistant answers policy questions fluently but cites documents superseded six months ago. Offline evaluation checks answer similarity, not source validity."
       : "A classifier meets its overall target while error rates for one low-volume group are four times higher.",
@@ -685,7 +685,7 @@ function dataCase(topic: string, variant: number): CaseCore {
 
 function engineeringCase(topic: string, variant: number): CaseCore {
   if (topic.includes("maintenance")) return {
-    title: "A replacement fan runs backwards after maintenance",
+    title: "A cooling unit overheats immediately after fan maintenance",
     background: "A field enclosure overheats only above 70% load after one fan assembly was replaced. The system cannot be fully shut down during business hours.",
     evidence: [
       "[A] Inlet 24C; outlet sensor B reaches 61C at 75% load while adjacent outlet sensor A reaches 47C.",
@@ -697,7 +697,7 @@ function engineeringCase(topic: string, variant: number): CaseCore {
     solution: "Fan-2 is powered and spinning but its airflow direction is wrong, likely after connector work. Reduce load within safe limits, coordinate isolated correction by qualified hands, verify direction and temperature under a controlled ramp, and stop if limits rise. Do not infer correct cooling from RPM/current alone.",
   };
   if (topic.includes("safety")) return {
-    title: "A pressure sensor disagrees with the mechanical relief indicator",
+    title: "Two pressure indicators tell opposite stories during operation",
     background: "A process controller reports 9.8 bar near its trip point, but a local mechanical gauge reads 6.1 bar. Production asks to raise the software alarm threshold to avoid stops.",
     evidence: [
       "[A] Digital sensor PT-204: 9.8 bar and rising 0.1 bar/min.",
@@ -709,7 +709,7 @@ function engineeringCase(topic: string, variant: number): CaseCore {
     solution: "The readings conflict and neither instrument may be assumed correct. Do not raise the alarm threshold. Hold/reduce load, preserve the trip, compare with a calibrated independent instrument and inspect the known signal fault under safety procedure. Escalate or stop before the rated relief pressure.",
   };
   if (topic.includes("reliab")) return {
-    title: "A redundant pump pair shares one hidden power dependency",
+    title: "Both 'redundant' pumps stop during a single electrical fault",
     background: "A cooling design claims N+1 redundancy because either pump can carry full flow. A maintenance test of panel P-7 stopped both pumps.",
     evidence: [
       "[A] Pump A and Pump B each deliver 120 L/min; required flow is 95 L/min.",
@@ -722,7 +722,7 @@ function engineeringCase(topic: string, variant: number): CaseCore {
   };
   if (topic.includes("document")) return writingCase("procedure", variant);
   return {
-    title: variant === 0 ? "A load-dependent vibration points to misalignment after service" : "Two sensors reveal a false root-cause assumption",
+    title: variant === 0 ? "A serviced machine vibrates only when load increases" : "Two sensors challenge the team's leading fault theory",
     background: variant === 0
       ? "A motor-pump assembly vibrates only above 65% load after coupling maintenance. Bearings remain within temperature limits."
       : "A remote telemetry unit resets during radio transmission, and operations blames firmware without testing supply voltage.",
@@ -746,7 +746,7 @@ function engineeringCase(topic: string, variant: number): CaseCore {
 
 function writingCase(topic: string, variant: number): CaseCore {
   if (topic.includes("postmortem")) return {
-    title: "A postmortem confuses the triggering deploy with the root control failure",
+    title: "A postmortem blames the last deploy, but the timeline says more",
     background: "A draft incident review says 'Engineer deployed bad code' and recommends more careful engineers. The service was unavailable for 47 minutes after a schema-incompatible release.",
     evidence: [
       "[A] 09:02 deploy v42 began; 09:04 first database-column error; 09:07 alert fired.",
@@ -758,7 +758,7 @@ function writingCase(topic: string, variant: number): CaseCore {
     solution: "The deploy triggered the incident, but missing compatibility/migration gates and weak readiness allowed impact. Separate trigger, root/control failures, contributing approval delay, and recovery. Actions need owners, dates, and proof: schema gate, transactional smoke test, rollback authority, and readiness correction.",
   };
   if (topic.includes("runbook") || topic.includes("procedure")) return {
-    title: "A restart runbook lacks prerequisites, success criteria, and a stop rule",
+    title: "A restart runbook leaves the next operator guessing when to stop",
     background: "A junior responder restarted billing-api twice because the runbook says only 'restart if errors continue'. The second restart extended impact and delayed escalation.",
     evidence: [
       "[A] Existing step 4: 'Restart the service if errors continue.'",
@@ -770,7 +770,7 @@ function writingCase(topic: string, variant: number): CaseCore {
     solution: "The rewrite must identify audience/owner and target, require dependency and impact checks, permit one controlled restart under the stated condition, define commands/placeholders and expected output, observe error rate for three minutes, and stop/escalate above 5%. It must not encourage repeated restart loops.",
   };
   if (topic.includes("report")) return {
-    title: "An executive incident report buries the decision and overstates certainty",
+    title: "An incident report sounds certain but leaves the decision hard to find",
     background: "A five-page outage report opens with packet-level detail but never states customer impact, current risk, or the decision requested from leadership.",
     evidence: [
       "[A] Confirmed impact: checkout unavailable for 18 minutes; 1,842 failed attempts; no completed-order loss found.",
@@ -782,7 +782,7 @@ function writingCase(topic: string, variant: number): CaseCore {
     solution: "Lead with impact, status, risk, and the requested game-day decision. Label the cache configuration as a leading hypothesis, cite missing reproduction, summarize evidence, and move packet detail to an appendix. Include owner and next validation milestone.",
   };
   if (topic.includes("knowledge")) return {
-    title: "A knowledge article gives one environment's command as a universal fix",
+    title: "A popular knowledge article breaks in the second environment",
     background: "A DNS troubleshooting article tells every reader to overwrite /etc/resolv.conf. On managed hosts the file is regenerated and the change can break VPN split DNS.",
     evidence: [
       "[A] Article: 'Fix DNS with echo nameserver 8.8.8.8 > /etc/resolv.conf'.",
@@ -794,7 +794,7 @@ function writingCase(topic: string, variant: number): CaseCore {
     solution: "Start with symptom/scope and read-only resolution tests, identify who owns resolver configuration, preserve split DNS, and provide owner-specific supported changes with validation and rollback. Remove the destructive universal overwrite.",
   };
   if (topic.includes("decision")) return {
-    title: "An architecture decision record lists a choice but not the forces",
+    title: "An architecture record names the winner but cannot defend the choice",
     background: "An ADR says 'Use managed PostgreSQL because it is best' but omits availability, data residency, cost, migration, and operational constraints.",
     evidence: [
       "[A] Workload: 450 writes/s peak, 2 TB data, RPO 5 minutes, RTO 30 minutes.",
@@ -806,7 +806,7 @@ function writingCase(topic: string, variant: number): CaseCore {
     solution: "A defensible ADR weights residency/availability, operational capacity, recovery, cost, and migration. It records why alternatives were rejected, consequences and mitigations, validation, and a trigger such as scale/residency/service availability change; it cannot merely call one option best.",
   };
   return {
-    title: variant === 0 ? "A change guide permits execution without a verified backup" : "A handoff note omits the state that the next operator needs",
+    title: variant === 0 ? "A change guide reaches the point of no return without a safety check" : "The next operator receives a handoff but not the current system state",
     background: variant === 0
       ? "A database upgrade guide lists the upgrade command before backup verification and uses 'roll back if needed' without a restoration procedure."
       : "An overnight operator receives a handoff saying 'API still flaky, keep an eye on it' after partial mitigation.",

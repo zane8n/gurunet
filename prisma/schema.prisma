@@ -282,6 +282,7 @@ model Challenge {
   @@unique([userId, dateKey])
   @@unique([userId, generationSignature])
   @@index([dateKey, generationSignature])
+  @@index([userId, createdAt])
 }
 
 model ExaminerMessage {
@@ -391,6 +392,9 @@ model Submission {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   grade     Grade?
   attachments SubmissionAttachment[]
+
+  @@index([userId, submittedAt])
+  @@index([challengeId])
 }
 
 model SubmissionAttachment {
@@ -443,6 +447,9 @@ model Grade {
   challenge  Challenge  @relation(fields: [challengeId], references: [id], onDelete: Cascade)
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   reviews    GradeReview[]
+
+  @@index([userId, createdAt])
+  @@index([challengeId])
 }
 
 model GradeReview {
@@ -473,6 +480,8 @@ model LedgerEvent {
   createdAt    DateTime   @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 model Redemption {
@@ -486,6 +495,8 @@ model Redemption {
   createdAt    DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 model NotebookEntry {
@@ -504,6 +515,8 @@ model NotebookEntry {
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 model WeeklyDisciplineRecord {

@@ -44,11 +44,11 @@ export function buildChallengeFromAi({
     : ai.scenario;
   const expectedAnswerFormat =
     recovery && !/\brecovery|reinforcement\b/i.test(ai.expectedAnswerFormat)
-      ? `${ai.expectedAnswerFormat}\n\nTargeted reinforcement`
+      ? `${ai.expectedAnswerFormat}\n\nQuick recovery`
       : ai.expectedAnswerFormat;
   const submissionRequirements =
     recovery && !ai.submissionRequirements.some((item) => /\brecovery|reinforcement\b/i.test(item))
-      ? [...ai.submissionRequirements, "Targeted reinforcement answer."].slice(0, 10)
+      ? [...ai.submissionRequirements, "Short quick-recovery answer."].slice(0, 10)
       : ai.submissionRequirements;
 
   return {
@@ -81,12 +81,11 @@ function ensureRecoveryTask(scenario: string, context?: RecoveryContext) {
   if (scenario.includes(task)) return scenario;
 
   const block = [
-    "Task 2 - Targeted reinforcement",
-    ...(context?.target ? [`Focus: ${context.target}`] : []),
+    context?.target ? `Quick recovery - ${context.target}` : "Quick recovery",
     task,
     "",
   ].join("\n");
-  const existingBlock = /(?:Task 2\s*[-:]?[^\n]*|Recovery Component|Recovery Task)[\s\S]*?(?=\n(?:Optional Lab|Submission Deadline)\b|$)/i;
+  const existingBlock = /(?:Task 2\s*[-:]?[^\n]*|Recovery Component|Recovery Task|Quick recovery[^\n]*)[\s\S]*?(?=\n(?:Optional Lab|Submission Deadline|Deadline)\b|$)/i;
   if (existingBlock.test(scenario)) return scenario.replace(existingBlock, block.trimEnd());
   const deadline = /\nSubmission Deadline\b/i;
   return deadline.test(scenario)

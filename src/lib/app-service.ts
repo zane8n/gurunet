@@ -46,7 +46,12 @@ import {
   disciplineSnapshot,
   getDiscipline,
 } from "@/lib/disciplines";
-import { enqueueAiJob, runAiJobNow } from "@/lib/ai-jobs";
+import {
+  enqueueAiJob,
+  getChallengeGenerationStatus,
+  runAiJobNow,
+  runQueuedChallengeGeneration,
+} from "@/lib/ai-jobs";
 import { buildSubmissionContent, type SubmissionAttachment } from "@/lib/submission-content";
 import {
   assessRecoveryOutcome,
@@ -54,6 +59,7 @@ import {
   selectRecoveryContext,
 } from "@/lib/recovery";
 import {
+  CHALLENGE_BLUEPRINT_VERSION,
   blueprintFromSnapshot,
   selectChallengeBlueprint,
   type ChallengeHistorySignal,
@@ -354,7 +360,7 @@ export async function updateStudyProfile(
     recoveryMode: false,
     teamMode: false,
   });
-  await getOrCreateTodayChallenge(user);
+  await getOrCreateTodayChallenge(user, { refreshPersonalization: true });
   return {
     onboardingRequired: false,
     studyProfile: mapped,
@@ -362,38 +368,81 @@ export async function updateStudyProfile(
   };
 }
 
-export async function getDashboard(user: User) {
+export async function getDashboard(
+  user: User,
+  options: { profileState?: Awaited<ReturnType<typeof getStudyProfile>> } = {},
+) {
   await ensureMissedPreviousChallenge(user);
   const today = await getOrCreateTodayChallenge(user);
-  await Promise.all([
-    ensureMarketplaceCatalog(),
-    syncUserNotificationSchedule(user.id),
+  const [dbUser, profileState] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: user.id } }),
+    options.profileState ?? getStudyProfile(user),
   ]);
-
-  const dbUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
   const currentUser = fromDbUser(dbUser);
-  const profileState = await getStudyProfile(currentUser);
   const timezone = getUserTimezone(currentUser.timezone);
   const currentWeekKey = weekKeyFor(new Date(), timezone);
+  const progressChallengeSelect = {
+    id: true,
+    dateKey: true,
+    title: true,
+    topic: true,
+    difficulty: true,
+    status: true,
+    deadlineAt: true,
+    createdAt: true,
+    submissions: {
+      orderBy: { submittedAt: "desc" },
+      take: 1,
+      select: { submittedAt: true },
+    },
+    grades: {
+      orderBy: { createdAt: "desc" },
+      take: 1,
+      select: {
+        finalScore: true,
+        updatedPis: true,
+        ertEarned: true,
+        ertBalance: true,
+        nextImprovementTarget: true,
+      },
+    },
+  } as const satisfies Prisma.ChallengeSelect;
   const [
-    submissions,
-    grades,
+    todaySubmissionDb,
+    todayGradeDb,
+    recentProgressChallenges,
+    gradedProgressChallenges,
     notebookEntries,
     redemptions,
-    challenges,
-    gradedChallenges,
     todayNotice,
     challengeSettings,
     cohorts,
     socialData,
     weeklyRecord,
+    challengeGenerationStatus,
   ] =
     await Promise.all([
-      prisma.submission.findMany({
-        where: { userId: user.id },
+      prisma.submission.findFirst({
+        where: { userId: user.id, challengeId: today.id },
         include: { attachments: true },
+        orderBy: { submittedAt: "desc" },
       }),
-      prisma.grade.findMany({ where: { userId: user.id } }),
+      prisma.grade.findFirst({
+        where: { userId: user.id, challengeId: today.id },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.challenge.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: "desc" },
+        take: 8,
+        select: progressChallengeSelect,
+      }),
+      prisma.challenge.findMany({
+        where: { userId: user.id, grades: { some: {} } },
+        orderBy: { createdAt: "desc" },
+        take: 12,
+        select: progressChallengeSelect,
+      }),
       prisma.notebookEntry.findMany({
         where: { userId: user.id },
         orderBy: { createdAt: "desc" },
@@ -404,16 +453,6 @@ export async function getDashboard(user: User) {
         orderBy: { createdAt: "desc" },
         take: 5,
       }),
-      prisma.challenge.findMany({
-        where: { userId: user.id },
-        orderBy: { createdAt: "desc" },
-        take: 8,
-      }),
-      prisma.challenge.findMany({
-        where: { userId: user.id, grades: { some: {} } },
-        orderBy: { createdAt: "desc" },
-        take: 12,
-      }),
       findLatestChallengeNotice(user.id, today.id),
       getChallengeSettings(currentUser),
       getCohortSnapshot(currentUser),
@@ -421,22 +460,23 @@ export async function getDashboard(user: User) {
       prisma.weeklyDisciplineRecord.findUnique({
         where: { userId_weekKey: { userId: user.id, weekKey: currentWeekKey } },
       }),
+      getChallengeGenerationStatus(today.id),
     ]);
 
-  const todaySubmissionDb =
-    submissions.find((item) => item.challengeId === today.id) ?? null;
   const todaySubmission = todaySubmissionDb
     ? submissionWithAttachments(todaySubmissionDb)
     : null;
-  const todayGradeDb = grades.find((item) => item.challengeId === today.id) ?? null;
   const progressChallenges = Array.from(
-    new Map([...challenges, ...gradedChallenges].map((challenge) => [challenge.id, challenge])).values(),
+    new Map(
+      [...recentProgressChallenges, ...gradedProgressChallenges]
+        .map((challenge) => [challenge.id, challenge]),
+    ).values(),
   )
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
     .slice(0, 14);
   const progress = progressChallenges.map((challenge) => {
-    const grade = grades.find((item) => item.challengeId === challenge.id);
-    const submission = submissions.find((item) => item.challengeId === challenge.id);
+    const grade = challenge.grades[0];
+    const submission = challenge.submissions[0];
     return {
       id: challenge.id,
       date: challenge.dateKey,
@@ -467,7 +507,7 @@ export async function getDashboard(user: User) {
 
   return {
     user: currentUser,
-    today,
+    today: todaySubmission ? today : { ...today, solution: "" },
     todayNotice: todayNotice
       ? {
           id: todayNotice.id,
@@ -484,6 +524,7 @@ export async function getDashboard(user: User) {
     studyProfile: profileState.studyProfile,
     activeDiscipline: profileState.activeDiscipline,
     nextChallengeUnlockAt: nextChallengeUnlockIso(today.dateKey, timezone),
+    challengeGenerationStatus,
     todaySubmission,
     todayGrade: todayGradeDb ? fromDbGrade(todayGradeDb) : null,
     progress,
@@ -492,6 +533,14 @@ export async function getDashboard(user: User) {
     redemptions: redemptions.map(fromDbRedemption),
     social: buildSocialSnapshot(currentUser, socialData),
   };
+}
+
+export async function runDashboardBackgroundTasks(userId: string, challengeId?: string) {
+  await Promise.allSettled([
+    ensureMarketplaceCatalog(),
+    syncUserNotificationSchedule(userId),
+    challengeId ? runQueuedChallengeGeneration(challengeId) : Promise.resolve(null),
+  ]);
 }
 
 type RetentionProgressRow = {
@@ -632,14 +681,39 @@ function weeklyRevealMessage(averageScore: number | null, completedDays: number)
   return `You kept the learning loop active for ${completedDays} days. Use the correction themes as next week's starting point.`;
 }
 
-export async function getOrCreateTodayChallenge(user: User) {
+export async function getOrCreateTodayChallenge(
+  user: User,
+  options: { refreshPersonalization?: boolean } = {},
+) {
   const dbUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
   const currentUser = fromDbUser(dbUser);
-  const [existingChallenges, settings, profileState] = await Promise.all([
+  const today = await currentChallengeDateKeyForUser(currentUser);
+  const existing = await prisma.challenge.findUnique({
+    where: { userId_dateKey: { userId: user.id, dateKey: today } },
+    include: {
+      submissions: { select: { id: true }, take: 1 },
+      grades: { select: { id: true }, take: 1 },
+    },
+  });
+  const existingBlueprint = blueprintFromSnapshot(existing?.disciplineSnapshot);
+  const canUseExistingImmediately = Boolean(
+    existing &&
+      !options.refreshPersonalization &&
+      (existing.submissions.length > 0 ||
+        existing.grades.length > 0 ||
+        existing.status === "RestDay" ||
+        existingBlueprint?.version === CHALLENGE_BLUEPRINT_VERSION),
+  );
+  if (existing && canUseExistingImmediately) {
+    const normalized = await normalizeActiveChallengeDeadline(currentUser, existing);
+    return fromDbChallenge(normalized);
+  }
+
+  const [existingChallenges, settings, profileState, sameDayChallenges] = await Promise.all([
     prisma.challenge.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
-      take: 180,
+      take: 60,
       select: {
         userId: true,
         dateKey: true,
@@ -653,14 +727,20 @@ export async function getOrCreateTodayChallenge(user: User) {
     }),
     getChallengeSettings(currentUser),
     getStudyProfile(currentUser),
+    prisma.challenge.findMany({
+      where: { dateKey: today, userId: { not: user.id } },
+      orderBy: { createdAt: "desc" },
+      take: 120,
+      select: {
+        dateKey: true,
+        title: true,
+        topic: true,
+        scenario: true,
+        status: true,
+        disciplineSnapshot: true,
+      },
+    }),
   ]);
-  const today = currentChallengeDateKey(currentUser, existingChallenges);
-  const sameDayChallenges = await prisma.challenge.findMany({
-    where: { dateKey: today, userId: { not: user.id } },
-    orderBy: { createdAt: "desc" },
-    take: 500,
-    select: { dateKey: true, title: true, topic: true, scenario: true, status: true, disciplineSnapshot: true },
-  });
   const restDay = profileState.studyProfile?.restDay ?? profileState.activeDiscipline.restDay ?? 0;
   const scheduledRecovery = isDayAfterScheduledRest(today, restDay);
   const discipline = challengeDisciplineSnapshot(
@@ -683,11 +763,6 @@ export async function getOrCreateTodayChallenge(user: User) {
   });
   const recoveryRequired = Boolean(recoveryContext);
 
-  const existing = await prisma.challenge.findFirst({
-    where: { userId: user.id, dateKey: today },
-    include: { submissions: true, grades: true },
-    orderBy: { createdAt: "desc" },
-  });
   if (isScheduledRestDay(today, restDay)) {
     const restChallenge = createRestDayChallenge(currentUser, today, discipline);
     if (existing?.submissions.length || existing?.grades.length) {
@@ -749,7 +824,8 @@ export async function getOrCreateTodayChallenge(user: User) {
     const canRefreshForProfile =
       existing.submissions.length === 0 &&
       existing.grades.length === 0 &&
-      (disciplineProfileKey(existingDomain.disciplineSnapshot) !== disciplineProfileKey(discipline) ||
+      (existingBlueprint?.version !== CHALLENGE_BLUEPRINT_VERSION ||
+        disciplineProfileKey(existingDomain.disciplineSnapshot) !== disciplineProfileKey(discipline) ||
         existingDomain.isRecovery !== recoveryRequired ||
         existingDomain.recoveryContext?.targetKey !== recoveryContext?.targetKey);
 
@@ -796,9 +872,9 @@ export async function getOrCreateTodayChallenge(user: User) {
           disciplineSnapshot: discipline,
         },
       });
-      const job = await enqueueAiJob(
+      await enqueueAiJob(
         "ChallengeGeneration",
-        `challenge-profile:v4:${user.id}:${today}:${disciplineProfileFingerprint(discipline)}`,
+        `challenge-profile:v${CHALLENGE_BLUEPRINT_VERSION}:${user.id}:${today}:${disciplineProfileFingerprint(discipline)}`,
         {
           userId: user.id,
           challengeId: updated.id,
@@ -812,11 +888,8 @@ export async function getOrCreateTodayChallenge(user: User) {
           recoveryContext,
         },
       );
-      await runAiJobNow(job.id);
       await consumeManualRecoveryRequest(user.id, settings.recoveryMode, recoveryRequired);
-      return fromDbChallenge(
-        await prisma.challenge.findUniqueOrThrow({ where: { id: updated.id } }),
-      );
+      return fromDbChallenge(updated);
     }
 
     const normalized = await normalizeActiveChallengeDeadline(currentUser, existing);
@@ -869,7 +942,7 @@ export async function getOrCreateTodayChallenge(user: User) {
     },
   });
 
-  const job = await enqueueAiJob("ChallengeGeneration", `challenge:v4:${user.id}:${today}:${discipline.generationContext?.blueprint?.blueprintId ?? "base"}`, {
+  await enqueueAiJob("ChallengeGeneration", `challenge:v${CHALLENGE_BLUEPRINT_VERSION}:${user.id}:${today}:${discipline.generationContext?.blueprint?.blueprintId ?? "base"}`, {
     userId: user.id,
     challengeId: created.id,
     dateKey: today,
@@ -881,13 +954,10 @@ export async function getOrCreateTodayChallenge(user: User) {
     recentWeaknesses: recentGrades.map((grade) => grade.nextImprovementTarget),
     recoveryContext,
   });
-  await runAiJobNow(job.id);
 
   await consumeManualRecoveryRequest(user.id, settings.recoveryMode, recoveryRequired);
 
-  return fromDbChallenge(
-    await prisma.challenge.findUniqueOrThrow({ where: { id: created.id } }),
-  );
+  return fromDbChallenge(created);
 }
 
 export async function forceGenerateChallenge(user: User) {
@@ -963,11 +1033,7 @@ export async function runSupportAction(
 
 export async function ensureMissedPreviousChallenge(user: User) {
   const timezone = getUserTimezone(user.timezone);
-  const existingChallenges = await prisma.challenge.findMany({
-    where: { userId: user.id },
-    select: { userId: true, dateKey: true, createdAt: true },
-  });
-  const today = currentChallengeDateKey(user, existingChallenges);
+  const today = await currentChallengeDateKeyForUser(user);
   const candidates = await prisma.challenge.findMany({
     where: {
       userId: user.id,
@@ -976,6 +1042,7 @@ export async function ensureMissedPreviousChallenge(user: User) {
       submissions: { none: {} },
     },
     orderBy: { dateKey: "desc" },
+    take: 31,
   });
 
   for (const challenge of candidates) {
@@ -2710,40 +2777,40 @@ function createDisciplineFallbackChallenge(
   const includeLab = /lab|hands-on|practical/i.test(
     blueprint?.modeLabel ?? discipline.formats[0] ?? "",
   );
-  const caseReference = blueprint
-    ? `GN-${blueprint.nonce.slice(0, 9).toUpperCase()}`
-    : `GN-${Math.abs(user.id.split("").reduce((total, item) => total + item.charCodeAt(0), 0)) + 1000}`;
-
+  const briefNudges = [
+    "One clue narrows the field sharply. Find it before reaching for a broad fix.",
+    "Read this as a small mystery: what changed, what stayed healthy, and which check would settle it?",
+    "The tempting answer is not automatically the safest one. Build the case from the artifacts.",
+    "Aim for a response another practitioner could follow, verify, and safely reverse.",
+  ];
+  const briefNudge = briefNudges[stableSelectionIndex(
+    `${user.id}:${options.dateKey}:${blueprint?.nonce ?? focus}:brief-nudge`,
+    briefNudges.length,
+  )];
   return {
     ...base,
     title: packet.title.slice(0, 120),
     topic: focus,
     scenario: [
-      "Task 1 - Main assessment",
-      "Case brief",
-      `You are the ${blueprint?.practitionerRole ?? "responsible practitioner"} for a ${blueprint?.scenarioFamily ?? discipline.label.toLowerCase()} case (reference ${caseReference})${blueprint?.secondaryDiscipline ? ` with a governed ${blueprint.secondaryDiscipline} integration boundary` : ""}.`,
-      "",
-      "Context",
+      "The setup",
       packet.background,
       "",
-      "Supplied artifacts",
+      "Clues",
       ...packet.evidence,
       "",
-      "Objective",
-      packet.objective,
-      "",
+      briefNudge,
       ...(includeLab
-        ? ["Optional lab", packet.lab, ""]
+        ? ["", "Try it yourself (optional)", packet.lab]
         : []),
       ...(options.recovery
         ? [
-            "Task 2 - Targeted reinforcement",
-            `Focus: ${recoveryTopic}`,
-            options.recoveryContext?.task ?? `Explain one important failure mode or misconception related to ${recoveryTopic}. State the evidence that would expose it and one validation step.`,
             "",
+            `Quick recovery - ${recoveryTopic}`,
+            options.recoveryContext?.task ?? `Explain one important failure mode or misconception related to ${recoveryTopic}. State the evidence that would expose it and one validation step.`,
           ]
         : []),
-      "Submission Deadline",
+      "",
+      "Deadline",
       "15:00 local time. Do not reveal the solution until after submission.",
     ].join("\n"),
     objective: packet.objective,
@@ -2756,7 +2823,7 @@ function createDisciplineFallbackChallenge(
     allowedTools: packet.allowedTools,
     expectedAnswerFormat: [
       ...sections.map((section, index) => `${index + 1}. ${section}`),
-      ...(options.recovery ? [`${sections.length + 1}. Recovery task`] : []),
+      ...(options.recovery ? [`${sections.length + 1}. Quick recovery`] : []),
     ].join("\n"),
     submissionRequirements: [
       "Core answer or root cause.",
@@ -2764,17 +2831,17 @@ function createDisciplineFallbackChallenge(
       "Exact checks, commands, code, or work product.",
       "Verification method.",
       "Risk, rollback, limitation, or escalation note.",
-      ...(options.recovery ? ["Recovery retrieval task answer."] : []),
+      ...(options.recovery ? ["Short quick-recovery answer."] : []),
     ].slice(0, 10),
     solution: [
       packet.solution,
       ...(options.recovery
-        ? [`Reinforcement teaching answer: ${options.recoveryContext ? recoveryTeachingAnswer(options.recoveryContext) : `Explain ${recoveryTopic} with a correction, decisive evidence, and a validation step.`}`]
+        ? [`Quick-recovery teaching answer: ${options.recoveryContext ? recoveryTeachingAnswer(options.recoveryContext) : `Explain ${recoveryTopic} with a correction, decisive evidence, and a validation step.`}`]
         : []),
     ].join(" "),
     recoveryContext: options.recoveryContext,
     antiGenericRequirement:
-      `Your answer must use the ${caseReference} artifacts, reach a case-specific conclusion, and follow these sections: ${sections.join(", ")}.`,
+      `Your answer must use the supplied artifacts, reach a case-specific conclusion, and follow these sections: ${sections.join(", ")}.`,
   };
 }
 
@@ -3139,10 +3206,8 @@ async function getCohortSnapshot(user: User) {
   };
   let owned: CohortWithEnrollments[];
   let joined: { cohortChallenge: CohortWithEnrollments }[];
-  let allUsers: Awaited<ReturnType<typeof prisma.user.findMany>>;
-  let grades: Awaited<ReturnType<typeof prisma.grade.findMany>>;
   try {
-    [owned, joined, allUsers, grades] = await Promise.all([
+    [owned, joined] = await Promise.all([
       prisma.cohortChallenge.findMany({
         where: { ownerId: user.id },
         include: { enrollments: true },
@@ -3159,16 +3224,37 @@ async function getCohortSnapshot(user: User) {
         orderBy: { createdAt: "desc" },
         take: 6,
       }),
-      prisma.user.findMany(),
-      prisma.grade.findMany({ orderBy: { createdAt: "desc" } }),
     ]);
   } catch {
     return [];
   }
-  const userMap = new Map(allUsers.map((item) => [item.id, fromDbUser(item)]));
+
+  const cohorts = [
+    ...owned,
+    ...joined.map((enrollment) => enrollment.cohortChallenge),
+  ];
+  const memberIds = Array.from(new Set(cohorts.flatMap((cohort) =>
+    cohort.enrollments.map((enrollment) => enrollment.userId),
+  )));
+  const [members, grades] = await Promise.all([
+    prisma.user.findMany({
+      where: { id: { in: memberIds } },
+      select: { id: true, name: true, pisScore: true, currentStreak: true },
+    }),
+    prisma.grade.findMany({
+      where: { userId: { in: memberIds } },
+      orderBy: [{ userId: "asc" }, { createdAt: "desc" }],
+      distinct: ["userId"],
+      select: { userId: true, finalScore: true },
+    }),
+  ]);
+  const userMap = new Map(members.map((item) => [item.id, {
+    ...item,
+    name: item.name?.trim() || "GURUnet learner",
+  }]));
   const latestGradeByUser = new Map<string, number>();
   for (const grade of grades) {
-    if (!latestGradeByUser.has(grade.userId)) latestGradeByUser.set(grade.userId, grade.finalScore);
+    latestGradeByUser.set(grade.userId, grade.finalScore);
   }
   const byId = new Map<string, ReturnType<typeof mapCohort>>();
   for (const cohort of owned) byId.set(cohort.id, mapCohort(cohort, userMap, latestGradeByUser, user.id));
@@ -3222,7 +3308,7 @@ function mapCohort(
     createdAt: Date;
     enrollments: { userId: string }[];
   },
-  userMap: Map<string, User>,
+  userMap: Map<string, { id: string; name: string; pisScore: number; currentStreak: number }>,
   latestGradeByUser: Map<string, number>,
   viewerId: string,
 ) {
@@ -3290,6 +3376,20 @@ function currentChallengeDateKey(
     (item) => item.userId === user.id && item.dateKey === rolledKey,
   );
   return hasPreviousChallenge ? rolledKey : calendarToday;
+}
+
+async function currentChallengeDateKeyForUser(user: User) {
+  const timezone = getUserTimezone(user.timezone);
+  const now = new Date();
+  const calendarToday = dateKeyFor(now, timezone);
+  const rolledKey = challengeDateKeyFor(now, timezone);
+  if (rolledKey === calendarToday) return calendarToday;
+
+  const previousChallenge = await prisma.challenge.findUnique({
+    where: { userId_dateKey: { userId: user.id, dateKey: rolledKey } },
+    select: { id: true },
+  });
+  return previousChallenge ? rolledKey : calendarToday;
 }
 
 async function normalizeActiveChallengeDeadline<T extends {
@@ -3533,33 +3633,63 @@ async function getSocialData(userId: string) {
   const friendships = await prisma.friendship.findMany({
     where: { OR: [{ userId }, { friendId: userId }] },
   });
+  const relatedProfileIds = [
+    userId,
+    ...friendships.map((item) => item.userId === userId ? item.friendId : item.userId),
+  ];
   const privateProfileIds = [
     userId,
     ...friendships
       .filter((item) => item.status === "Accepted")
       .map((item) => item.userId === userId ? item.friendId : item.userId),
   ];
-  const [users, grades, challenges, marketplaceChallenges, challengeEnrollments, studyProfiles, socialSettings] =
+  const [relatedUsers, discoverableUsers, grades, challengeCounts, marketplaceChallenges, challengeEnrollments] =
     await Promise.all([
       prisma.user.findMany({
+        where: { id: { in: relatedProfileIds } },
         select: {
           id: true,
           name: true,
           pisScore: true,
           ertBalance: true,
           currentStreak: true,
+          studyProfile: true,
+          socialSettings: true,
         },
       }),
-      prisma.grade.findMany({ where: { userId: { in: privateProfileIds } } }),
-      prisma.challenge.findMany({
+      prisma.user.findMany({
+        where: {
+          id: { notIn: relatedProfileIds },
+          socialSettings: { is: { discoverable: true } },
+        },
+        orderBy: [{ pisScore: "desc" }, { id: "asc" }],
+        take: 80,
+        select: {
+          id: true,
+          name: true,
+          pisScore: true,
+          ertBalance: true,
+          currentStreak: true,
+          studyProfile: true,
+          socialSettings: true,
+        },
+      }),
+      prisma.grade.findMany({
         where: { userId: { in: privateProfileIds } },
-        select: { userId: true },
+        orderBy: [{ userId: "asc" }, { createdAt: "desc" }],
+        distinct: ["userId"],
+        select: { userId: true, finalScore: true, createdAt: true },
+      }),
+      prisma.challenge.groupBy({
+        by: ["userId"],
+        where: { userId: { in: privateProfileIds } },
+        _count: { _all: true },
       }),
       prisma.marketplaceChallenge.findMany({ orderBy: { createdAt: "asc" } }),
-      prisma.challengeEnrollment.findMany(),
-      prisma.userStudyProfile.findMany(),
-      prisma.userSocialSettings.findMany(),
+      prisma.challengeEnrollment.findMany({ where: { userId } }),
     ]);
+
+  const users = [...relatedUsers, ...discoverableUsers];
 
   return {
     users: users.map((item) => ({ ...item, name: item.name?.trim() || "GURUnet learner" })),
@@ -3568,7 +3698,9 @@ async function getSocialData(userId: string) {
       finalScore: grade.finalScore,
       createdAt: grade.createdAt.toISOString(),
     })),
-    challenges,
+    challengeCounts: Object.fromEntries(
+      challengeCounts.map((item) => [item.userId, item._count._all]),
+    ) as Record<string, number>,
     friendships: friendships.map((friendship) => ({
       id: friendship.id,
       userId: friendship.userId,
@@ -3577,15 +3709,19 @@ async function getSocialData(userId: string) {
       createdAt: friendship.createdAt.toISOString(),
       updatedAt: friendship.updatedAt.toISOString(),
     })),
-    marketplaceChallenges: marketplaceChallenges.map(fromDbMarketplaceChallenge),
+    marketplaceChallenges: marketplaceChallenges.length > 0
+      ? marketplaceChallenges.map(fromDbMarketplaceChallenge)
+      : marketplaceCatalog(),
     challengeEnrollments: challengeEnrollments.map((enrollment) => ({
       id: enrollment.id,
       userId: enrollment.userId,
       marketplaceChallengeId: enrollment.marketplaceChallengeId,
       createdAt: enrollment.createdAt.toISOString(),
     })),
-    studyProfiles: studyProfiles.map(fromDbStudyProfile),
-    socialSettings,
+    studyProfiles: users.flatMap((item) =>
+      item.studyProfile ? [fromDbStudyProfile(item.studyProfile)] : [],
+    ),
+    socialSettings: users.flatMap((item) => item.socialSettings ? [item.socialSettings] : []),
   };
 }
 
@@ -3604,7 +3740,7 @@ function buildSocialSnapshot(
       currentStreak: number;
     }[];
     grades: { userId: string; finalScore: number; createdAt: string }[];
-    challenges: { userId: string }[];
+    challengeCounts: Record<string, number>;
     friendships: {
       id: string;
       userId: string;
@@ -3646,7 +3782,7 @@ function buildSocialSnapshot(
     pisScore: item.pisScore,
     ertBalance: item.ertBalance,
     currentStreak: item.currentStreak,
-    challengeCount: data.challenges.filter((challenge) => challenge.userId === item.id).length,
+    challengeCount: data.challengeCounts[item.id] ?? 0,
     latestScore: latestGradeByUser.get(item.id)?.finalScore ?? null,
     isFriend: friendIds.has(item.id),
     isYou: item.id === user.id,
@@ -3777,9 +3913,6 @@ function buildSocialSnapshot(
     },
     marketplace: data.marketplaceChallenges.map((challenge) => ({
       ...challenge,
-      enrollmentCount: data.challengeEnrollments.filter(
-        (item) => item.marketplaceChallengeId === challenge.id,
-      ).length,
       isEnrolled: enrolledIds.has(challenge.id),
     })),
     enrollments: data.challengeEnrollments.filter((item) => item.userId === user.id),
@@ -3819,7 +3952,7 @@ function preferredProfessionFor(profile?: StudyProfile) {
   return getDiscipline(profile.primaryDiscipline).label;
 }
 
-async function ensureMarketplaceCatalog() {
+function marketplaceCatalog() {
   const catalog: MarketplaceChallenge[] = [
     {
       id: "market_vlan-stp-incident-room",
@@ -3853,16 +3986,19 @@ async function ensureMarketplaceCatalog() {
     },
   ];
 
-  for (const item of catalog) {
-    await prisma.marketplaceChallenge.upsert({
-      where: { id: item.id },
-      update: {},
-      create: {
-        ...item,
-        createdAt: new Date(item.createdAt),
-      },
-    });
-  }
+  return catalog;
+}
+
+async function ensureMarketplaceCatalog() {
+  const catalog = marketplaceCatalog();
+
+  await prisma.marketplaceChallenge.createMany({
+    data: catalog.map((item) => ({
+      ...item,
+      createdAt: new Date(item.createdAt),
+    })),
+    skipDuplicates: true,
+  });
 }
 
 function submissionWithAttachments(

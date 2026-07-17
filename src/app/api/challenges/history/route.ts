@@ -9,8 +9,14 @@ export async function GET() {
     const challenges = await prisma.challenge.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
+      include: { submissions: { select: { id: true }, take: 1 } },
     });
-    return json({ challenges: challenges.map(fromDbChallenge) });
+    return json({
+      challenges: challenges.map((challenge) => {
+        const mapped = fromDbChallenge(challenge);
+        return challenge.submissions.length > 0 ? mapped : { ...mapped, solution: "" };
+      }),
+    });
   } catch (error) {
     return apiError(error);
   }

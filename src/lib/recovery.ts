@@ -120,7 +120,7 @@ export function selectRecoveryContext(input: {
   const priorAssignments = recentTargets.filter((item) => item === targetKey).length;
   const styles = ["Evidence drill", "Error correction", "Transfer check", "Teach-back"] as const;
   const taskStyle = styles[stableIndex(`${input.dateKey}:${targetKey}:${priorAssignments}`, styles.length)];
-  const task = recoveryTask(taskStyle, candidate.target, candidate.skill, input.dateKey);
+  const task = recoveryTask(taskStyle, candidate.target, input.dateKey);
 
   return {
     targetKey,
@@ -170,23 +170,18 @@ export function assessRecoveryOutcome(input: {
 function recoveryTask(
   style: RecoveryContext["taskStyle"],
   target: string,
-  skill: string,
   dateKey: string,
 ) {
   const microCase = recoveryMicroCase(target, dateKey);
   const direction = style === "Error correction"
-    ? "Identify the mistaken conclusion, correct it, and give the exact observation that proves the correction."
+    ? "Spot the mistaken conclusion, correct it, and name the observation that proves your correction."
     : style === "Transfer check"
-      ? "State the governing principle, apply it to this evidence, and give one validation step that could falsify your conclusion."
+      ? "Apply the governing principle to the evidence and give one check that could disprove your conclusion."
       : style === "Teach-back"
-        ? "Explain the answer to a junior colleague in 4-6 precise lines, including one common mistake and its operational consequence."
-        : "Name the decisive artifact, explain what it proves and does not prove, then give the next discriminating check.";
-  return [
-    `Retrieval target: ${target}.`,
-    `Skill to strengthen: ${cleanSkill(skill)}.`,
-    microCase.prompt,
-    direction,
-  ].join(" ");
+        ? "Teach the answer back in 4-6 precise lines, including one common mistake and its consequence."
+        : "Choose the decisive clue, say what it proves and does not prove, then give the next useful check.";
+  const prompt = microCase.prompt.replace(/^Micro-case:\s*/i, "");
+  return `${prompt}\n\n${direction} Keep the answer short and use the evidence.`;
 }
 
 export function recoveryTeachingAnswer(context: RecoveryContext) {
@@ -242,10 +237,6 @@ function cleanRecoveryTarget(value: string) {
   if (rest.length === 0) return first.slice(0, 80);
   const firstLooksLikeDiscipline = /^(networking|linux|systems|cybersecurity|software engineering|automation|scripting|cloud|devops|data|ai|applied engineering|technical writing)$/i.test(first);
   return (firstLooksLikeDiscipline ? rest[0] : first).slice(0, 80);
-}
-
-function cleanSkill(value: string) {
-  return value.replace(/\s+/g, " ").replace(/[.]+$/, "").trim().slice(0, 180) || "connect a conclusion to decisive evidence";
 }
 
 function recoveryAnswer(content: string) {

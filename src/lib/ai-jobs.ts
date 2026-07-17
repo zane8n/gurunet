@@ -27,6 +27,13 @@ type AiJobType =
   | "StrictCritique"
   | "NotebookSummary";
 
+export type ChallengeGenerationStatus =
+  | "Queued"
+  | "Running"
+  | "Succeeded"
+  | "Failed"
+  | "FallbackUsed";
+
 export async function enqueueAiJob(
   type: AiJobType,
   dedupeKey: string,
@@ -79,6 +86,31 @@ export async function runDueAiJobs(limit = 3) {
   }
 
   return results;
+}
+
+export async function getChallengeGenerationStatus(challengeId: string) {
+  const job = await prisma.aiJob.findFirst({
+    where: {
+      type: "ChallengeGeneration",
+      payload: { path: ["challengeId"], equals: challengeId },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { status: true },
+  });
+  return (job?.status ?? null) as ChallengeGenerationStatus | null;
+}
+
+export async function runQueuedChallengeGeneration(challengeId: string) {
+  const job = await prisma.aiJob.findFirst({
+    where: {
+      type: "ChallengeGeneration",
+      status: "Queued",
+      payload: { path: ["challengeId"], equals: challengeId },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  return job ? runAiJobNow(job.id) : null;
 }
 
 export async function runAiJobNow(jobId: string) {
@@ -225,7 +257,7 @@ async function runChallengeGenerationJob(payload: Record<string, unknown>) {
         userId: { not: challenge.userId },
       },
       orderBy: { createdAt: "desc" },
-      take: 500,
+      take: 60,
       select: { dateKey: true, title: true, topic: true, scenario: true, status: true, disciplineSnapshot: true },
     }),
   ]);

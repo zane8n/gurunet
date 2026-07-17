@@ -1,6 +1,6 @@
 import type { ChallengeBlueprint, DisciplineSnapshot } from "@/lib/domain";
 
-export const CHALLENGE_BLUEPRINT_VERSION = 4;
+export const CHALLENGE_BLUEPRINT_VERSION = 5;
 
 export type ChallengeHistorySignal = {
   dateKey: string;
@@ -199,6 +199,19 @@ export function challengeNoveltyIssues(input: {
   for (const phrase of vaguePhrases) {
     if (normalizedPacket.includes(normalize(phrase))) {
       issues.push(`The challenge uses an abstract placeholder instead of case evidence: "${phrase}".`);
+    }
+  }
+  const internalLabels = [
+    "assessment mode",
+    "role and setting",
+    "task 1 - main assessment",
+    "required deliverable",
+    "retrieval target",
+    "skill to strengthen",
+  ];
+  for (const label of internalLabels) {
+    if (normalizedPacket.includes(normalize(label))) {
+      issues.push(`The learner brief exposes internal generator language: "${label}".`);
     }
   }
   if (concreteArtifactScore(input.scenario) < 3) {

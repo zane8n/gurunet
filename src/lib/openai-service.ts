@@ -342,7 +342,7 @@ async function createOpenAiChallengeCompletion(
     format: openAiChallengeResponseFormat,
     effort: openAiChallengeReasoningEffort(),
     max_output_tokens: 6200,
-    prompt_cache_key: "gurunet-challenge-v7",
+    prompt_cache_key: "gurunet-challenge-v8",
   });
 }
 
@@ -409,35 +409,26 @@ function openAiChallengeInput(context: ChallengeContext, rejectionFeedback: stri
   return {
     learner: {
       discipline: discipline?.label ?? context.track ?? "Technical practice",
-      selectedTopic: blueprint?.primaryTopic ?? context.topicFocus ?? discipline?.topics[0],
-      preferredFormats: discipline?.formats ?? [],
+      topic: blueprint?.primaryTopic ?? context.topicFocus ?? discipline?.topics[0],
       formatHint: blueprint?.modeLabel ?? discipline?.generationContext?.preferredFormat,
-      currentLevel: discipline?.currentLevel,
+      level: discipline?.currentLevel,
       difficulty: context.difficulty,
-      availableMinutes: context.durationMinutes ?? discipline?.generationContext?.durationMinutes,
+      timeAvailableMinutes: context.durationMinutes ?? discipline?.generationContext?.durationMinutes,
       expectedEvidence: discipline?.evidenceTypes ?? [],
-      preferredAnswerSections: discipline?.responseSections ?? [],
-      weakAreas: discipline?.weakAreas ?? [],
-      avoidAreas: discipline?.avoidAreas ?? [],
-      goals: discipline?.goals ?? [],
+      answerOutline: discipline?.responseSections ?? [],
       preferenceNotes: discipline?.preferenceNotes,
-      pisScore: context.user.pisScore,
-      streak: context.user.currentStreak,
-      recentWeaknesses: context.recentWeaknesses,
       privateMemory: privateChallengeMemoryForUser(context.user),
     },
-    continuity: {
+    optionalRecovery: {
       date: context.dateKey,
-      timePressureRequested: context.pressure,
-      recoveryTask: context.recovery ? context.recoveryContext?.task : null,
-      recoveryTarget: context.recovery ? context.recoveryContext?.target : null,
+      task: context.recovery ? context.recoveryContext?.task : null,
+      target: context.recovery ? context.recoveryContext?.target : null,
     },
     originality: {
       recentChallenges: recentAvoidance,
       otherChallengesToday: sameDayAvoidance,
       instruction: "Use a different problem, evidence pattern, and title. Do not create a cosmetic variation of these challenges.",
     },
-    requiredTopic: blueprint?.focus ?? context.topicFocus,
     deadline: "15:00 local time",
     retryFeedback: rejectionFeedback,
   };
