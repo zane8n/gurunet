@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidTimezone } from "@/lib/time";
 import { appApiError } from "@/lib/app-api";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -12,7 +13,7 @@ export const scheduleSchema = z.object({
   durationMinutes: z.number().int().min(10).max(240),
   reminderMinutesBefore: z.number().int().min(0).max(120).default(10),
   flexWindowMinutes: z.number().int().min(0).max(120).default(30),
-  timezone: z.string().trim().min(3).max(80),
+  timezone: z.string().trim().min(3).max(80).refine(isValidTimezone),
   oneOffAt: z.coerce.date().nullable().optional(),
   enabled: z.boolean().default(true),
 }).refine((value) => value.daysOfWeek.length > 0 || value.oneOffAt, {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { appPlatformSchema, appApiError, versionIsSupported } from "@/lib/app-api";
 import { isAllowedAppRedirect, siteUrl } from "@/lib/app-oauth";
+import { isValidTimezone } from "@/lib/time";
 
 const schema = z.object({
   provider: z.enum(["google", "github", "apple"]),
@@ -9,7 +10,7 @@ const schema = z.object({
   codeChallenge: z.string().min(43).max(128),
   state: z.string().min(16).max(256),
   appVersion: z.string().min(1).max(32),
-  timezone: z.string().min(3).max(80),
+  timezone: z.string().min(3).max(80).refine(isValidTimezone),
 });
 
 export async function GET(request: Request) {

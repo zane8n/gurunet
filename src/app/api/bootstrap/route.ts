@@ -7,14 +7,16 @@ import {
   runDashboardBackgroundTasks,
 } from "@/lib/app-service";
 import { getCurrentUser, publicUser } from "@/lib/auth";
+import { userWithClientTimezone } from "@/lib/user-timezone";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const user = await getCurrentUser();
+    const authenticatedUser = await getCurrentUser();
     const disciplines = getDisciplineCatalog();
-    if (!user) {
+    if (!authenticatedUser) {
       return json({ user: null, profile: null, disciplines, dashboard: null });
     }
+    const user = await userWithClientTimezone(authenticatedUser, request);
 
     const profile = await getStudyProfile(user);
     if (profile.onboardingRequired) {

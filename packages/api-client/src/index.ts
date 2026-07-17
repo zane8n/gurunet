@@ -21,12 +21,21 @@ export class GurunetClient {
     const tokenSet = await this.tokens.get();
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
+    try {
+      headers.set("X-Client-Timezone", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+    } catch {
+      headers.set("X-Client-Timezone", "UTC");
+    }
     headers.set("X-Request-ID", crypto.randomUUID());
     headers.set("X-App-Version", this.appVersion);
     if (tokenSet) headers.set("Authorization", `Bearer ${tokenSet.accessToken}`);
     if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
     if (init.method && init.method !== "GET") headers.set("Idempotency-Key", headers.get("Idempotency-Key") ?? crypto.randomUUID());
-    const response = await fetch(`${this.baseUrl}/api/v1${path}`, { ...init, headers });
+    const response = await fetch(`${this.baseUrl}/api/v1${path}`, {
+      ...init,
+      cache: init.cache ?? "no-store",
+      headers,
+    });
     if (response.status === 401 && retry && tokenSet?.refreshToken) {
       await this.refresh(tokenSet.refreshToken);
       return this.request<T>(path, init, false);

@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { revokeLinkedProviderTokens } from "@/lib/provider-revocation";
 import { clearUserUploadStorage } from "@/lib/storage";
 import { syncUserNotificationSchedule } from "@/lib/notification-scheduler";
+import { isValidTimezone } from "@/lib/time";
 
 const AUTH_SESSION_COOKIES = [
   "authjs.session-token",
@@ -17,7 +18,9 @@ const AUTH_SESSION_COOKIES = [
 
 const profileSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
-  timezone: z.string().trim().min(3).max(80).optional(),
+  timezone: z.string().trim().min(3).max(80).refine(isValidTimezone, {
+    message: "Select a valid timezone.",
+  }).optional(),
   currentPassword: z.string().max(160).optional(),
   newPassword: z.string().min(8).max(160).optional(),
 });

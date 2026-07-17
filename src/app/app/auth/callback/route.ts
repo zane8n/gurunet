@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { isValidTimezone } from "@/lib/time";
 import { auth } from "@/auth";
 import { appPlatformSchema } from "@/lib/app-api";
 import { opaqueTokenHash } from "@/lib/app-auth";
@@ -14,7 +15,7 @@ const querySchema = z.object({
   codeChallenge: z.string().min(43).max(128),
   state: z.string().min(16).max(256),
   appVersion: z.string().min(1).max(32),
-  timezone: z.string().min(3).max(80),
+  timezone: z.string().min(3).max(80).refine(isValidTimezone),
 });
 
 export async function GET(request: Request) {

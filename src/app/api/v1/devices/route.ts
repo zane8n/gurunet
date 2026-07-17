@@ -1,14 +1,16 @@
 import { z } from "zod";
+import { isValidTimezone } from "@/lib/time";
 import { appApiError } from "@/lib/app-api";
 import { getBearerIdentity } from "@/lib/app-auth";
 import { prisma } from "@/lib/prisma";
+import { syncUserNotificationSchedule } from "@/lib/notification-scheduler";
 
 const updateSchema = z.object({
   pushToken: z.string().trim().min(8).max(512).nullable().optional(),
   notificationsEnabled: z.boolean().optional(),
   appVersion: z.string().trim().min(1).max(32).optional(),
   locale: z.string().trim().min(2).max(20).optional(),
-  timezone: z.string().trim().min(3).max(80).optional(),
+  timezone: z.string().trim().min(3).max(80).refine(isValidTimezone).optional(),
 });
 
 export async function GET() {
@@ -32,10 +34,21 @@ export async function PATCH(request: Request) {
     if (!identity) return appApiError("UNAUTHORIZED", "Sign in is required.", 401);
     const input = updateSchema.parse(await request.json());
     const session = await prisma.appSession.findUniqueOrThrow({ where: { id: identity.sessionId } });
-    const device = await prisma.deviceInstallation.update({
-      where: { id: session.deviceId },
-      data: { ...input, lastSeenAt: new Date() },
+    const device = await prisma.$transaction(async (tx) => {
+      const updated = await tx.deviceInstallation.update({
+        where: { id: session.deviceId },
+        data: { ...input, lastSeenAt: new Date() },
+      });
+      if (input.timezone) {
+        await tx.user.update({ where: { id: identity.user.id }, data: { timezone: input.timezone } });
+        await tx.studySchedule.updateMany({
+          where: { userId: identity.user.id },
+          data: { timezone: input.timezone },
+        });
+      }
+      return updated;
     });
+    if (input.timezone) await syncUserNotificationSchedule(identity.user.id, 14, true);
     return Response.json({
       device: { ...device, pushToken: device.pushToken ? "registered" : null },
     });

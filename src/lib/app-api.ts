@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidTimezone } from "@/lib/time";
 
 export const appPlatformSchema = z.enum(["Android", "IOS", "Windows"]);
 
@@ -6,7 +7,7 @@ export const appDeviceSchema = z.object({
   deviceId: z.string().trim().min(8).max(160).optional(),
   platform: appPlatformSchema,
   appVersion: z.string().trim().min(1).max(32),
-  timezone: z.string().trim().min(3).max(80),
+  timezone: z.string().trim().min(3).max(80).refine(isValidTimezone),
   locale: z.string().trim().min(2).max(20).optional(),
   pushToken: z.string().trim().min(8).max(512).optional(),
 });
@@ -42,6 +43,6 @@ export function appApiError(
 ) {
   return Response.json(
     { error: { code, message, details }, requestId: crypto.randomUUID() },
-    { status },
+    { status, headers: { "Cache-Control": "private, no-store, max-age=0" } },
   );
 }

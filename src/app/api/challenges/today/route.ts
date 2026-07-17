@@ -4,11 +4,13 @@ import { requireUser } from "@/lib/auth";
 import { getOrCreateTodayChallenge, runDashboardBackgroundTasks } from "@/lib/app-service";
 import { getChallengeGenerationStatus } from "@/lib/ai-jobs";
 import { prisma } from "@/lib/prisma";
+import { userWithClientTimezone } from "@/lib/user-timezone";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const user = await requireUser();
-    const challenge = await getOrCreateTodayChallenge(user);
+    const user = await userWithClientTimezone(await requireUser(), request);
+    const now = new Date();
+    const challenge = await getOrCreateTodayChallenge(user, { now });
     const [hasSubmitted, challengeGenerationStatus] = await Promise.all([
       prisma.submission.findFirst({
         where: { userId: user.id, challengeId: challenge.id },

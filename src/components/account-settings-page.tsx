@@ -12,6 +12,7 @@ import {
   Clock3,
   Download,
   Loader2,
+  LocateFixed,
   Moon,
   Palette,
   ShieldCheck,
@@ -79,8 +80,10 @@ const difficultyOptions = ["Guided", "Normal", "Advanced", "Production", "Expert
 async function accountRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
+    cache: init?.cache ?? "no-store",
     headers: {
       "Content-Type": "application/json",
+      "X-Client-Timezone": Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Johannesburg",
       ...(init?.headers ?? {}),
     },
   });
@@ -102,6 +105,7 @@ export function AccountSettingsPage() {
   const [user, setUser] = useState<SafeUser | null>(null);
   const [name, setName] = useState("");
   const [timezone, setTimezone] = useState("");
+  const [deviceTimezone, setDeviceTimezone] = useState("Africa/Johannesburg");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
@@ -114,6 +118,17 @@ export function AccountSettingsPage() {
   const [browserNotificationState, setBrowserNotificationState] = useState<
     "unsupported" | NotificationPermission
   >("unsupported");
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      try {
+        setDeviceTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Johannesburg");
+      } catch {
+        setDeviceTimezone("Africa/Johannesburg");
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -457,17 +472,30 @@ export function AccountSettingsPage() {
                     required
                   />
                 </label>
-                <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-                  Timezone
-                  <input
-                    value={timezone}
-                    onChange={(event) => setTimezone(event.target.value)}
-                    minLength={3}
-                    maxLength={80}
-                    className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
-                    required
-                  />
-                </label>
+                <div className="grid gap-1.5 text-sm font-medium text-slate-700">
+                  <label htmlFor="account-timezone">Timezone</label>
+                  <div className="flex min-w-0 gap-2">
+                    <input
+                      id="account-timezone"
+                      value={timezone}
+                      onChange={(event) => setTimezone(event.target.value)}
+                      minLength={3}
+                      maxLength={80}
+                      className="h-10 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-700/15"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setTimezone(deviceTimezone)}
+                      className="grid size-10 shrink-0 place-items-center rounded-md border border-slate-300 bg-white text-cyan-700 hover:bg-slate-50"
+                      title={`Use device timezone: ${deviceTimezone}`}
+                      aria-label={`Use device timezone ${deviceTimezone}`}
+                    >
+                      <LocateFixed size={16} />
+                    </button>
+                  </div>
+                  <span className="text-xs font-normal text-slate-500">Device timezone: {deviceTimezone}</span>
+                </div>
                 <p className="text-xs leading-5 text-slate-500 sm:col-span-2">
                   Email changes need a verification flow, so they stay locked until that route is added.
                 </p>

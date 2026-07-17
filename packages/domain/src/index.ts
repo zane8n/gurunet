@@ -10,6 +10,18 @@ export function deadlineState(deadline: string, now = Date.now()) {
   const remainingMs = new Date(deadline).getTime() - now;
   return { remainingMs, overdue: remainingMs < 0, urgent: remainingMs >= 0 && remainingMs <= 60 * 60_000 };
 }
+
+export type ServerClock = {
+  serverNow: string;
+  nextChallengeReleaseAt: string;
+};
+
+export function releaseRefreshDelay(clock: ServerClock, bufferMs = 1_500) {
+  const serverNow = Date.parse(clock.serverNow);
+  const nextRelease = Date.parse(clock.nextChallengeReleaseAt);
+  if (!Number.isFinite(serverNow) || !Number.isFinite(nextRelease)) return null;
+  return Math.max(1_000, nextRelease - serverNow + bufferMs);
+}
 export function reminderTimes(availableAt: Date, deadlineAt: Date, studyHour = 10) {
   const study = new Date(availableAt); study.setHours(studyHour, 0, 0, 0);
   return [availableAt, study, new Date(deadlineAt.getTime() - 60 * 60_000)].filter((date, index, dates) => date < deadlineAt && dates.findIndex((other) => other.getTime() === date.getTime()) === index).slice(0, 3);

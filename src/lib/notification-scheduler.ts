@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/store";
-import { challengeUnlockIso, dateKeyFor } from "@/lib/time";
+import {
+  addDaysToDateKey,
+  challengeUnlockIso,
+  dateKeyFor,
+  localDateTimeIso,
+  weekdayForDateKey,
+} from "@/lib/time";
 
 export const notificationKinds = {
   challengeAvailable: "challenge_available",
@@ -27,45 +33,15 @@ const defaultPreferences = {
 
 export function localDateTime(dateKey: string, localTime: string, timezone: string) {
   const [hour, minute] = localTime.split(":").map(Number);
-  const utcGuess = new Date(`${dateKey}T${localTime}:00.000Z`);
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    hour12: false,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(utcGuess);
-  const actual = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const localAsUtc = Date.UTC(
-    Number(actual.year),
-    Number(actual.month) - 1,
-    Number(actual.day),
-    Number(actual.hour === "24" ? "0" : actual.hour),
-    Number(actual.minute),
-    Number(actual.second),
-  );
-  const intendedAsUtc = Date.UTC(
-    Number(dateKey.slice(0, 4)),
-    Number(dateKey.slice(5, 7)) - 1,
-    Number(dateKey.slice(8, 10)),
-    hour,
-    minute,
-    0,
-  );
-  return new Date(intendedAsUtc - (localAsUtc - utcGuess.getTime()));
+  return new Date(localDateTimeIso(dateKey, timezone, hour, minute));
 }
 
 function addDays(dateKey: string, days: number) {
-  const date = new Date(`${dateKey}T12:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
+  return addDaysToDateKey(dateKey, days);
 }
 
 function weekDay(dateKey: string) {
-  return new Date(`${dateKey}T12:00:00.000Z`).getUTCDay();
+  return weekdayForDateKey(dateKey);
 }
 
 export async function queueUserNotification(input: {

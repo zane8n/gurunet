@@ -76,6 +76,9 @@ import {
   challengeDateKeyFor,
   dateKeyFor,
   getUserTimezone,
+  learningClockFor,
+  learningCycleDateKeys,
+  learningCycleKey,
   localDeadlineIso,
   nextChallengeUnlockIso,
   weekKeyFor,
@@ -372,15 +375,17 @@ export async function getDashboard(
   user: User,
   options: { profileState?: Awaited<ReturnType<typeof getStudyProfile>> } = {},
 ) {
-  await ensureMissedPreviousChallenge(user);
-  const today = await getOrCreateTodayChallenge(user);
+  const dashboardNow = new Date();
+  await ensureMissedPreviousChallenge(user, dashboardNow);
+  const today = await getOrCreateTodayChallenge(user, { now: dashboardNow });
   const [dbUser, profileState] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { id: user.id } }),
     options.profileState ?? getStudyProfile(user),
   ]);
   const currentUser = fromDbUser(dbUser);
   const timezone = getUserTimezone(currentUser.timezone);
-  const currentWeekKey = weekKeyFor(new Date(), timezone);
+  const restDay = profileState.studyProfile?.restDay ?? profileState.activeDiscipline.restDay ?? 0;
+  const currentWeekKey = learningCycleKey(dateKeyFor(dashboardNow, timezone), restDay);
   const progressChallengeSelect = {
     id: true,
     dateKey: true,
@@ -503,7 +508,12 @@ export async function getDashboard(
     settings: challengeSettings,
     weeklyRecord,
     timezone,
+    now: dashboardNow,
   });
+  const clock = {
+    ...learningClockFor(dashboardNow, timezone),
+    activeChallengeDateKey: today.dateKey,
+  };
 
   return {
     user: currentUser,
@@ -523,7 +533,8 @@ export async function getDashboard(
     onboardingRequired: profileState.onboardingRequired,
     studyProfile: profileState.studyProfile,
     activeDiscipline: profileState.activeDiscipline,
-    nextChallengeUnlockAt: nextChallengeUnlockIso(today.dateKey, timezone),
+    clock,
+    nextChallengeUnlockAt: clock.nextChallengeReleaseAt,
     challengeGenerationStatus,
     todaySubmission,
     todayGrade: todayGradeDb ? fromDbGrade(todayGradeDb) : null,
@@ -560,9 +571,11 @@ function buildRetentionSnapshot(input: {
   settings: Awaited<ReturnType<typeof getChallengeSettings>>;
   weeklyRecord: { completedCount: number; continuityCreditEarned: boolean } | null;
   timezone: string;
+  now: Date;
 }): RetentionSnapshot {
-  const calendarToday = dateKeyFor(new Date(), input.timezone);
-  const weekDates = dateKeysForCurrentWeek(calendarToday);
+  const calendarToday = dateKeyFor(input.now, input.timezone);
+  const restDay = input.discipline.restDay ?? 0;
+  const weekDates = dateKeysForCurrentWeek(calendarToday, restDay);
   const weekRows = input.progress.filter((row) => weekDates.includes(row.date));
   const completedFromRows = weekRows.filter((row) => row.finalScore !== null).length;
   const completedDays = Math.max(completedFromRows, input.weeklyRecord?.completedCount ?? 0);
@@ -579,10 +592,9 @@ function buildRetentionSnapshot(input: {
       row.submittedAt &&
       Date.parse(row.submittedAt) <= Date.parse(row.deadlineAt),
   ).length;
-  const dayOfWeek = new Date(`${calendarToday}T12:00:00.000Z`).getUTCDay();
-  const revealUnlocked = completedDays >= targetDays || (dayOfWeek === 0 && scores.length > 0);
+  const dayOfWeek = weekDayForDateKey(calendarToday);
+  const revealUnlocked = completedDays >= targetDays || (dayOfWeek === restDay && scores.length > 0);
   const nextDateKey = addDaysToDateKey(input.today.dateKey, 1);
-  const restDay = input.discipline.restDay ?? 0;
   const nextIsRestDay = isScheduledRestDay(nextDateKey, restDay);
   const nextIsRecoveryDay = isDayAfterScheduledRest(nextDateKey, restDay);
   const previewFocus =
@@ -598,13 +610,39 @@ function buildRetentionSnapshot(input: {
     profileFormatForChallenge(input.user.id, nextDateKey, input.discipline) ??
     input.discipline.formats[0] ??
     "Practical assessment";
+  const remainingDays = Math.max(0, targetDays - completedDays);
+  const nextMilestone = input.weeklyRecord?.continuityCreditEarned
+    ? {
+        title: "Continuity credit banked",
+        detail: "Your learning week is protected. Extra practice is optional, not required.",
+        remainingDays: 0,
+      }
+    : remainingDays === 0
+      ? {
+          title: "Weekly target complete",
+          detail: input.user.continuityCredits >= 3
+            ? "Your credit balance is full. Use the remaining days only when they serve your goals."
+            : "The continuity credit will be added with the completed assessment record.",
+          remainingDays: 0,
+        }
+      : {
+          title: `${remainingDays} more learning ${remainingDays === 1 ? "day" : "days"}`,
+          detail: "A submitted challenge counts. Your scheduled rest day never breaks the cycle.",
+          remainingDays,
+        };
 
   return {
     targetDays,
     completedDays,
     continuityCredits: input.user.continuityCredits,
     creditEarnedThisWeek: input.weeklyRecord?.continuityCreditEarned ?? false,
-    days: weekDates.map((date, index) => {
+    cycle: {
+      startDate: weekDates[0],
+      endDate: weekDates[weekDates.length - 1],
+      restDayLabel: weekDayName(restDay),
+    },
+    nextMilestone,
+    days: weekDates.map((date) => {
       const row = weekRows.find((item) => item.date === date);
       let state: RetentionSnapshot["days"][number]["state"];
       if (row?.finalScore !== null && row?.finalScore !== undefined) state = "completed";
@@ -616,7 +654,7 @@ function buildRetentionSnapshot(input: {
       else state = "open";
       return {
         date,
-        label: ["M", "T", "W", "T", "F", "S", "S"][index],
+        label: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekDayForDateKey(date)],
         state,
         score: row?.finalScore ?? null,
       };
@@ -644,16 +682,13 @@ function buildRetentionSnapshot(input: {
       earlySubmissions,
       message: revealUnlocked
         ? weeklyRevealMessage(averageScore, completedDays)
-        : `${Math.max(0, targetDays - completedDays)} more completed ${targetDays - completedDays === 1 ? "day" : "days"} unlocks the weekly reveal. Sunday also closes the week without requiring seven submissions.`,
+        : `${Math.max(0, targetDays - completedDays)} more completed ${targetDays - completedDays === 1 ? "day" : "days"} unlocks the weekly review. ${weekDayName(restDay)} closes your learning week without requiring seven submissions.`,
     },
   };
 }
 
-function dateKeysForCurrentWeek(dateKey: string) {
-  const current = new Date(`${dateKey}T12:00:00.000Z`);
-  const daysSinceMonday = (current.getUTCDay() + 6) % 7;
-  const monday = addDaysToDateKey(dateKey, -daysSinceMonday);
-  return Array.from({ length: 7 }, (_, index) => addDaysToDateKey(monday, index));
+function dateKeysForCurrentWeek(dateKey: string, restDay = 0) {
+  return learningCycleDateKeys(dateKey, restDay);
 }
 
 function addDaysToDateKey(dateKey: string, days: number) {
@@ -683,11 +718,11 @@ function weeklyRevealMessage(averageScore: number | null, completedDays: number)
 
 export async function getOrCreateTodayChallenge(
   user: User,
-  options: { refreshPersonalization?: boolean } = {},
+  options: { refreshPersonalization?: boolean; now?: Date } = {},
 ) {
   const dbUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
   const currentUser = fromDbUser(dbUser);
-  const today = await currentChallengeDateKeyForUser(currentUser);
+  const today = await currentChallengeDateKeyForUser(currentUser, options.now);
   const existing = await prisma.challenge.findUnique({
     where: { userId_dateKey: { userId: user.id, dateKey: today } },
     include: {
@@ -1031,9 +1066,9 @@ export async function runSupportAction(
   return clearStudyConfiguration(actor, user, input.reason);
 }
 
-export async function ensureMissedPreviousChallenge(user: User) {
+export async function ensureMissedPreviousChallenge(user: User, now = new Date()) {
   const timezone = getUserTimezone(user.timezone);
-  const today = await currentChallengeDateKeyForUser(user);
+  const today = await currentChallengeDateKeyForUser(user, now);
   const candidates = await prisma.challenge.findMany({
     where: {
       userId: user.id,
@@ -2089,9 +2124,13 @@ export async function gradeExistingSubmission(user: User, submissionId: string) 
   if (submission.requiresVerification && !submission.verificationAnswer) {
     throw new Response("Verification required before grading", { status: 409 });
   }
-  const [challenge, storedUser] = await Promise.all([
+  const [challenge, storedUser, studyProfile] = await Promise.all([
     prisma.challenge.findUniqueOrThrow({ where: { id: submission.challengeId } }),
     prisma.user.findUniqueOrThrow({ where: { id: user.id } }),
+    prisma.userStudyProfile.findUnique({
+      where: { userId: user.id },
+      select: { restDay: true },
+    }),
   ]);
 
   const domainChallenge = fromDbChallenge(challenge);
@@ -2120,11 +2159,9 @@ export async function gradeExistingSubmission(user: User, submissionId: string) 
     submission.submittedAt,
     getUserTimezone(fromDbUser(storedUser).timezone),
   );
-  const completionWeekDates = dateKeysForCurrentWeek(completionDateKey);
-  const completionWeekKey = weekKeyFor(
-    submission.submittedAt,
-    getUserTimezone(fromDbUser(storedUser).timezone),
-  );
+  const restDay = studyProfile?.restDay ?? 0;
+  const completionWeekDates = dateKeysForCurrentWeek(completionDateKey, restDay);
+  const completionWeekKey = learningCycleKey(completionDateKey, restDay);
 
   const created = await prisma.$transaction(async (tx) => {
     const dbGrade = await tx.grade.create({
@@ -2180,9 +2217,19 @@ export async function gradeExistingSubmission(user: User, submissionId: string) 
         completedCount: weeklyCompletionCount,
       },
     });
+    const recentContinuityCredit = await tx.ledgerEvent.findFirst({
+      where: {
+        userId: user.id,
+        type: "CONTINUITY",
+        amount: { gt: 0 },
+        createdAt: { gte: new Date(submission.submittedAt.getTime() - 7 * 86_400_000) },
+      },
+      select: { id: true },
+    });
     const continuityCreditEarned =
       completionRecord.completedCount >= 4 &&
       !completionRecord.continuityCreditEarned &&
+      !recentContinuityCredit &&
       storedUser.continuityCredits < 3;
     const continuityBalance = storedUser.continuityCredits + (continuityCreditEarned ? 1 : 0);
 
@@ -3378,9 +3425,8 @@ function currentChallengeDateKey(
   return hasPreviousChallenge ? rolledKey : calendarToday;
 }
 
-async function currentChallengeDateKeyForUser(user: User) {
+async function currentChallengeDateKeyForUser(user: User, now = new Date()) {
   const timezone = getUserTimezone(user.timezone);
-  const now = new Date();
   const calendarToday = dateKeyFor(now, timezone);
   const rolledKey = challengeDateKeyFor(now, timezone);
   if (rolledKey === calendarToday) return calendarToday;

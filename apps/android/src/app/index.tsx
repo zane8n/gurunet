@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,6 +13,8 @@ import {
 import { router } from "expo-router";
 import { api, signIn } from "@/lib/client";
 import { syncAndroidNotifications } from "@/lib/notifications";
+import { releaseRefreshDelay } from "@gurunet/domain";
+import type { LearningClockDto } from "@gurunet/contracts";
 
 type Bootstrap = {
   challenge?: {
@@ -26,6 +29,7 @@ type Bootstrap = {
     assessment?: { modeLabel: string };
   };
   user: { name: string; currentStreak: number };
+  clock?: LearningClockDto;
   onboardingRequired?: boolean;
   nextChallengeUnlockAt?: string;
   studyProfile?: { restDay?: number } | null;
@@ -69,6 +73,19 @@ export default function TodayScreen() {
       });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!data?.clock) return;
+    const delay = releaseRefreshDelay(data.clock);
+    const timer = delay === null ? undefined : setTimeout(() => void load(), delay);
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void load();
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      subscription.remove();
+    };
+  }, [data?.clock]);
 
   if (authNeeded) return <LoginPrompt onDone={load} />;
   if (!data && !error) {

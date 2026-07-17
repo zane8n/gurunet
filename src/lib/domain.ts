@@ -260,6 +260,16 @@ export type RetentionSnapshot = {
   completedDays: number;
   continuityCredits: number;
   creditEarnedThisWeek: boolean;
+  cycle: {
+    startDate: string;
+    endDate: string;
+    restDayLabel: string;
+  };
+  nextMilestone: {
+    title: string;
+    detail: string;
+    remainingDays: number;
+  };
   days: {
     date: string;
     label: string;

@@ -138,6 +138,11 @@ export async function issueAppSession(userId: string, input: AppDeviceInput) {
         notificationsEnabled: Boolean(input.pushToken),
       },
     });
+    await tx.user.update({ where: { id: userId }, data: { timezone: input.timezone } });
+    await tx.studySchedule.updateMany({
+      where: { userId },
+      data: { timezone: input.timezone },
+    });
     await tx.appSession.create({
       data: {
         id: sessionId,

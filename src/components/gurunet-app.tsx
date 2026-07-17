@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, FormEvent, ReactNode } from "react";
 import {
   Apple,
+  ArrowLeft,
+  ArrowRight,
   BookOpenText,
   Bold,
   CalendarClock,
@@ -13,6 +15,7 @@ import {
   CircleGauge,
   Code2,
   Command,
+  Compass,
   Download,
   FileText,
   GitBranch,
@@ -34,6 +37,7 @@ import {
   Settings,
   ShieldCheck,
   Sun,
+  Target,
   Trash2,
   UserRound,
   UserPlus,
@@ -50,6 +54,7 @@ import type {
   Submission,
   User,
 } from "@/lib/domain";
+import type { LearningClockSnapshot } from "@/lib/time";
 import {
   formatBytes,
   parseSubmissionContent,
@@ -287,6 +292,7 @@ type Dashboard = {
   studyProfile: StudyProfile | null;
   activeDiscipline: ActiveDiscipline;
   cohorts: CohortSummary[];
+  clock: LearningClockSnapshot;
   nextChallengeUnlockAt: string;
   challengeGenerationStatus: "Queued" | "Running" | "Succeeded" | "Failed" | "FallbackUsed" | null;
   todaySubmission: Submission | null;
@@ -313,11 +319,22 @@ function initialTheme(): ThemeMode {
   }
 }
 
+function detectedTimezone() {
+  if (typeof Intl === "undefined") return "Africa/Johannesburg";
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Johannesburg";
+  } catch {
+    return "Africa/Johannesburg";
+  }
+}
+
 async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
+    cache: init?.cache ?? "no-store",
     headers: {
       "Content-Type": "application/json",
+      "X-Client-Timezone": detectedTimezone(),
       ...(init?.headers ?? {}),
     },
   });
@@ -498,6 +515,7 @@ const weekDayOptions = [
 
 export function GurunetApp() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [sessionUser, setSessionUser] = useState<SafeUser | null>(null);
   const [disciplines, setDisciplines] = useState<DisciplineTemplate[]>([]);
   const [profileGate, setProfileGate] = useState<{
     onboardingRequired: boolean;
@@ -514,6 +532,7 @@ export function GurunetApp() {
   const [focusOpen, setFocusOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(() => initialTheme());
   const [palette] = useState<ThemePaletteId>(() => initialPalette());
+  const [deviceTimezone, setDeviceTimezone] = useState("Africa/Johannesburg");
   const [responseOpen, setResponseOpen] = useState(false);
   const [examinerOpen, setExaminerOpen] = useState(false);
   const [examinerLoading, setExaminerLoading] = useState(false);
@@ -540,6 +559,11 @@ export function GurunetApp() {
   }, [theme]);
 
   useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setDeviceTimezone(detectedTimezone()));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
     document.documentElement.dataset.palette = palette;
     localStorage.setItem(paletteStorageKey, palette);
   }, [palette]);
@@ -559,9 +583,11 @@ export function GurunetApp() {
         }>("/api/bootstrap");
         setDisciplines(data.disciplines);
         if (data.user) {
+          setSessionUser(data.user);
           setProfileGate(data.profile);
           setDashboard(data.dashboard);
         } else {
+          setSessionUser(null);
           setProfileGate(null);
           setDashboard(null);
         }
@@ -620,6 +646,7 @@ export function GurunetApp() {
 
   async function loadDashboard() {
     const data = await apiRequest<Dashboard>("/api/me/stats");
+    setSessionUser(data.user);
     setDashboard(data);
     setProfileGate({
       onboardingRequired: data.onboardingRequired,
@@ -628,6 +655,80 @@ export function GurunetApp() {
     });
     setVerification("");
   }
+
+  useEffect(() => {
+    const storedTimezone = sessionUser?.timezone;
+    if (!storedTimezone || storedTimezone === deviceTimezone) return;
+    const syncKey = `gurunet.timezone-sync:${storedTimezone}:${deviceTimezone}`;
+    if (sessionStorage.getItem(syncKey)) return;
+    sessionStorage.setItem(syncKey, "attempted");
+
+    let cancelled = false;
+    void apiRequest<{ user: SafeUser }>("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify({ timezone: deviceTimezone }),
+    })
+      .then(async () => {
+        if (cancelled || !dashboard) return;
+        const refreshed = await apiRequest<Dashboard>("/api/me/stats");
+        if (cancelled) return;
+        setSessionUser(refreshed.user);
+        setDashboard(refreshed);
+        setProfileGate({
+          onboardingRequired: refreshed.onboardingRequired,
+          studyProfile: refreshed.studyProfile,
+          activeDiscipline: refreshed.activeDiscipline,
+        });
+      })
+      .catch((error) => console.warn("Timezone synchronization failed", error));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dashboard, deviceTimezone, sessionUser?.timezone]);
+
+  useEffect(() => {
+    const clock = dashboard?.clock;
+    if (!clock) return;
+    const serverAtLoad = Date.parse(clock.serverNow);
+    const boundary = Date.parse(clock.nextChallengeReleaseAt);
+    if (!Number.isFinite(serverAtLoad) || !Number.isFinite(boundary)) return;
+    const clientAtLoad = Date.now();
+    let refreshing = false;
+
+    async function refreshForBoundary() {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const refreshed = await apiRequest<Dashboard>("/api/me/stats");
+        setSessionUser(refreshed.user);
+        setDashboard(refreshed);
+        setProfileGate({
+          onboardingRequired: refreshed.onboardingRequired,
+          studyProfile: refreshed.studyProfile,
+          activeDiscipline: refreshed.activeDiscipline,
+        });
+      } catch (error) {
+        console.warn("Learning-day refresh failed", error);
+        refreshing = false;
+      }
+    }
+
+    const millisecondsUntilBoundary = Math.max(1_000, boundary - serverAtLoad + 1_500);
+    const timer = window.setTimeout(() => void refreshForBoundary(), millisecondsUntilBoundary);
+    function refreshIfBoundaryPassed() {
+      if (document.visibilityState !== "visible") return;
+      const estimatedServerNow = serverAtLoad + (Date.now() - clientAtLoad);
+      if (estimatedServerNow >= boundary) void refreshForBoundary();
+    }
+    document.addEventListener("visibilitychange", refreshIfBoundaryPassed);
+    window.addEventListener("focus", refreshIfBoundaryPassed);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", refreshIfBoundaryPassed);
+      window.removeEventListener("focus", refreshIfBoundaryPassed);
+    };
+  }, [dashboard?.clock]);
 
   async function exportLearningRecord() {
     setBusy(true);
@@ -843,6 +944,7 @@ export function GurunetApp() {
 
   async function logout() {
     await apiRequest("/api/auth/logout", { method: "POST" });
+    setSessionUser(null);
     setDashboard(null);
   }
 
@@ -1206,25 +1308,27 @@ export function GurunetApp() {
     () =>
       today
         ? new Intl.DateTimeFormat("en-ZA", {
+            timeZone: dashboard?.clock.timezone,
             hour: "2-digit",
             minute: "2-digit",
             day: "2-digit",
             month: "short",
           }).format(new Date(today.deadlineAt))
         : "",
-    [today],
+    [dashboard?.clock.timezone, today],
   );
   const nextUnlock = useMemo(
     () =>
       nextChallengeUnlockAt
         ? new Intl.DateTimeFormat("en-ZA", {
+            timeZone: dashboard?.clock.timezone,
             hour: "2-digit",
             minute: "2-digit",
             day: "2-digit",
             month: "short",
           }).format(new Date(nextChallengeUnlockAt))
         : "",
-    [nextChallengeUnlockAt],
+    [dashboard?.clock.timezone, nextChallengeUnlockAt],
   );
   const commandActions = useMemo(() => {
     if (!dashboard || !user || !today) return [];
@@ -1407,7 +1511,11 @@ export function GurunetApp() {
               <Field label="Email" name="email" placeholder="you@example.com" type="email" />
               <Field label="Password" name="password" placeholder="Minimum 8 characters" type="password" />
               {authMode === "signup" && (
-                <Field label="Timezone" name="timezone" defaultValue="Africa/Johannesburg" />
+                <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white/55 px-3 py-2 text-xs text-slate-600">
+                  <CalendarClock size={15} className="shrink-0 text-cyan-700" />
+                  <input type="hidden" name="timezone" value={deviceTimezone} />
+                  Dates and deadlines will follow {deviceTimezone}.
+                </div>
               )}
             </div>
 
@@ -2188,36 +2296,70 @@ function StudyProfileOnboarding({
   onSave: (input: unknown) => void;
 }) {
   return (
-    <section className="astrowind-shell">
-      <section className="astrowind-hero">
-        <div className="mx-auto max-w-4xl text-center">
-          <p className="astrowind-kicker">Study profile</p>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
-            Calibrate GURUnet before it starts challenging you.
+    <section className="onboarding-shell astrowind-shell">
+      <header className="onboarding-intro grid gap-8 border-b border-slate-200 pb-8 pt-7 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-end">
+        <div>
+          <p className="astrowind-kicker">Your learning system</p>
+          <h1 className="mt-3 max-w-3xl text-3xl font-semibold leading-tight text-slate-950 sm:text-4xl">
+            Make tomorrow&apos;s challenge feel built for you.
           </h1>
-          <p className="mx-auto mt-5 max-w-2xl text-base leading-8 text-slate-600">
-            The profile anchors the discipline, evidence standards, response format,
-            examiner language, challenge topics, and notebook emphasis.
+          <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
+            Three short decisions set your discipline, practice style, evidence standard, and weekly rhythm. You can refine any of them later.
           </p>
         </div>
-      </section>
+        <div className="border-l-2 border-cyan-700 pl-4 text-sm leading-6 text-slate-600">
+          <p className="font-semibold text-slate-950">About three minutes</p>
+          <p className="mt-1">Finish once, then GURUnet prepares one focused brief each learning day.</p>
+        </div>
+      </header>
 
-      <AstroSection
-        id="profile-calibration"
-        eyebrow="Configuration"
-        title="Build a governed capacity profile"
-        text="Choose from the governed STEM and technical domains. Use written preferences only for bespoke nuance, not vague standards."
-      >
-        <StudyProfileForm
-          busy={busy}
-          disciplines={disciplines}
-          errors={errors}
-          status={status}
-          onSave={onSave}
-        />
-      </AstroSection>
+      <StudyProfileForm
+        busy={busy}
+        disciplines={disciplines}
+        errors={errors}
+        onboarding
+        status={status}
+        onSave={onSave}
+      />
     </section>
   );
+}
+
+type StudyProfileFormInput = {
+  primaryDiscipline: string;
+  secondaryInterests: string[];
+  rankedTopics: string[];
+  currentLevel: string;
+  preferredFormats: string[];
+  evidenceTypes: string[];
+  weeklyTimeBudgetHours: number;
+  restDay: number;
+  targetDifficulty: string;
+  weakAreas: string[];
+  avoidAreas: string[];
+  goals: string[];
+  customDiscipline?: string;
+  preferenceNotes?: string;
+};
+
+function studyProfileInputFromForm(form: HTMLFormElement, selectedId: string): StudyProfileFormInput {
+  const data = new FormData(form);
+  return {
+    primaryDiscipline: String(data.get("primaryDiscipline") || selectedId),
+    secondaryInterests: data.getAll("secondaryInterests").map(String),
+    rankedTopics: data.getAll("rankedTopics").map(String),
+    currentLevel: String(data.get("currentLevel") || "Intermediate"),
+    preferredFormats: data.getAll("preferredFormats").map(String),
+    evidenceTypes: data.getAll("evidenceTypes").map(String),
+    weeklyTimeBudgetHours: Number(data.get("weeklyTimeBudgetHours") || 4),
+    restDay: Number(data.get("restDay") || 0),
+    targetDifficulty: String(data.get("targetDifficulty") || "Normal"),
+    weakAreas: data.getAll("weakAreas").map(String),
+    avoidAreas: data.getAll("avoidAreas").map(String),
+    goals: data.getAll("goals").map(String),
+    customDiscipline: String(data.get("customDiscipline") || "") || undefined,
+    preferenceNotes: String(data.get("preferenceNotes") || "") || undefined,
+  };
 }
 
 function StudyProfileForm({
@@ -2225,6 +2367,7 @@ function StudyProfileForm({
   disciplines,
   errors,
   initialProfile,
+  onboarding = false,
   status,
   submitLabel = "Save profile",
   onSave,
@@ -2233,6 +2376,7 @@ function StudyProfileForm({
   disciplines: DisciplineTemplate[];
   errors: string[];
   initialProfile?: StudyProfile | null;
+  onboarding?: boolean;
   status: string;
   submitLabel?: string;
   onSave: (input: unknown) => void;
@@ -2244,27 +2388,50 @@ function StudyProfileForm({
   const formats = selected?.formats ?? [];
   const evidenceTypes = selected?.evidenceTypes ?? [];
   const [clientErrors, setClientErrors] = useState<string[]>([]);
+  const [step, setStep] = useState(0);
+  const formRef = useRef<HTMLFormElement>(null);
   const visibleErrors = [...clientErrors, ...errors];
+  const steps = [
+    { title: "Direction", text: "Choose the work that should matter most.", icon: <Compass size={18} /> },
+    { title: "Practice", text: "Set how challenges should test you.", icon: <Target size={18} /> },
+    { title: "Rhythm", text: "Fit serious practice into a real week.", icon: <CalendarClock size={18} /> },
+  ];
+
+  useEffect(() => {
+    if (errors.length === 0) return;
+    const joined = errors.join(" ").toLowerCase();
+    const targetStep = /primary discipline|ranked topic|professional goal|current level/.test(joined)
+      ? 0
+      : /preferred format|evidence|weak area|secondary interest/.test(joined)
+        ? 1
+        : 2;
+    const frame = window.requestAnimationFrame(() => setStep(targetStep));
+    return () => window.cancelAnimationFrame(frame);
+  }, [errors]);
+
+  function readInput() {
+    return formRef.current ? studyProfileInputFromForm(formRef.current, selectedId) : null;
+  }
+
+  function continueToNextStep() {
+    const input = readInput();
+    if (!input) return;
+    const nextErrors = validateStudyProfileInput(input, step);
+    setClientErrors(nextErrors);
+    if (nextErrors.length > 0) return;
+    setStep((current) => Math.min(steps.length - 1, current + 1));
+    window.requestAnimationFrame(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const input = {
-      primaryDiscipline: String(form.get("primaryDiscipline") || selectedId),
-      secondaryInterests: form.getAll("secondaryInterests").map(String),
-      rankedTopics: form.getAll("rankedTopics").map(String),
-      currentLevel: String(form.get("currentLevel") || "Intermediate"),
-      preferredFormats: form.getAll("preferredFormats").map(String),
-      evidenceTypes: form.getAll("evidenceTypes").map(String),
-      weeklyTimeBudgetHours: Number(form.get("weeklyTimeBudgetHours") || 4),
-      restDay: Number(form.get("restDay") || 0),
-      targetDifficulty: String(form.get("targetDifficulty") || "Normal"),
-      weakAreas: form.getAll("weakAreas").map(String),
-      avoidAreas: form.getAll("avoidAreas").map(String),
-      goals: form.getAll("goals").map(String),
-      customDiscipline: String(form.get("customDiscipline") || "") || undefined,
-      preferenceNotes: String(form.get("preferenceNotes") || "") || undefined,
-    };
+    if (step < steps.length - 1) {
+      continueToNextStep();
+      return;
+    }
+    const input = studyProfileInputFromForm(event.currentTarget, selectedId);
     const nextErrors = validateStudyProfileInput(input);
     setClientErrors(nextErrors);
     if (nextErrors.length > 0) return;
@@ -2272,28 +2439,64 @@ function StudyProfileForm({
   }
 
   return (
-    <div className="grid gap-6">
-      <div className="astrowind-card">
-        <div className="grid gap-4 text-sm leading-6 text-slate-600 md:grid-cols-3">
-          <div>
-            <p className="font-semibold text-slate-950">What it controls</p>
-            <p className="mt-1">Challenge topics, formats, response templates, evidence standards, grading language, and notebook emphasis.</p>
-          </div>
-          <div>
-            <p className="font-semibold text-slate-950">What to avoid</p>
-            <p className="mt-1">Selecting everything. A focused profile gives the examiner sharper judgment and better recovery work.</p>
-          </div>
-          <div>
-            <p className="font-semibold text-slate-950">Minimum signal</p>
-            <p className="mt-1">Pick 3+ topics, 2+ formats, 2+ evidence types, 1 weak area, 1 goal, and 1-40 weekly hours.</p>
-          </div>
-        </div>
-        <CalibrationPath />
+    <form ref={formRef} onSubmit={submit} className="onboarding-form scroll-mt-20">
+      <div className="grid gap-4 border-b border-slate-200 pb-5 sm:grid-cols-3" aria-label={`Step ${step + 1} of ${steps.length}`}>
+        {steps.map((item, index) => {
+          const active = index === step;
+          const complete = index < step;
+          return (
+            <button
+              key={item.title}
+              type="button"
+              disabled={index > step}
+              onClick={() => {
+                if (index < step) {
+                  setClientErrors([]);
+                  setStep(index);
+                }
+              }}
+              className={`onboarding-step-tab flex items-start gap-3 border-t-2 pt-3 text-left transition-colors ${
+                active
+                  ? "border-cyan-700 text-slate-950"
+                  : complete
+                    ? "border-slate-400 text-slate-700"
+                    : "border-slate-200 text-slate-400"
+              }`}
+              aria-current={active ? "step" : undefined}
+            >
+              <span className={`mt-0.5 ${active ? "text-cyan-700" : ""}`}>
+                {complete ? <CheckCircle2 size={18} /> : item.icon}
+              </span>
+              <span>
+                <span className="block text-xs font-semibold uppercase tracking-[0.1em]">Step {index + 1}</span>
+                <span className="mt-1 block text-sm font-semibold">{item.title}</span>
+                <span className="mt-0.5 hidden text-xs font-normal leading-5 text-slate-500 sm:block">{item.text}</span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      <form onSubmit={submit} className="grid gap-5">
-        <div className="astrowind-card">
-          <div className="grid gap-4 md:grid-cols-[0.75fr_1.25fr]">
+      {(status || visibleErrors.length > 0) && (
+        <div
+          className={`mt-5 border-l-2 px-4 py-2 text-sm leading-6 ${
+            visibleErrors.length > 0
+              ? "border-orange-500 bg-orange-50/70 text-orange-950"
+              : "border-cyan-700 bg-cyan-50/50 text-slate-700"
+          }`}
+          aria-live="polite"
+        >
+          {status && <p className="font-semibold">{status}</p>}
+          {visibleErrors.length > 0 && (
+            <ul className="grid gap-1">
+              {visibleErrors.map((error) => <li key={error}>- {error}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+
+      <section className={step === 0 ? "onboarding-step-content soft-enter" : "hidden"}>
+        <div className="grid gap-5 lg:grid-cols-[minmax(14rem,0.7fr)_minmax(0,1.3fr)]">
             <label className="grid gap-2 text-sm font-medium text-slate-700">
               Primary discipline
               <select
@@ -2312,77 +2515,112 @@ function StudyProfileForm({
                 The primary discipline is the fallback template for all generated challenges.
               </span>
             </label>
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-              <p>{selected?.summary}</p>
-              <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Governed topics
+            <div className="border-l border-slate-200 pl-5 text-sm leading-6 text-slate-600">
+              <p className="font-semibold text-slate-950">{selected?.label} practice</p>
+              <p className="mt-1">{selected?.summary}</p>
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                The rubric stays governed; your selections decide which topics and formats appear most often.
               </p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">{topics.join(", ")}</p>
             </div>
           </div>
-        </div>
 
-        <div className="grid gap-5 lg:grid-cols-2">
-          <SurveyGroup title="Ranked topic interests">
+        <div className="mt-7 grid gap-7 lg:grid-cols-2">
+          <div>
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              Current level
+              <select name="currentLevel" defaultValue={initialProfile?.currentLevel ?? "Intermediate"} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm">
+                {[
+                  ["Beginner", "Guided tasks and examples"],
+                  ["Intermediate", "Structured independent work"],
+                  ["Advanced", "Ambiguous cases and trade-offs"],
+                  ["Production", "Live constraints and operational judgment"],
+                  ["Expert", "Edge cases and high-pressure review"],
+                ].map(([value, label]) => <option key={value} value={value}>{value} - {label}</option>)}
+              </select>
+            </label>
+            <div className="mt-6">
+              <h2 className="text-sm font-semibold text-slate-900">Professional goal</h2>
+              <CheckboxGrid
+                name="goals"
+                values={professionalGoalOptions}
+                defaultValues={initialProfile?.goals}
+                min={1}
+                max={3}
+                limitHint="Pick 1-3 outcomes. These shape long-term emphasis, not today's score."
+              />
+            </div>
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Priority topics</h2>
             <CheckboxGrid
               key={`${selectedId}-rankedTopics`}
               name="rankedTopics"
               values={topics}
-              defaultValues={initialProfile?.rankedTopics}
+              defaultValues={initialProfile?.rankedTopics ?? topics.slice(0, 3)}
               min={3}
               max={8}
               limitHint="Pick 3-8. These become the priority topic pool for generated challenges."
             />
-          </SurveyGroup>
-          <SurveyGroup title="Preferred challenge formats">
+          </div>
+        </div>
+      </section>
+
+      <section className={step === 1 ? "onboarding-step-content soft-enter" : "hidden"}>
+        <div className="grid gap-8 lg:grid-cols-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Challenge formats</h2>
             <CheckboxGrid
               key={`${selectedId}-preferredFormats`}
               name="preferredFormats"
               values={formats}
-              defaultValues={initialProfile?.preferredFormats}
+              defaultValues={initialProfile?.preferredFormats ?? formats.slice(0, 2)}
               min={2}
               max={6}
-              limitHint="Pick 2-6. Lab/hands-on selections are treated as real generation rules."
+              limitHint="Two useful defaults are selected. Change them to match how you prefer to practise."
             />
-          </SurveyGroup>
-          <SurveyGroup title="Expected evidence/output">
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Evidence you can produce</h2>
             <CheckboxGrid
               key={`${selectedId}-evidenceTypes`}
               name="evidenceTypes"
               values={evidenceTypes}
-              defaultValues={initialProfile?.evidenceTypes}
+              defaultValues={initialProfile?.evidenceTypes ?? evidenceTypes.slice(0, 2)}
               min={2}
               max={8}
-              limitHint="Pick 2-8. These are the proof types the grader expects to see."
+              limitHint="The first two are recommended. The examiner uses these as proof standards."
             />
-          </SurveyGroup>
-          <SurveyGroup title="Weak areas">
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Area to strengthen first</h2>
             <CheckboxGrid
               key={`${selectedId}-weakAreas`}
               name="weakAreas"
               values={topics}
               defaultValues={initialProfile?.weakAreas}
               min={1}
-              max={8}
-              limitHint="Pick 1-8. These become pressure points and recovery targets."
+              max={3}
+              limitHint="Pick 1-3 honest gaps. These guide reinforcement; they do not lower your grade."
             />
-          </SurveyGroup>
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Adjacent interests</h2>
+            <CheckboxGrid
+              key={`${selectedId}-secondaryInterests`}
+              name="secondaryInterests"
+              values={disciplines
+                .filter((item) => item.id !== selectedId)
+                .map((item) => ({ value: item.id, label: item.label }))}
+              defaultValues={initialProfile?.secondaryInterests}
+              max={3}
+              limitHint="Optional. Add up to 3 areas for occasional cross-training."
+            />
+          </div>
         </div>
+      </section>
 
-        <div className="astrowind-card">
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
-            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-              Current level
-              <select name="currentLevel" defaultValue={initialProfile?.currentLevel ?? "Intermediate"} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm">
-                {[
-                  ["Beginner", "I need guided tasks and examples."],
-                  ["Intermediate", "I can execute with structure."],
-                  ["Advanced", "I can reason through ambiguity."],
-                  ["Production", "I operate under real constraints."],
-                  ["Expert", "I need high-pressure edge cases."],
-                ].map(([value, label]) => <option key={value} value={value}>{value} - {label}</option>)}
-              </select>
-            </label>
+      <section className={step === 2 ? "onboarding-step-content soft-enter" : "hidden"}>
+        <div className="grid gap-4 md:grid-cols-3">
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Target difficulty
               <select name="targetDifficulty" defaultValue={initialProfile?.targetDifficulty ?? "Normal"} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm">
@@ -2400,15 +2638,9 @@ function StudyProfileForm({
               </select>
               <span className="text-xs font-normal leading-5 text-slate-500">No assessment is due. The next day contains two recovery tasks.</span>
             </label>
-            <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-              Custom path request
-              <input name="customDiscipline" defaultValue={initialProfile?.customDiscipline ?? ""} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Optional specialty" />
-              <span className="text-xs font-normal leading-5 text-slate-500">
-                Draft only. The governed discipline remains the fallback.
-              </span>
-            </label>
           </div>
-          <label className="mt-4 grid gap-1.5 text-sm font-medium text-slate-700">
+
+          <label className="mt-7 grid gap-1.5 text-sm font-medium text-slate-700">
             Written preferences
             <textarea
               name="preferenceNotes"
@@ -2418,129 +2650,107 @@ function StudyProfileForm({
               placeholder="Example: I prefer hands-on lab challenges with clear setup, tasks, evidence capture, and validation. Avoid purely theoretical questions unless needed."
             />
             <span className="text-xs font-normal leading-5 text-slate-500">
-              Optional. Use this for bespoke preferences that do not fit the checkboxes. The backend stores this as guidance; it does not override safety or grading rules.
+              Optional, but useful. Describe the mix, pace, tools, or context that would make the practice recognisably yours. Safety and grading standards remain governed.
             </span>
           </label>
-        </div>
 
-        <div className="grid gap-5 lg:grid-cols-2">
-          <SurveyGroup title="Secondary interests">
-            <CheckboxGrid
-              key={`${selectedId}-secondaryInterests`}
-              name="secondaryInterests"
-              values={disciplines
-                .filter((item) => item.id !== selectedId)
-                .map((item) => ({ value: item.id, label: item.label }))}
-              defaultValues={initialProfile?.secondaryInterests}
-              max={4}
-              limitHint="Optional. Pick up to 4 adjacent areas for occasional cross-training."
-            />
-          </SurveyGroup>
-          <SurveyGroup title="Professional goals">
-            <CheckboxGrid
-              name="goals"
-              values={professionalGoalOptions}
-              defaultValues={initialProfile?.goals}
-              min={1}
-              max={6}
-              limitHint="Pick 1-6. These steer the examiner's long-term emphasis."
-            />
-          </SurveyGroup>
-        </div>
+          <details className="group mt-6 border-t border-slate-200 pt-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-700 marker:hidden">
+              Optional fine-tuning
+              <ChevronRight size={16} className="text-cyan-700 transition-transform group-open:rotate-90" />
+            </summary>
+            <div className="mt-5 grid gap-7 lg:grid-cols-2">
+              <label className="grid content-start gap-1.5 text-sm font-medium text-slate-700">
+                Custom specialty request
+                <input name="customDiscipline" defaultValue={initialProfile?.customDiscipline ?? ""} className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Example: radio access network optimisation" />
+                <span className="text-xs font-normal leading-5 text-slate-500">
+                  A custom path stays draft until it has specific written context. The governed discipline remains the fallback.
+                </span>
+              </label>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">Areas to de-emphasise</h2>
+                <CheckboxGrid
+                  key={`${selectedId}-avoidAreas`}
+                  name="avoidAreas"
+                  values={topics}
+                  defaultValues={initialProfile?.avoidAreas}
+                  max={4}
+                  limitHint="Optional. Do not select the same area as a weakness."
+                />
+              </div>
+            </div>
+          </details>
 
-        <SurveyGroup title="Avoid areas">
-          <CheckboxGrid
-            key={`${selectedId}-avoidAreas`}
-            name="avoidAreas"
-            values={topics}
-            defaultValues={initialProfile?.avoidAreas}
-            max={8}
-            limitHint="Optional. Avoid areas are de-emphasized and cannot also be weak-area targets."
-          />
-        </SurveyGroup>
+          {onboarding && (
+            <div className="mt-7 border-l-2 border-cyan-700 pl-4 text-sm leading-6 text-slate-600">
+              <p className="font-semibold text-slate-950">Your first brief</p>
+              <p className="mt-1">
+                GURUnet will combine {selected?.label ?? "your discipline"}, your selected topics, and your preferred evidence into one focused challenge. It will not expose the solution before submission.
+              </p>
+            </div>
+          )}
+      </section>
 
-        {(status || visibleErrors.length > 0) && (
-          <div className={`rounded-md border p-4 text-sm leading-6 ${
-            visibleErrors.length > 0
-              ? "border-orange-200 bg-orange-50 text-orange-900"
-              : "border-slate-200 bg-white/70 text-slate-700"
-          }`}>
-            {status && <p className="font-semibold">{status}</p>}
-            {visibleErrors.length > 0 && (
-              <ul className="mt-2 grid gap-1">
-                {visibleErrors.map((error) => (
-                  <li key={error}>- {error}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-        <button disabled={busy} className="h-11 w-fit rounded-md bg-slate-950 px-5 text-sm font-semibold text-white disabled:opacity-60">
-          {submitLabel}
+      <div className="onboarding-actions sticky bottom-2 z-10 mt-6 flex items-center justify-between gap-4 border-t border-slate-200 bg-white/92 py-4 backdrop-blur-md">
+        <button
+          type="button"
+          onClick={() => {
+            setClientErrors([]);
+            setStep((current) => Math.max(0, current - 1));
+          }}
+          className={`flex h-10 items-center gap-2 rounded-md px-3 text-sm font-semibold text-slate-600 hover:bg-slate-100 ${step === 0 ? "invisible" : ""}`}
+        >
+          <ArrowLeft size={16} />
+          Back
         </button>
-      </form>
-    </div>
+        <p className="hidden text-xs text-slate-500 sm:block">Step {step + 1} of {steps.length}</p>
+        {step < steps.length - 1 ? (
+          <button type="button" onClick={continueToNextStep} className="flex h-10 items-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white">
+            Continue
+            <ArrowRight size={16} />
+          </button>
+        ) : (
+          <button disabled={busy} className="flex h-10 items-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white disabled:opacity-60">
+            {busy ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle2 size={16} />}
+            {onboarding ? "Build my first challenge" : submitLabel}
+          </button>
+        )}
+      </div>
+    </form>
   );
 }
 
-function validateStudyProfileInput(input: {
-  rankedTopics: string[];
-  preferredFormats: string[];
-  evidenceTypes: string[];
-  weeklyTimeBudgetHours: number;
-  restDay: number;
-  weakAreas: string[];
-  goals: string[];
-}) {
+function validateStudyProfileInput(input: StudyProfileFormInput, step?: number) {
   const errors: string[] = [];
-  if (input.rankedTopics.length < 3) errors.push("Ranked topic interests: pick at least 3 focused topics.");
-  if (input.rankedTopics.length > 8) errors.push("Ranked topic interests: pick no more than 8 topics.");
-  if (input.preferredFormats.length < 2) errors.push("Preferred challenge formats: pick at least 2 formats.");
-  if (input.preferredFormats.length > 6) errors.push("Preferred challenge formats: pick no more than 6 formats.");
-  if (input.evidenceTypes.length < 2) errors.push("Expected evidence/output: pick at least 2 evidence types.");
-  if (input.evidenceTypes.length > 8) errors.push("Expected evidence/output: pick no more than 8 evidence types.");
-  if (input.weakAreas.length < 1) errors.push("Weak areas: pick at least 1 area for targeted capacity building.");
-  if (input.weakAreas.length > 8) errors.push("Weak areas: pick no more than 8 areas.");
-  if (input.goals.length < 1) errors.push("Professional goals: pick at least 1 goal.");
-  if (input.goals.length > 6) errors.push("Professional goals: pick no more than 6 goals.");
-  if (!Number.isInteger(input.weeklyTimeBudgetHours) || input.weeklyTimeBudgetHours < 1 || input.weeklyTimeBudgetHours > 40) {
-    errors.push("Weekly hours: enter a whole number from 1 to 40.");
+  const validateStep = (target: number) => step === undefined || step === target;
+  if (validateStep(0)) {
+    if (input.rankedTopics.length < 3) errors.push("Priority topics: pick at least 3 focused topics.");
+    if (input.rankedTopics.length > 8) errors.push("Priority topics: pick no more than 8 topics.");
+    if (input.goals.length < 1) errors.push("Professional goal: pick at least 1 outcome.");
+    if (input.goals.length > 3) errors.push("Professional goal: pick no more than 3 outcomes.");
   }
-  if (!Number.isInteger(input.restDay) || input.restDay < 0 || input.restDay > 6) {
-    errors.push("Weekly rest day: select one day of the week.");
+  if (validateStep(1)) {
+    if (input.preferredFormats.length < 2) errors.push("Challenge formats: keep at least 2 formats selected.");
+    if (input.preferredFormats.length > 6) errors.push("Challenge formats: pick no more than 6 formats.");
+    if (input.evidenceTypes.length < 2) errors.push("Evidence: keep at least 2 evidence types selected.");
+    if (input.evidenceTypes.length > 8) errors.push("Evidence: pick no more than 8 evidence types.");
+    if (input.weakAreas.length < 1) errors.push("Area to strengthen: pick at least 1 area.");
+    if (input.weakAreas.length > 3) errors.push("Area to strengthen: pick no more than 3 areas.");
+  }
+  if (validateStep(2)) {
+    if (!Number.isInteger(input.weeklyTimeBudgetHours) || input.weeklyTimeBudgetHours < 1 || input.weeklyTimeBudgetHours > 40) {
+      errors.push("Weekly hours: enter a whole number from 1 to 40.");
+    }
+    if (!Number.isInteger(input.restDay) || input.restDay < 0 || input.restDay > 6) {
+      errors.push("Weekly rest day: select one day of the week.");
+    }
+    const overlap = input.weakAreas.filter((item) => input.avoidAreas.includes(item));
+    if (overlap.length > 0) errors.push(`Fine-tuning: ${overlap.join(", ")} cannot be both a weakness and an avoid area.`);
+    if (input.customDiscipline && (input.preferenceNotes?.trim().length ?? 0) < 60) {
+      errors.push("Custom specialty requests need at least 60 characters of written context.");
+    }
   }
   return errors;
-}
-
-function CalibrationPath() {
-  const steps = [
-    ["1", "Choose a governed discipline", "This anchors the rubric and prevents vague AI-made standards."],
-    ["2", "Select evidence and formats", "This tells GURUnet whether to create labs, triage, reviews, documentation, or design work."],
-    ["3", "Declare weak areas", "The system uses these as pressure points and recovery targets."],
-    ["4", "Add written preferences", "Use this for bespoke guidance without loosening grading quality."],
-  ];
-  return (
-    <div className="mt-4 grid gap-2 md:grid-cols-4">
-      {steps.map(([number, title, text]) => (
-        <div key={number} className="rounded-md border border-slate-200 bg-white/55 p-3">
-          <span className="grid size-6 place-items-center rounded-md bg-slate-950 font-mono text-xs font-semibold text-white">
-            {number}
-          </span>
-          <p className="mt-3 text-sm font-semibold text-slate-950">{title}</p>
-          <p className="mt-1 text-xs leading-5 text-slate-600">{text}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SurveyGroup({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="quiet-panel rounded-md p-5">
-      <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
-      <div className="mt-3">{children}</div>
-    </section>
-  );
 }
 
 function CheckboxGrid({
@@ -2563,7 +2773,10 @@ function CheckboxGrid({
     [values],
   );
   const [selected, setSelected] = useState<string[]>(
-    () => (defaultValues ?? []).filter((value) => allowedValues.has(value)).slice(0, max),
+    () => {
+      const allowedDefaults = (defaultValues ?? []).filter((value) => allowedValues.has(value));
+      return allowedDefaults.slice(0, max ?? allowedDefaults.length);
+    },
   );
 
   function toggle(value: string) {
@@ -5216,6 +5429,11 @@ function formatSigned(value: number) {
   return value > 0 ? `+${value}` : `${value}`;
 }
 
+function shortDateKey(dateKey: string) {
+  return new Intl.DateTimeFormat("en-ZA", { day: "numeric", month: "short", timeZone: "UTC" })
+    .format(new Date(`${dateKey}T12:00:00.000Z`));
+}
+
 function DailyMomentumPanel({
   busy,
   grade,
@@ -5260,6 +5478,9 @@ function DailyMomentumPanel({
             <p className="mt-1 text-sm text-slate-700">
               {retention.completedDays}/{retention.targetDays} learning days
             </p>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {shortDateKey(retention.cycle.startDate)}-{shortDateKey(retention.cycle.endDate)} · resets after {retention.cycle.restDayLabel}
+            </p>
           </div>
           <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
             <ShieldCheck size={14} className="text-cyan-700" />
@@ -5271,9 +5492,16 @@ function DailyMomentumPanel({
             <MasteryDay key={day.date} day={day} />
           ))}
         </div>
-        <p className="mt-2 text-[11px] leading-4 text-slate-500">
-          Four completed days earns a continuity credit, up to three. A credit automatically protects an occasional busy day.
-        </p>
+        <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-200" aria-hidden="true">
+          <div
+            className="h-full rounded-full bg-cyan-700 transition-[width] duration-500"
+            style={{ width: `${Math.min(100, (retention.completedDays / retention.targetDays) * 100)}%` }}
+          />
+        </div>
+        <div className="mt-2 flex items-start gap-2 text-xs leading-5 text-slate-600">
+          <Target size={14} className="mt-0.5 shrink-0 text-cyan-700" />
+          <p><span className="font-semibold text-slate-800">{retention.nextMilestone.title}.</span> {retention.nextMilestone.detail}</p>
+        </div>
       </div>
 
       {retention.preview.available ? (
@@ -5301,7 +5529,7 @@ function DailyMomentumPanel({
 
       <div className="mt-3 border-t border-slate-200 pt-3">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Weekly reveal</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Weekly review</p>
           {retention.creditEarnedThisWeek && (
             <span className="text-xs font-semibold text-cyan-800">Credit earned</span>
           )}

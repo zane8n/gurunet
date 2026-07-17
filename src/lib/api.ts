@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
 export function json(data: unknown, init?: ResponseInit) {
-  return NextResponse.json(data, init);
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Cache-Control")) {
+    headers.set("Cache-Control", "private, no-store, max-age=0");
+  }
+  return NextResponse.json(data, { ...init, headers });
 }
 
 export function apiError(error: unknown) {

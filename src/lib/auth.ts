@@ -7,7 +7,7 @@ import type { Session, User } from "@/lib/domain";
 import { fromDbSession, fromDbUser } from "@/lib/db-mappers";
 import { prisma } from "@/lib/prisma";
 import { createId } from "@/lib/store";
-import { nowIso } from "@/lib/time";
+import { isValidTimezone, nowIso } from "@/lib/time";
 import { getBearerIdentity } from "@/lib/app-auth";
 
 export const SESSION_COOKIE = "gurunet_session";
@@ -17,7 +17,9 @@ export const signupSchema = z.object({
   name: z.string().trim().min(2).max(80),
   email: z.string().trim().email().max(160).transform((value) => value.toLowerCase()),
   password: z.string().min(8).max(160),
-  timezone: z.string().trim().min(3).max(80).default("Africa/Johannesburg"),
+  timezone: z.string().trim().min(3).max(80).refine(isValidTimezone, {
+    message: "Select a valid timezone.",
+  }).default("Africa/Johannesburg"),
 });
 
 export const loginSchema = z.object({

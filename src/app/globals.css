@@ -343,6 +343,45 @@
     padding: 3rem 0 2rem;
   }
 
+  .onboarding-shell {
+    max-width: 1120px;
+    gap: 2rem;
+    padding-bottom: 4rem;
+  }
+
+  .onboarding-intro {
+    animation: soft-enter 420ms ease both;
+  }
+
+  .onboarding-form {
+    position: relative;
+    min-width: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+    padding: 0.25rem 0 0;
+    animation: soft-enter 520ms 80ms ease both;
+  }
+
+  .onboarding-step-content {
+    min-height: 25rem;
+    padding: 2rem 0 1rem;
+  }
+
+  .onboarding-step-tab:disabled {
+    cursor: default;
+  }
+
+  @media (max-width: 639px) {
+    .onboarding-step-content {
+      min-height: 0;
+      padding-top: 1.5rem;
+    }
+
+    .onboarding-actions {
+      margin-inline: -0.25rem;
+      padding-inline: 0.25rem;
+    }
+  }
+
   .astrowind-section {
     scroll-margin-top: 5rem;
     animation: soft-enter 560ms ease both;

@@ -11,6 +11,17 @@ export const challengeGenerationStatusSchema = z.enum([
   "FallbackUsed",
 ]);
 
+export const learningClockSchema = z.object({
+  serverNow: z.string().datetime(),
+  timezone: z.string().min(3).max(80),
+  localDateKey: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  localTime: z.string().regex(/^\d{2}:\d{2}$/),
+  activeChallengeDateKey: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  challengeReleased: z.boolean(),
+  releaseHour: z.number().int().min(0).max(23),
+  nextChallengeReleaseAt: z.string().datetime(),
+});
+
 export const appDeviceSchema = z.object({
   deviceId: z.string().min(8).max(160).optional(),
   platform: platformSchema,
@@ -83,6 +94,7 @@ export type Platform = z.infer<typeof platformSchema>;
 export type AppDeviceInput = z.infer<typeof appDeviceSchema>;
 export type ChallengeDto = z.infer<typeof challengeSchema>;
 export type ChallengeGenerationStatus = z.infer<typeof challengeGenerationStatusSchema>;
+export type LearningClockDto = z.infer<typeof learningClockSchema>;
 export type DraftDto = z.infer<typeof draftSchema>;
 export type ConnectionProfileDto = z.infer<typeof connectionProfileSchema>;
 export type PublicRankingProfileDto = z.infer<typeof publicRankingProfileSchema>;
